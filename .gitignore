@@ -38,3 +38,8 @@ testing/scratch/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Flutter Android
+**/android/local.properties
+**/android/.gradle
+**/android/captures/
