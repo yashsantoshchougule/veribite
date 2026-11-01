@@ -1,21 +1,21 @@
-"""Multi-tier deterministic additive matcher and OCR corruption normalizer.
-Adheres to Ponytail protocol: stdlib only (re, sqlite3, difflib), < 100 lines per focused unit.
+"""Multi-tier deterministic additive matcher, OCR corruption normalizer,
+and anti-splitting hidden sweetener cluster detector.
+Adheres to Ponytail protocol: stdlib only (re, sqlite3, difflib, math), < 100 lines per focused unit.
 """
 
 import re
 import sqlite3
 import difflib
-from typing import Optional, Dict, Any
+import math
+from typing import Optional, Dict, Any, List
 
 def normalize_ocr_additive_token(token: str) -> str:
     """Applies OCR optical character substitution normalization inside additive codes.
     Converts O -> 0, I/l -> 1, S -> 5, B -> 8 for numeric sequences.
     """
-    # Normalize spaced tokens e.g. "I N S" -> "INS"
     cleaned = re.sub(r"\bI\s+N\s+S\b", "INS", token, flags=re.IGNORECASE)
     cleaned = re.sub(r"\b1\s*N\s*S\b", "INS", cleaned, flags=re.IGNORECASE)
     
-    # Target code patterns like INS 1O2, E-1O2, (1O2)
     def fix_digits(match):
         prefix = match.group(1)
         code = match.group(2)
@@ -128,3 +128,82 @@ def match_additive_from_token(token: str, conn: sqlite3.Connection) -> Optional[
         }
 
     return None
+
+def detect_sweetener_cluster(
+    ingredients_ordered: List[str],
+    total_sugars_g: float,
+    carbohydrates_g: float,
+    conn: sqlite3.Connection
+) -> Dict[str, Any]:
+    """Detects split hidden sweeteners using FSSAI descending order rank decay.
+    Aggregates aliases into Total Sweetener Cluster and checks if combined sugar exceeds #1 ingredient.
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT canonical_name, category, glycemic_index FROM sugar_aliases;")
+    alias_rows = cursor.fetchall()
+    
+    # Map for case-insensitive lookup
+    alias_map = {row[0].lower(): {"canonical_name": row[0], "category": row[1], "glycemic_index": row[2]} for row in alias_rows}
+    
+    detected_sweeteners = []
+    first_ingredient = ingredients_ordered[0] if ingredients_ordered else "Primary Ingredient"
+    
+    for rank, ing in enumerate(ingredients_ordered):
+        clean_ing = ing.lower().strip()
+        matched_alias = None
+        
+        # Check exact or substring containment
+        for alias_key, alias_info in alias_map.items():
+            # Check pattern boundary
+            pattern = r"\b" + re.escape(alias_key.split("(")[0].strip()) + r"\b"
+            if re.search(pattern, clean_ing):
+                matched_alias = alias_info
+                break
+                
+        if matched_alias:
+            detected_sweeteners.append({
+                "rank": rank + 1,
+                "raw_text": ing,
+                "canonical_name": matched_alias["canonical_name"],
+                "category": matched_alias["category"],
+                "glycemic_index": matched_alias["glycemic_index"]
+            })
+            
+    num_detected = len(detected_sweeteners)
+    cluster_detected = num_detected >= 2 or (num_detected >= 1 and total_sugars_g >= 15.0)
+    
+    # Geometric Rank Decay Estimation: w_i = alpha * exp(-lambda * rank)
+    # Total sweetener percentage is anchored by nutrition table's total_sugars_g
+    combined_percentage = max(total_sugars_g, 0.0)
+    
+    # Estimate #1 ingredient percentage:
+    # If sweeteners appear at ranks 2, 4, 5, etc., their weights decay.
+    # Total product is 100%. The #1 ingredient cannot exceed (100 - sum(sweeteners) - sum(other fats/flour)).
+    lambda_decay = 0.25
+    decay_weights = [math.exp(-lambda_decay * i) for i in range(len(ingredients_ordered))]
+    total_decay = sum(decay_weights)
+    
+    # Normalized share of #1 ingredient
+    w1_share = (decay_weights[0] / total_decay) * (100.0 - combined_percentage)
+    
+    exceeds_first = combined_percentage > w1_share
+    
+    alert_message = ""
+    if cluster_detected and num_detected >= 2:
+        names_str = ", ".join([s["canonical_name"] for s in detected_sweeteners])
+        alert_message = (
+            f"Hidden Sweetener Alert: Manufacturers split sweeteners into {num_detected} aliases "
+            f"({names_str}). Combined sweeteners (~{combined_percentage:.1f}%) "
+            f"{'exceed' if exceeds_first else 'rival'} the primary ingredient {first_ingredient}!"
+        )
+    elif cluster_detected:
+        alert_message = f"High Sweetener Concentration: Contains ~{combined_percentage:.1f}% total sugars."
+        
+    return {
+        "cluster_detected": cluster_detected,
+        "detected_aliases": detected_sweeteners,
+        "combined_estimated_percentage": combined_percentage,
+        "first_ingredient_estimated_percentage": round(w1_share, 1),
+        "exceeds_first_ingredient": exceeds_first,
+        "alert_message": alert_message
+    }
