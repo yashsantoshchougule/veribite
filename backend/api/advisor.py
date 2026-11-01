@@ -22,15 +22,16 @@ class AdvisorChatRequest(BaseModel):
 
 
 def call_gemini_advisor(prompt: str, user_message: str) -> str:
-    """Call Gemini 2.5 Flash API with strict system instructions and citation groundings."""
+    """Call Gemini API with strict system instructions and citation groundings."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
 
     from google import genai
     client = genai.Client(api_key=api_key)
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=model_name,
         contents=f"{prompt}\n\nUser Question: {user_message}",
     )
     return response.text
