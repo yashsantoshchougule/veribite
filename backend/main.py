@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from backend.api.products import router as products_router
+from backend.api.vision import router as vision_router
 
 app = FastAPI(
     title="Smart Packaged Product Scanner API",
@@ -8,6 +9,7 @@ app = FastAPI(
 )
 
 app.include_router(products_router)
+app.include_router(vision_router)
 
 @app.get("/health")
 def health_check():
