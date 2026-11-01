@@ -1,4 +1,10 @@
+import os
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+# Load environment variables from .env file
+load_dotenv()
+
 from backend.api.products import router as products_router
 from backend.api.vision import router as vision_router
 from backend.api.advisor import router as advisor_router
