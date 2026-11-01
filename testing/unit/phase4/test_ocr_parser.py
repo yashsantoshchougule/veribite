@@ -64,3 +64,4 @@ def test_specular_glare_detector_triggers_above_18_percent():
     no_glare = detect_specular_glare(clean_pixels)
     assert no_glare["is_glare"] is False
     assert no_glare["badge"] is None
+

@@ -155,3 +155,4 @@ Map<String, dynamic> evaluateProductVerdict({
     'n_red': nRed,
   };
 }
+

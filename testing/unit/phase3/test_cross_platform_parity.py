@@ -105,3 +105,4 @@ def test_parity_salt_to_sodium_normalization():
     raw = {"salt_g": 1.5, "sodium_mg": None}
     norm = normalize_and_impute_nutrition(raw_nutrition=raw)
     assert norm["sodium_mg"] == 600.0
+

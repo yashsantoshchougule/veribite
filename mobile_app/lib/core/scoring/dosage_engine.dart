@@ -207,3 +207,4 @@ Map<String, dynamic> calculatePrescribedDosage({
     'user_weight_kg': userWeightKg,
   };
 }
+

@@ -103,3 +103,4 @@ def test_phase4_strict_test_isolation():
 
     data_pipeline_tests = list((repo_root / "data_pipeline").rglob("test_*.py"))
     assert len(data_pipeline_tests) == 0, f"Test pollution in data_pipeline: {data_pipeline_tests}"
+

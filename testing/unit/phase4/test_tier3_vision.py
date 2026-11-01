@@ -93,3 +93,4 @@ def test_tier3_vision_api_endpoint(tmp_path):
         assert res["final_score"] <= 39
         assert res["red_cap_triggered"] is True
         assert res["source"] == "gemini_vision"
+

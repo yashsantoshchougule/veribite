@@ -114,3 +114,4 @@ class LocalProductCache:
                 )
         finally:
             conn.close()
+

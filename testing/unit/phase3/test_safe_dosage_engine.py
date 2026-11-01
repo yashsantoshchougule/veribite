@@ -71,3 +71,4 @@ def test_clean_food_dosage_clamping():
     # Mathematical portion would be 1000g, but single snack portion is clamped to <= 150g
     assert dosage["safe_portion_grams"] == 150
     assert dosage["frequency_schedule"] == "Daily Safe"
+

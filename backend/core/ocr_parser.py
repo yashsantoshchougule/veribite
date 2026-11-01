@@ -109,3 +109,4 @@ def detect_specular_glare(luminance_pixels: List[int]) -> Dict[str, Any]:
         "saturated_pct": round(saturated_pct, 2),
         "badge": badge,
     }
+

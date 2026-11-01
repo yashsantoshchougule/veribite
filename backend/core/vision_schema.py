@@ -38,3 +38,4 @@ def check_reformulation(cached_hash: Optional[str], current_ingredients: Any) ->
         return False
     current_hash = compute_ingredient_hash(current_ingredients)
     return current_hash != cached_hash
+

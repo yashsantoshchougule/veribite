@@ -60,3 +60,4 @@ def validate_and_normalize_barcode(raw_input: str) -> Optional[str]:
         return None
 
     return None
+

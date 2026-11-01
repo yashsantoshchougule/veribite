@@ -56,3 +56,4 @@ def test_local_product_cache_sqlite_roundtrip(tmp_path):
     assert retrieved["product_name"] == "Orange Cream Biscuits"
     assert retrieved["health_score"] == 22
     assert retrieved["red_cap_triggered"] == 1
+

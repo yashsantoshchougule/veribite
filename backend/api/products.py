@@ -141,3 +141,4 @@ async def get_product_by_barcode(barcode: str) -> Dict[str, Any]:
         "red_cap_triggered": verdict["red_cap_triggered"],
         "ingredient_hash": ing_hash,
     }
+

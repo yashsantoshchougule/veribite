@@ -112,3 +112,4 @@ Map<String, dynamic> detectSpecularGlare(List<int> luminancePixels) {
     'badge': badge,
   };
 }
+

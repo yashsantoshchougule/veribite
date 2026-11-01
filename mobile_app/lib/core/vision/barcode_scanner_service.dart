@@ -64,3 +64,4 @@ String? validateAndNormalizeBarcode(String? rawInput) {
 
   return null;
 }
+

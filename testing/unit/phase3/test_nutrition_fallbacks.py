@@ -59,3 +59,4 @@ def test_safe_none_handling_and_beverage_density():
     assert norm["sodium_mg"] == 0.0
     assert norm["fiber_g"] == 0.0
     assert norm["protein_g"] == 0.0
+

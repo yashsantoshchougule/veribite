@@ -106,3 +106,4 @@ def test_caution_tier_additive_deduction():
     assert res["final_score"] == 64
     assert res["red_cap_triggered"] is False
     assert res["nova_grade"] == 4
+

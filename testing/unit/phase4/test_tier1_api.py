@@ -84,3 +84,4 @@ def test_tier1_openfoodfacts_enrichment_flow():
         assert data["health_score"] >= 75
         assert data["red_cap_triggered"] is False
         assert mock_cache.set_product.called
+
