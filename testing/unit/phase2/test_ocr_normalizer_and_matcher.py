@@ -47,3 +47,4 @@ def test_ocr_normalizer_and_fallbacks():
     conn.close()
     if db_path.exists():
         db_path.unlink()
+

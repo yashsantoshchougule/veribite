@@ -57,3 +57,4 @@ CREATE TABLE IF NOT EXISTS regulatory_citations (
     verified_passage TEXT,
     source_url TEXT
 );
+

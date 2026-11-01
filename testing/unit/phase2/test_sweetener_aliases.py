@@ -45,3 +45,4 @@ def test_sugar_aliases_complete_60_items_across_5_groups():
     conn.close()
     if db_path.exists():
         db_path.unlink()
+

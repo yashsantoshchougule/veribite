@@ -678,3 +678,4 @@ All tests must execute in < 2 seconds with 0 failures and 0 external network cal
    `Get-Item mobile_app/assets/db/toxicology_master.db` shows valid SQLite database file.
 3. Verify FTS5 trigram queries:
    `sqlite3 data_pipeline/toxicology_master.db "SELECT primary_name FROM additives_fts WHERE additives_fts MATCH 'traz';"` returns `Tartrazine`.
+

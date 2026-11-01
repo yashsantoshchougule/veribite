@@ -36,3 +36,4 @@ def test_database_schema_and_fts5_trigram_structure():
     conn.close()
     if db_path.exists():
         db_path.unlink()
+

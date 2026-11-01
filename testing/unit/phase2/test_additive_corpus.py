@@ -51,3 +51,4 @@ def test_additive_corpus_and_red_cap_triggers():
     conn.close()
     if db_path.exists():
         db_path.unlink()
+

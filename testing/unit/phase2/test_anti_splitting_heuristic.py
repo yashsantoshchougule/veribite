@@ -57,3 +57,4 @@ def test_anti_splitting_detector_clusters_and_alerts():
     conn.close()
     if db_path.exists():
         db_path.unlink()
+
