@@ -1,0 +1,15 @@
+[project]
+name = "packaged-food-scanner-backend"
+version = "0.1.0"
+description = "FastAPI backend, Supabase client, Redis cache & Gemini 2.5 Flash Vision RAG services"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "httpx>=0.28.0",
+    "google-genai>=0.1.0",
+    "supabase>=2.10.0",
+    "redis>=5.2.0",
+    "pytest>=8.3.0",
+]

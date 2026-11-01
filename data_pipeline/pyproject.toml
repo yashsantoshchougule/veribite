@@ -1,0 +1,14 @@
+[project]
+name = "packaged-food-scanner-data-pipeline"
+version = "0.1.0"
+description = "Toxicology database compiler, FTS5 index generator, and hidden sugar normalizer"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
