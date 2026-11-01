@@ -15,22 +15,49 @@ def fetch_citations_for_additives(
     conn.row_factory = sqlite3.Row
     try:
         cursor = conn.cursor()
-        if codes:
-            placeholders = ",".join("?" for _ in codes)
-            query = f"""
-                SELECT citation_id, authority, ins_code, verified_passage, source_url
-                FROM regulatory_citations
-                WHERE ins_code IN ({placeholders}) OR ins_code IS NULL
-                ORDER BY authority ASC;
-            """
-            cursor.execute(query, tuple(codes))
+        cursor.execute("PRAGMA table_info(regulatory_citations);")
+        columns = [row["name"] for row in cursor.fetchall()]
+        has_ins_code = "ins_code" in columns
+
+        if has_ins_code:
+            if codes:
+                placeholders = ",".join("?" for _ in codes)
+                query = f"""
+                    SELECT citation_id, authority, ins_code, verified_passage, source_url
+                    FROM regulatory_citations
+                    WHERE ins_code IN ({placeholders}) OR ins_code IS NULL
+                    ORDER BY authority ASC;
+                """
+                cursor.execute(query, tuple(codes))
+            else:
+                cursor.execute("""
+                    SELECT citation_id, authority, ins_code, verified_passage, source_url
+                    FROM regulatory_citations
+                    WHERE ins_code IS NULL
+                    ORDER BY authority ASC;
+                """)
         else:
-            cursor.execute("""
-                SELECT citation_id, authority, ins_code, verified_passage, source_url
-                FROM regulatory_citations
-                WHERE ins_code IS NULL
-                ORDER BY authority ASC;
-            """)
+            if codes:
+                placeholders = ",".join("?" for _ in codes)
+                query = f"""
+                    SELECT r.citation_id, r.authority, a.ins_code, r.verified_passage, r.source_url
+                    FROM regulatory_citations r
+                    JOIN additives_master a ON r.citation_id = a.citation_id
+                    WHERE a.ins_code IN ({placeholders})
+                    UNION
+                    SELECT citation_id, authority, NULL as ins_code, verified_passage, source_url
+                    FROM regulatory_citations
+                    WHERE citation_id NOT IN (SELECT citation_id FROM additives_master WHERE citation_id IS NOT NULL)
+                    ORDER BY authority ASC;
+                """
+                cursor.execute(query, tuple(codes))
+            else:
+                cursor.execute("""
+                    SELECT citation_id, authority, NULL as ins_code, verified_passage, source_url
+                    FROM regulatory_citations
+                    WHERE citation_id NOT IN (SELECT citation_id FROM additives_master WHERE citation_id IS NOT NULL)
+                    ORDER BY authority ASC;
+                """)
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
