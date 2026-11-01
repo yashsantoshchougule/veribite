@@ -76,3 +76,83 @@ def compute_base_nutriscore(nutrition: Dict[str, float], is_beverage: bool = Fal
     # Map raw_s (-15 to +40) to 0-100
     score = round(100.0 - ((raw_s + 15.0) * 100.0 / 55.0))
     return max(0, min(100, score))
+
+
+def classify_nova_group(
+    additives: List[Dict[str, Any]],
+    trans_fat_g: float = 0.0,
+    ingredient_count: int = 1,
+    contains_cosmetic_additives: bool = False,
+    is_culinary_ingredient: bool = False,
+) -> int:
+    """Classify food into NOVA group 1 to 4."""
+    if is_culinary_ingredient:
+        return 2
+
+    # Any cosmetic additives, industrial substances, or trans fats -> NOVA 4
+    if len(additives) > 0 or trans_fat_g > 0.0 or contains_cosmetic_additives:
+        return 4
+
+    # Group 1: Unprocessed or minimally processed foods (1 ingredient or simple whole food)
+    if ingredient_count <= 1:
+        return 1
+
+    # Group 3: Processed foods (2-3 whole ingredients with culinary ingredients, no additives)
+    return 3
+
+
+def evaluate_product_verdict(
+    nutrition: Dict[str, float],
+    additives: List[Dict[str, Any]],
+    is_beverage: bool = False,
+    ingredient_count: int = 1,
+    contains_cosmetic_additives: bool = False,
+    is_culinary_ingredient: bool = False,
+) -> Dict[str, Any]:
+    """Calculate overall health verdict: Nutri-Score, NOVA, Additive Deductions & 39 Red Cap."""
+    trans_fat_g = float(nutrition.get("trans_fat_g") or 0.0)
+    nova_grade = classify_nova_group(
+        additives=additives,
+        trans_fat_g=trans_fat_g,
+        ingredient_count=ingredient_count,
+        contains_cosmetic_additives=contains_cosmetic_additives,
+        is_culinary_ingredient=is_culinary_ingredient,
+    )
+
+    base_score = compute_base_nutriscore(nutrition, is_beverage=is_beverage)
+
+    n_caution = sum(1 for a in additives if a.get("risk_tier") in ("CAUTION", "MODERATE"))
+    red_additives = [
+        a for a in additives if a.get("risk_tier") == "RED" or int(a.get("triggers_red_cap") or 0) == 1
+    ]
+    n_red = len(red_additives)
+
+    nova_penalty = 10 if nova_grade == 4 else 0
+    net_score = base_score - (8 * n_caution) - (20 * n_red) - nova_penalty
+
+    # Check 39/100 Hard Red Cap
+    red_cap_triggered = False
+    red_cap_reason: Optional[str] = None
+
+    if n_red > 0:
+        red_cap_triggered = True
+        names = [a.get("primary_name", a.get("ins_code", "Unknown")) for a in red_additives]
+        red_cap_reason = f"Red-Tier Additive Detected: {', '.join(names)}"
+        final_score = min(max(net_score, 0), 39)
+    elif trans_fat_g > 0.2:
+        red_cap_triggered = True
+        red_cap_reason = f"Trans Fat Exceeds 0.2g ({trans_fat_g:.2f}g per 100g)"
+        final_score = min(max(net_score, 0), 39)
+    else:
+        final_score = max(0, min(100, net_score))
+
+    return {
+        "base_score": base_score,
+        "net_score": net_score,
+        "final_score": final_score,
+        "nova_grade": nova_grade,
+        "red_cap_triggered": red_cap_triggered,
+        "red_cap_reason": red_cap_reason,
+        "n_caution": n_caution,
+        "n_red": n_red,
+    }
