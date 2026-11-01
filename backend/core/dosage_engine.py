@@ -4,6 +4,102 @@ import math
 from typing import Any, Dict, List, Optional
 
 
+SWEETENER_KEYWORDS = {
+    "sugar", "glucose", "sucrose", "dextrose", "syrup", "maltodextrin",
+    "honey", "jaggery", "fructose", "invert sugar", "caramel", "molasses",
+}
+
+SAT_FAT_KEYWORDS = {
+    "palm", "palmolein", "hydrogenated", "vanaspati", "butter",
+    "shortening", "ghee", "coconut oil", "lard", "tallow",
+}
+
+
+def normalize_and_impute_nutrition(
+    raw_nutrition: Dict[str, Any],
+    ingredients_ordered: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    is_beverage: bool = False,
+) -> Dict[str, Any]:
+    """Normalize raw label nutrition values and apply heuristics for unreadable metrics."""
+    ingredients = ingredients_ordered or []
+    top_3_ingredients = [ing.lower() for ing in ingredients[:3]]
+    is_estimated = False
+
+    # 1. Salt to Sodium Normalization: Sodium (mg) = Salt (g) * 400
+    salt_val = raw_nutrition.get("salt_g")
+    sodium_val = raw_nutrition.get("sodium_mg")
+    if sodium_val is None and raw_nutrition.get("sodium_mg_per_100g") is not None:
+        sodium_val = raw_nutrition.get("sodium_mg_per_100g")
+
+    if (sodium_val is None) and (salt_val is not None):
+        sodium_mg = float(salt_val) * 400.0
+    else:
+        sodium_mg = float(sodium_val or 0.0)
+
+    # 2. Sugar Imputation
+    sugar_val = raw_nutrition.get("sugar_g_per_100g")
+    if sugar_val is None:
+        sugar_val = raw_nutrition.get("total_sugars_g")
+
+    if sugar_val is None:
+        has_sweetener_in_top_3 = any(
+            any(kw in ing for kw in SWEETENER_KEYWORDS) for ing in top_3_ingredients
+        )
+        if has_sweetener_in_top_3:
+            sugar_g = 22.0
+            is_estimated = True
+        else:
+            sugar_g = 0.0
+    else:
+        sugar_g = float(sugar_val)
+
+    # 3. Saturated Fat Imputation
+    sat_fat_val = raw_nutrition.get("sat_fat_g_per_100g")
+    if sat_fat_val is None:
+        sat_fat_val = raw_nutrition.get("sat_fat_g")
+
+    if sat_fat_val is None:
+        has_sat_fat_in_top_3 = any(
+            any(kw in ing for kw in SAT_FAT_KEYWORDS) for ing in top_3_ingredients
+        )
+        if has_sat_fat_in_top_3:
+            sat_fat_g = 12.0
+            is_estimated = True
+        else:
+            sat_fat_g = 0.0
+    else:
+        sat_fat_g = float(sat_fat_val)
+
+    # 4. Optional Nutrients safe defaults
+    energy_kj = float(raw_nutrition.get("energy_kj") or 0.0)
+    fiber_g = float(raw_nutrition.get("fiber_g") or 0.0)
+    protein_g = float(raw_nutrition.get("protein_g") or 0.0)
+    fruit_veg_nut_pct = float(raw_nutrition.get("fruit_veg_nut_pct") or 0.0)
+    trans_fat_g = float(raw_nutrition.get("trans_fat_g") or 0.0)
+
+    estimate_badge: Optional[str] = None
+    if is_estimated:
+        estimate_badge = "Estimated from Ingredient Order — Scan Nutrition Table for Exact Gram Ceiling"
+
+    return {
+        "energy_kj": energy_kj,
+        "total_sugars_g": sugar_g,
+        "sugar_g_per_100g": sugar_g,
+        "sat_fat_g": sat_fat_g,
+        "sat_fat_g_per_100g": sat_fat_g,
+        "sodium_mg": sodium_mg,
+        "sodium_mg_per_100g": sodium_mg,
+        "fiber_g": fiber_g,
+        "protein_g": protein_g,
+        "fruit_veg_nut_pct": fruit_veg_nut_pct,
+        "trans_fat_g": trans_fat_g,
+        "is_estimated": is_estimated,
+        "estimate_badge": estimate_badge,
+        "is_beverage": is_beverage,
+    }
+
+
 def calculate_prescribed_dosage(
     nutrition: Dict[str, float],
     additives: List[Dict[str, Any]],
