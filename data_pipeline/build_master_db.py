@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from data_pipeline.taxonomy_data import SUGAR_ALIASES, REGULATORY_CITATIONS
+from data_pipeline.taxonomy_data import SUGAR_ALIASES, REGULATORY_CITATIONS, ADDITIVES_CORPUS
 
 def init_database(db_path: Path) -> sqlite3.Connection:
     """Initializes SQLite database with production schema, constraints and FTS5 trigram indexes."""
@@ -31,6 +31,21 @@ def seed_taxonomy_and_citations(conn: sqlite3.Connection):
             INSERT OR REPLACE INTO regulatory_citations (citation_id, authority, doc_title, verified_passage, source_url)
             VALUES (?, ?, ?, ?, ?);
         """, (cit["citation_id"], cit["authority"], cit["doc_title"], cit["verified_passage"], cit["source_url"]))
+        
+    # 3. Seed Additives Corpus
+    for item in ADDITIVES_CORPUS:
+        cursor.execute("""
+            INSERT OR REPLACE INTO additives_master (
+                ins_code, e_code, primary_name, synonyms_csv, functional_class,
+                risk_tier, triggers_red_cap, jecfa_adi_mg_kg, default_conc_mg_per_g,
+                child_hyperactivity_flag, banned_jurisdictions, citation_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (
+            item["ins_code"], item["e_code"], item["primary_name"], item["synonyms_csv"],
+            item["functional_class"], item["risk_tier"], item["triggers_red_cap"],
+            item["jecfa_adi_mg_kg"], item["default_conc_mg_per_g"],
+            item["child_hyperactivity_flag"], item["banned_jurisdictions"], item["citation_id"]
+        ))
         
     conn.commit()
 
