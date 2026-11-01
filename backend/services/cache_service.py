@@ -17,11 +17,13 @@ class MultiLayerCacheManager:
         self,
         redis_client: Optional[Any] = None,
         sqlite_cache: Optional[LocalProductCache] = None,
+        supabase_service: Optional[Any] = None,
         redis_url: str = "redis://localhost:6379/0",
         socket_timeout_sec: float = 0.050,  # Strict 50ms timeout
     ):
         self.sqlite_cache = sqlite_cache or LocalProductCache()
         self.sqlite_cache.init_table()
+        self.supabase = supabase_service
 
         if redis_client is not None:
             self.redis = redis_client
@@ -38,7 +40,7 @@ class MultiLayerCacheManager:
                 self.redis = None
 
     def get_product(self, barcode: str) -> Optional[Dict[str, Any]]:
-        """Retrieve product from Redis (<15ms) or fallback to SQLite (<50ms)."""
+        """Retrieve product from Redis (<15ms), SQLite (<50ms), or Supabase PostgreSQL."""
         # 1. Try Redis primary layer
         if self.redis is not None:
             try:
@@ -55,6 +57,16 @@ class MultiLayerCacheManager:
         if cached:
             cached["source"] = "sqlite_fallback"
             return cached
+
+        # 3. Fallback to Supabase cloud layer
+        if self.supabase is not None:
+            try:
+                sb_product = self.supabase.get_product(barcode)
+                if sb_product:
+                    sb_product["source"] = "supabase"
+                    return sb_product
+            except Exception as err:
+                logger.warning(f"Supabase lookup failed ({err}).")
 
         return None
 
@@ -80,3 +92,10 @@ class MultiLayerCacheManager:
                 )
             except Exception as err:
                 logger.warning(f"Redis write failed: {err}")
+
+        # Write to Supabase
+        if self.supabase is not None:
+            try:
+                self.supabase.upsert_product(product_data)
+            except Exception as err:
+                logger.warning(f"Supabase upsert failed: {err}")
