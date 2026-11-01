@@ -101,6 +101,22 @@ async def get_product_by_barcode(barcode: str) -> Dict[str, Any]:
     # Run imputation and fallback
     norm_nutrition = normalize_and_impute_nutrition(raw_nutrition=raw_nutrition, category=category)
 
+    # Check for Partial Tier 1 (missing ingredient list)
+    if not ingredients_text or not ingredients_text.strip():
+        return {
+            "status": "PARTIAL_TIER_1",
+            "barcode": normalized_barcode,
+            "source": "openfoodfacts_partial",
+            "product_name": product_name,
+            "brand_name": brand_name,
+            "category": category,
+            "serving_size_g": product_info.get("serving_quantity"),
+            "piece_weight_g": None,
+            "nutrition": norm_nutrition,
+            "requires_ocr_ingredient_scan": True,
+            "message": "Nutrition table pre-filled from registry. Please scan ingredients list to complete toxicology evaluation.",
+        }
+
     # Empty additives for clean items or parse
     additives: list[Dict[str, Any]] = []
 
