@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+env/
+venv/
+
+# Mobile / Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.apk
+*.aab
+
+# Test Scratch & Local DB Journals
+testing/scratch/*
+!testing/scratch/.gitkeep
+*.db-journal
+*.db-wal
+
+# Secrets & Environment
+.env
+.env.local
+.env.test
+
+# OS
+.DS_Store
+Thumbs.db
