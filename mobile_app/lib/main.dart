@@ -13,7 +13,7 @@ class ScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NutriGuard Safe Consumption Scanner',
+      title: 'VeriBite Safe Consumption Scanner',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: AppColors.primaryObsidian,

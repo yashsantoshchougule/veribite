@@ -42,9 +42,10 @@ void main() {
       );
 
       // Verify Step 1 elements
+      expect(find.text('VeriBite'), findsOneWidget);
       expect(find.text('Point & Scan Any Food Packet'), findsOneWidget);
       expect(find.text('STEP 1 OF 4'), findsOneWidget);
-      expect(find.byType(Image), findsOneWidget);
+      expect(find.byType(Image), findsNWidgets(2));
       expect(find.text('Next Step →'), findsOneWidget);
       expect(find.text('Skip'), findsOneWidget);
 
