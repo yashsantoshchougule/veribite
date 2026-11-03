@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/features/auth/presentation/login_screen.dart';
-import 'package:mobile_app/features/auth/presentation/widgets/google_logo_icon.dart';
 import 'package:mobile_app/features/auth/presentation/widgets/login_feature_chip.dart';
 import 'package:mobile_app/main.dart';
 

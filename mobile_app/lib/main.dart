@@ -7,6 +7,8 @@ import 'features/auth/application/supabase_auth_service.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/camera/presentation/smart_camera_screen.dart';
 import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
+import 'features/profile/application/user_profile_service.dart';
+import 'features/profile/presentation/user_details_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +31,39 @@ Future<void> main() async {
 class ScannerApp extends StatelessWidget {
   const ScannerApp({super.key});
 
+  static Future<void> _navigatePostAuth(BuildContext context, {String? userId}) async {
+    final uid = userId ?? SupabaseAuthService().currentUser?.id ?? 'local_user';
+    final profileService = UserProfileService();
+    final hasCompleted = await profileService.hasCompletedProfile(uid);
+
+    if (!context.mounted) return;
+
+    if (hasCompleted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => const SmartCameraScreen(),
+        ),
+      );
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => UserDetailsScreen(
+            userId: uid,
+            onComplete: () {
+              if (context.mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => const SmartCameraScreen(),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -48,18 +83,16 @@ class ScannerApp extends StatelessWidget {
                   onLoginSubmit: (usernameOrEmail, password) async {
                     try {
                       final authService = SupabaseAuthService();
+                      String? uid;
                       if (authService.isAvailable) {
-                        await authService.signInWithEmail(
+                        final res = await authService.signInWithEmail(
                           email: usernameOrEmail,
                           password: password,
                         );
+                        uid = res.user?.id;
                       }
                       if (context.mounted) {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const SmartCameraScreen(),
-                          ),
-                        );
+                        await _navigatePostAuth(context, userId: uid);
                       }
                     } catch (e) {
                       if (context.mounted) {
@@ -77,6 +110,7 @@ class ScannerApp extends StatelessWidget {
                   onSignInSubmit: (name, username, email, password) async {
                     try {
                       final authService = SupabaseAuthService();
+                      String? uid;
                       if (authService.isAvailable) {
                         final res = await authService.signUp(
                           fullName: name,
@@ -97,13 +131,10 @@ class ScannerApp extends StatelessWidget {
                             return;
                           }
                         }
+                        uid = res.user?.id;
                       }
                       if (context.mounted) {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const SmartCameraScreen(),
-                          ),
-                        );
+                        await _navigatePostAuth(context, userId: uid);
                       }
                     } catch (e) {
                       if (context.mounted) {
@@ -144,11 +175,7 @@ class ScannerApp extends StatelessWidget {
                         await authService.signInWithGoogle();
                       } else {
                         if (context.mounted) {
-                          Navigator.of(context).pushReplacement(
-                            MaterialPageRoute(
-                              builder: (_) => const SmartCameraScreen(),
-                            ),
-                          );
+                          await _navigatePostAuth(context);
                         }
                       }
                     } catch (e) {
@@ -162,12 +189,8 @@ class ScannerApp extends StatelessWidget {
                       }
                     }
                   },
-                  onContinueWithCredential: (credential) {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => const SmartCameraScreen(),
-                      ),
-                    );
+                  onContinueWithCredential: (credential) async {
+                    await _navigatePostAuth(context);
                   },
                 ),
               ),
