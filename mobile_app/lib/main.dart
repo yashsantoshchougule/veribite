@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/theme/app_colors.dart';
+import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
 
 void main() {
-  // ponytail: entry point with Riverpod ProviderScope, GoRouter routes wired in Phase 6
   runApp(const ProviderScope(child: ScannerApp()));
 }
 
@@ -12,15 +13,17 @@ class ScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Packaged Product Safety Scanner',
+      title: 'NutriGuard Safe Consumption Scanner',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F9D58)),
+        colorSchemeSeed: AppColors.primaryPurple,
         useMaterial3: true,
+        scaffoldBackgroundColor: AppColors.surfaceLavender,
       ),
-      home: const Scaffold(
-        body: Center(
-          child: Text('Safe Consumption Dosage Scanner Initialized'),
-        ),
+      home: StarterWalkthroughScreen(
+        onFinish: () {
+          // Navigates to Login / Authentication or Dashboard screen
+        },
       ),
     );
   }

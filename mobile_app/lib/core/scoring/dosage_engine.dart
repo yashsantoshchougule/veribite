@@ -137,7 +137,7 @@ Map<String, dynamic> calculatePrescribedDosage({
     if (adi != null && (adi as num).toDouble() > 0.0) {
       final defaultConc = (a['default_conc_mg_per_g'] as num?)?.toDouble() ?? 0.1;
       final conc = math.max(defaultConc, 0.0001);
-      final aPortion = ((adi as num).toDouble() * userWeightKg * 0.50) / conc;
+      final aPortion = (adi.toDouble() * userWeightKg * 0.50) / conc;
       if (aPortion < adiPortionMin) {
         adiPortionMin = aPortion;
         adiLimitingAdditive = a['primary_name'] ?? a['ins_code'];
