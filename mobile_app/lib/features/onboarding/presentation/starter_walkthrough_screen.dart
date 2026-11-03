@@ -68,46 +68,10 @@ class _StarterWalkthroughScreenState extends State<StarterWalkthroughScreen> {
               padding: EdgeInsets.symmetric(horizontal: padding, vertical: isSmall ? 8.0 : 16.0),
               child: Column(
                 children: [
-                  // Top App Bar: VeriBite Logo + VeriBite + Skip
+                  // Top Bar: Skip Button aligned to right
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Image.asset(
-                                'assets/images/app_logo.png',
-                                width: 28,
-                                height: 28,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => const Icon(
-                                  Icons.eco_rounded,
-                                  color: Color(0xFF1B5E20),
-                                  size: 26,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Flexible(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'VeriBite',
-                                  style: TextStyle(
-                                    color: Color(0xFF16381C),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20,
-                                    letterSpacing: 0.3,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                       if (_currentPage < _steps.length - 1)
                         TextButton(
                           onPressed: _skipToLast,
@@ -126,7 +90,7 @@ class _StarterWalkthroughScreenState extends State<StarterWalkthroughScreen> {
                           ),
                         )
                       else
-                        const SizedBox(width: 32),
+                        const SizedBox(height: 36),
                     ],
                   ),
                   const SizedBox(height: 12),
