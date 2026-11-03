@@ -77,3 +77,4 @@ class WalkthroughNavBar extends StatelessWidget {
     );
   }
 }
+

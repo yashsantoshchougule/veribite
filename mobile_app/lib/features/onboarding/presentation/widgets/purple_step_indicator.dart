@@ -31,3 +31,4 @@ class PurpleStepIndicator extends StatelessWidget {
     );
   }
 }
+

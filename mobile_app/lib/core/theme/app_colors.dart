@@ -20,3 +20,4 @@ class AppColors {
   static const Color safetyMint = Color(0xFF146C2E);       // Clean Food & NOVA 1
   static const Color safetyMintBg = Color(0xFFC4EED0);     // Light Mint Container
 }
+
