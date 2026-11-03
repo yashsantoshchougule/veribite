@@ -16,9 +16,9 @@ class ScannerApp extends StatelessWidget {
       title: 'NutriGuard Safe Consumption Scanner',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: AppColors.primaryPurple,
+        colorSchemeSeed: AppColors.primaryObsidian,
         useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.surfaceLavender,
+        scaffoldBackgroundColor: AppColors.canvasCream,
       ),
       home: StarterWalkthroughScreen(
         onFinish: () {

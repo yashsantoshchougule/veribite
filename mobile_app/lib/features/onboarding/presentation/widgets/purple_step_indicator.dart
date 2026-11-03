@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 
+/// Luxury Walkthrough Step Indicator with Elongated Active Pill and Soft Inactive Dots
 class PurpleStepIndicator extends StatelessWidget {
   final int activeIndex;
   final int totalSteps;
@@ -20,15 +21,14 @@ class PurpleStepIndicator extends StatelessWidget {
         return AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           margin: const EdgeInsets.symmetric(horizontal: 4.0),
-          height: 8.0,
-          width: isActive ? 28.0 : 8.0,
+          height: 6.0,
+          width: isActive ? 28.0 : 6.0,
           decoration: BoxDecoration(
-            color: isActive ? AppColors.primaryPurple : AppColors.lightPurple,
-            borderRadius: BorderRadius.circular(4.0),
+            color: isActive ? AppColors.activeDotNavy : AppColors.inactiveDot,
+            borderRadius: BorderRadius.circular(3.0),
           ),
         );
       }),
     );
   }
 }
-

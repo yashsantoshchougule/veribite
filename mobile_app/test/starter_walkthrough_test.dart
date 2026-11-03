@@ -5,27 +5,27 @@ import 'package:mobile_app/features/onboarding/domain/walkthrough_step.dart';
 import 'package:mobile_app/features/onboarding/presentation/starter_walkthrough_screen.dart';
 
 void main() {
-  group('AppColors Purple Theme Palette', () {
-    test('defines required Material 3 purple palette tokens', () {
-      expect(AppColors.primaryPurple, const Color(0xFF6750A4));
-      expect(AppColors.darkPurple, const Color(0xFF381E72));
-      expect(AppColors.lightPurple, const Color(0xFFEADDFF));
-      expect(AppColors.surfaceLavender, const Color(0xFFF7F2FA));
-      expect(AppColors.textDark, const Color(0xFF1D192B));
-      expect(AppColors.accentViolet, const Color(0xFF845EC2));
+  group('AppColors Warm Luxury Palette', () {
+    test('defines required luxury editorial palette tokens', () {
+      expect(AppColors.canvasCream, const Color(0xFFFBF8F4));
+      expect(AppColors.cardSurface, const Color(0xFFFDFBF7));
+      expect(AppColors.textObsidian, const Color(0xFF0E1424));
+      expect(AppColors.textMutedMocha, const Color(0xFF59524A));
+      expect(AppColors.accentBronze, const Color(0xFF8C7A6B));
+      expect(AppColors.primaryObsidian, const Color(0xFF0E1424));
       expect(AppColors.safetyRed, const Color(0xFFBA1A1A));
-      expect(AppColors.safetyMint, const Color(0xFF146C2E));
+      expect(AppColors.safetyMint, const Color(0xFF137333));
     });
   });
 
   group('WalkthroughStep Domain Model', () {
-    test('provides all 4 predefined walkthrough steps', () {
+    test('provides all 4 predefined walkthrough steps matching screenshots', () {
       final steps = WalkthroughStep.defaultSteps;
       expect(steps.length, 4);
-      expect(steps[0].title, contains('Point & Scan'));
-      expect(steps[1].title, contains('Unmask Hidden Sugars'));
-      expect(steps[2].title, contains('Personalized Safe Dosage'));
-      expect(steps[3].title, contains('Healthier Swaps'));
+      expect(steps[0].title, 'Point & Scan Any Food Packet');
+      expect(steps[1].title, 'Unmask Hidden Sugars & Toxins');
+      expect(steps[2].title, 'Personalized Safe Dosage Math');
+      expect(steps[3].title, 'Healthier Swaps & Setup');
     });
   });
 
@@ -41,30 +41,40 @@ void main() {
         ),
       );
 
-      // Verify Step 1 is visible
-      expect(find.textContaining('Point & Scan'), findsOneWidget);
+      // Verify Step 1 elements
+      expect(find.text('Point & Scan Any Food Packet'), findsOneWidget);
+      expect(find.text('STEP 1 OF 4'), findsOneWidget);
+      expect(find.text('Offline Ready • < 20ms'), findsOneWidget);
       expect(find.text('Next Step →'), findsOneWidget);
       expect(find.text('Skip'), findsOneWidget);
+      expect(find.byIcon(Icons.auto_awesome), findsOneWidget);
 
       // Tap Next Step -> Should show Step 2
       await tester.tap(find.text('Next Step →'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Unmask Hidden Sugars'), findsOneWidget);
+      expect(find.text('Unmask Hidden Sugars & Toxins'), findsOneWidget);
+      expect(find.text('STEP 2 OF 4'), findsOneWidget);
+      expect(find.text('39/100 Hard Red Cap Triggered'), findsOneWidget);
       expect(find.text('← Back'), findsOneWidget);
 
       // Tap Next Step -> Should show Step 3
       await tester.tap(find.text('Next Step →'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Personalized Safe Dosage'), findsOneWidget);
+      expect(find.text('Personalized Safe Dosage Math'), findsOneWidget);
+      expect(find.text('STEP 3 OF 4'), findsOneWidget);
+      expect(find.text('16 Grams (1 Piece)'), findsOneWidget);
 
       // Tap Next Step -> Should show Step 4
       await tester.tap(find.text('Next Step →'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Healthier Swaps'), findsOneWidget);
+      expect(find.text('Healthier Swaps & Setup'), findsOneWidget);
+      expect(find.text('STEP 4 OF 4'), findsOneWidget);
       expect(find.text('Get Started & Sign In →'), findsOneWidget);
+      // Back button should still be available on Step 4
+      expect(find.text('← Back'), findsOneWidget);
 
       // Tap Get Started
       await tester.tap(find.text('Get Started & Sign In →'));
@@ -80,7 +90,7 @@ void main() {
         ),
       );
 
-      expect(find.textContaining('Point & Scan'), findsOneWidget);
+      expect(find.text('Point & Scan Any Food Packet'), findsOneWidget);
       expect(find.text('Skip'), findsOneWidget);
 
       // Tap Skip
@@ -88,7 +98,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // Now at Step 4
-      expect(find.textContaining('Healthier Swaps'), findsOneWidget);
+      expect(find.text('Healthier Swaps & Setup'), findsOneWidget);
+      expect(find.text('STEP 4 OF 4'), findsOneWidget);
       expect(find.text('Get Started & Sign In →'), findsOneWidget);
     });
 
@@ -102,13 +113,12 @@ void main() {
       // Move to Step 2
       await tester.tap(find.text('Next Step →'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Unmask Hidden Sugars'), findsOneWidget);
+      expect(find.text('Unmask Hidden Sugars & Toxins'), findsOneWidget);
 
       // Tap Back -> Returns to Step 1
       await tester.tap(find.text('← Back'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Point & Scan'), findsOneWidget);
+      expect(find.text('Point & Scan Any Food Packet'), findsOneWidget);
     });
   });
 }
-

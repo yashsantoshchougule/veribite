@@ -21,60 +21,87 @@ class WalkthroughNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLastStep = currentIndex == totalSteps - 1;
 
-    if (isLastStep) {
+    // Step 1: Full-width Next Step button
+    if (currentIndex == 0) {
       return SizedBox(
         width: double.infinity,
         child: ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.darkPurple,
+            backgroundColor: AppColors.primaryObsidian,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 2,
           ),
-          onPressed: onFinish,
-          child: const Text(
-            'Get Started & Sign In →',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          onPressed: onNext,
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Next Step →',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.2),
+              ),
+              SizedBox(width: 8),
+              Icon(Icons.auto_awesome, color: AppColors.buttonSparkle, size: 18),
+            ],
           ),
         ),
       );
     }
 
+    // Steps 2, 3, 4: Split Bar (Back on Left, Next / Finish on Right)
     return Row(
       children: [
-        if (currentIndex > 0) ...[
-          Expanded(
-            flex: 2,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primaryPurple,
-                side: const BorderSide(color: AppColors.primaryPurple, width: 1.5),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              onPressed: onBack,
-              child: const Text('← Back', style: TextStyle(fontWeight: FontWeight.bold)),
+        // Back Button
+        Expanded(
+          flex: 4,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              backgroundColor: AppColors.backButtonBg,
+              foregroundColor: AppColors.backButtonText,
+              side: const BorderSide(color: AppColors.backButtonBorder, width: 1.2),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            onPressed: onBack,
+            child: const Text(
+              '← Back',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
           ),
-          const SizedBox(width: 12),
-        ],
+        ),
+        const SizedBox(width: 12),
+        // Forward Button
         Expanded(
-          flex: 3,
+          flex: 6,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.darkPurple,
+              backgroundColor: AppColors.primaryObsidian,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               elevation: 2,
             ),
-            onPressed: onNext,
-            child: const Text('Next Step →', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            onPressed: isLastStep ? onFinish : onNext,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      isLastStep ? 'Get Started & Sign In →' : 'Next Step →',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.2),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.auto_awesome, color: AppColors.buttonSparkle, size: 18),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 }
-
