@@ -34,16 +34,11 @@ class WalkthroughNavBar extends StatelessWidget {
             elevation: 2,
           ),
           onPressed: onNext,
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Next Step →',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.2),
-              ),
-              SizedBox(width: 8),
-              Icon(Icons.auto_awesome, color: AppColors.buttonSparkle, size: 18),
-            ],
+          child: const Center(
+            child: Text(
+              'Next Step →',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.2),
+            ),
           ),
         ),
       );
@@ -83,21 +78,14 @@ class WalkthroughNavBar extends StatelessWidget {
               elevation: 2,
             ),
             onPressed: isLastStep ? onFinish : onNext,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      isLastStep ? 'Get Started & Sign In →' : 'Next Step →',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.2),
-                    ),
-                  ),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  isLastStep ? 'Get Started & Sign In →' : 'Next Step →',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.2),
                 ),
-                const SizedBox(width: 6),
-                const Icon(Icons.auto_awesome, color: AppColors.buttonSparkle, size: 18),
-              ],
+              ),
             ),
           ),
         ),

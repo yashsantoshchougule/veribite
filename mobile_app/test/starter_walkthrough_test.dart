@@ -47,7 +47,6 @@ void main() {
       expect(find.text('Offline Ready • < 20ms'), findsOneWidget);
       expect(find.text('Next Step →'), findsOneWidget);
       expect(find.text('Skip'), findsOneWidget);
-      expect(find.byIcon(Icons.auto_awesome), findsOneWidget);
 
       // Tap Next Step -> Should show Step 2
       await tester.tap(find.text('Next Step →'));
