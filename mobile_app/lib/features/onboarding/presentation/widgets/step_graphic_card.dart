@@ -59,6 +59,20 @@ class StepGraphicCard extends StatelessWidget {
   }
 
   Widget _buildStep1Scanner() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Image.asset(
+        'assets/images/starter_step1_scanner.jpg',
+        key: const Key('step_1_scanner_image'),
+        width: 360,
+        height: 195,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildStep1ScannerFallback(),
+      ),
+    );
+  }
+
+  Widget _buildStep1ScannerFallback() {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFF7F2EC),
