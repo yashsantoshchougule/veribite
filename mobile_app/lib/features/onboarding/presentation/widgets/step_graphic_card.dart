@@ -62,23 +62,24 @@ class StepGraphicCard extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Background blurred smartphone mockup image
+        // Exact same clear, rich smartphone mockup as Step 1
         ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: Image.asset(
-            'assets/images/starter_card_blurred_bg.jpg',
+            'assets/images/starter_step1_scanner.jpg',
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) => Container(
               color: const Color(0xFFF7F2EC),
             ),
           ),
         ),
-        // Frosted warm translucent veil matching reference screenshots
+        // Subtle frosted glassmorphic card overlay matching Step 1
         Positioned.fill(
           child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             decoration: BoxDecoration(
-              color: AppColors.canvasCream.withValues(alpha: 0.65),
-              borderRadius: BorderRadius.circular(20),
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(18),
             ),
           ),
         ),
