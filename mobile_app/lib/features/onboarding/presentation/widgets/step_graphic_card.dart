@@ -49,24 +49,36 @@ class StepGraphicCard extends StatelessWidget {
       case 1:
         return _buildStep1Scanner();
       case 2:
-        return _wrapWithBlurredBackground(_buildStep2Toxicology());
+        return _wrapWithPersonalizedBackground(
+          imageAsset: 'assets/images/starter_step2_toxicology_bg.jpg',
+          foregroundContent: _buildStep2Toxicology(),
+        );
       case 3:
-        return _wrapWithBlurredBackground(_buildStep3SafeDosage());
+        return _wrapWithPersonalizedBackground(
+          imageAsset: 'assets/images/starter_step3_dosage_bg.jpg',
+          foregroundContent: _buildStep3SafeDosage(),
+        );
       case 4:
       default:
-        return _wrapWithBlurredBackground(_buildStep4Swaps());
+        return _wrapWithPersonalizedBackground(
+          imageAsset: 'assets/images/starter_step4_swaps_bg.jpg',
+          foregroundContent: _buildStep4Swaps(),
+        );
     }
   }
 
-  Widget _wrapWithBlurredBackground(Widget foregroundContent) {
+  Widget _wrapWithPersonalizedBackground({
+    required String imageAsset,
+    required Widget foregroundContent,
+  }) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Exact same clear, rich smartphone mockup as Step 1
+        // Personalized clear & rich smartphone mockup background
         ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: Image.asset(
-            'assets/images/starter_step1_scanner.jpg',
+            imageAsset,
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) => Container(
               color: const Color(0xFFF7F2EC),
