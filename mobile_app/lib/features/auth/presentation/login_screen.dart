@@ -62,12 +62,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.initState();
     _slideController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 450),
     );
     _slideAnimation = CurvedAnimation(
       parent: _slideController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeOutCubic,
+      curve: Curves.easeInOut,
+      reverseCurve: Curves.easeInOut,
     );
   }
 
