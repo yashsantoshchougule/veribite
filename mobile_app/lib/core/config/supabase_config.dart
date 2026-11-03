@@ -9,3 +9,4 @@ class SupabaseConfig {
       supabaseAnonKey.isNotEmpty &&
       !supabaseUrl.contains('YOUR_SUPABASE_URL');
 }
+

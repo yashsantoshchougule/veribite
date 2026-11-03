@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import 'widgets/google_logo_icon.dart';
 import 'widgets/login_feature_chip.dart';
 
 /// Production-ready VeriBite Authentication Screen supporting dual sliding
 /// sections: Login (2 fields + forgot password) and Sign-In (5 fields).
+/// Styled in the Warm Luxury Alabaster & Midnight Obsidian editorial aesthetic
+/// identical to the starter walkthrough pages.
 class LoginScreen extends StatefulWidget {
   final VoidCallback? onGoogleSignIn;
   final ValueChanged<String>? onContinueWithCredential;
@@ -106,7 +109,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Logging in as $username...'),
-          backgroundColor: AppColors.loginBrandPurple,
+          backgroundColor: AppColors.primaryObsidian,
         ),
       );
     }
@@ -174,7 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Account created successfully for $username!'),
-          backgroundColor: AppColors.loginBrandPurple,
+          backgroundColor: AppColors.primaryObsidian,
         ),
       );
     }
@@ -201,9 +204,17 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          decoration: BoxDecoration(
+            color: AppColors.canvasCream,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: AppColors.cardBorder, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8C7A6B).withValues(alpha: 0.16),
+                blurRadius: 24,
+                offset: const Offset(0, -6),
+              ),
+            ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -214,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: 44,
                   height: 4.5,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE5E7EB),
+                    color: AppColors.cardBorder,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -225,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF111827),
+                  color: AppColors.textObsidian,
                 ),
               ),
               const SizedBox(height: 6),
@@ -233,7 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 'Enter your Gmail address to receive a secure password reset link.',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Color(0xFF6B7280),
+                  color: AppColors.textMutedMocha,
                 ),
               ),
               const SizedBox(height: 16),
@@ -253,6 +264,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Please enter a valid Gmail address'),
+                          backgroundColor: AppColors.safetyRed,
                         ),
                       );
                       return;
@@ -264,15 +276,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Password reset link sent to $email'),
-                        backgroundColor: AppColors.loginBrandPurple,
+                        backgroundColor: AppColors.primaryObsidian,
                       ),
                     );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.loginBrandPurple,
+                    backgroundColor: AppColors.primaryObsidian,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(28),
                     ),
+                    elevation: 0,
                   ),
                   child: const Text(
                     'Send Reset Link via Gmail',
@@ -299,7 +312,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Connecting with Google...'),
-          backgroundColor: AppColors.loginBrandPurple,
+          backgroundColor: AppColors.primaryObsidian,
         ),
       );
     }
@@ -311,131 +324,135 @@ class _LoginScreenState extends State<LoginScreen> {
     final bottomInset = mediaQuery.viewInsets.bottom;
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(bottom: bottomInset > 0 ? bottomInset + 16 : 24),
-          physics: const ClampingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Top Soft Lavender Header Canvas
-              _buildTopHeaderArea(),
+      backgroundColor: AppColors.canvasCream,
+      body: CustomPaint(
+        painter: const WatermarkPainter(),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(bottom: bottomInset > 0 ? bottomInset + 16 : 24),
+            physics: const ClampingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Top Header Card with Brand Logo & Feature Badges
+                _buildTopHeaderArea(),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Middle Auth Area with Swipe Gesture Detection
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                child: GestureDetector(
-                  onHorizontalDragStart: (_) {
-                    _horizontalDragAccumulator = 0;
-                  },
-                  onHorizontalDragUpdate: (details) {
-                    _horizontalDragAccumulator += details.primaryDelta ?? 0;
-                  },
-                  onHorizontalDragEnd: (details) {
-                    final velocity = details.primaryVelocity ?? 0;
-                    if ((_horizontalDragAccumulator < -40 || velocity < -120) && _activeTabIndex == 0) {
-                      // Swiped Left -> Move to Sign In
-                      _switchToTab(1);
-                    } else if ((_horizontalDragAccumulator > 40 || velocity > 120) && _activeTabIndex == 1) {
-                      // Swiped Right -> Move to Login
-                      _switchToTab(0);
-                    }
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    children: [
-                      // "Welcome to VeriBite" Heading
-                      const Text(
-                        'Welcome to VeriBite',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF111827),
-                          letterSpacing: -0.4,
+                // Middle Auth Area with Swipe Gesture Detection
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 22),
+                  child: GestureDetector(
+                    onHorizontalDragStart: (_) {
+                      _horizontalDragAccumulator = 0;
+                    },
+                    onHorizontalDragUpdate: (details) {
+                      _horizontalDragAccumulator += details.primaryDelta ?? 0;
+                    },
+                    onHorizontalDragEnd: (details) {
+                      final velocity = details.primaryVelocity ?? 0;
+                      if ((_horizontalDragAccumulator < -40 || velocity < -120) && _activeTabIndex == 0) {
+                        // Swiped Left -> Move to Sign In
+                        _switchToTab(1);
+                      } else if ((_horizontalDragAccumulator > 40 || velocity > 120) && _activeTabIndex == 1) {
+                        // Swiped Right -> Move to Login
+                        _switchToTab(0);
+                      }
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Column(
+                      children: [
+                        // "Welcome to VeriBite" Heading
+                        const Text(
+                          'Welcome to VeriBite',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 25,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textObsidian,
+                            letterSpacing: -0.4,
+                          ),
                         ),
-                      ),
 
-                      const SizedBox(height: 18),
+                        const SizedBox(height: 18),
 
-                      // Animated Dual Tab Selector [ Login | Sign In ]
-                      _buildTabSelector(),
+                        // Animated Dual Tab Selector [ Login | Sign In ]
+                        _buildTabSelector(),
 
-                      const SizedBox(height: 22),
+                        const SizedBox(height: 22),
 
-                      // Directional Animated Switcher between Login & Sign-In
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 280),
-                        transitionBuilder: (child, animation) {
-                          final isSignIn = child.key == const ValueKey('signin_section');
-                          final inOffset = isSignIn
-                              ? const Offset(0.25, 0.0)
-                              : const Offset(-0.25, 0.0);
+                        // Directional Animated Switcher between Login & Sign-In
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 280),
+                          transitionBuilder: (child, animation) {
+                            final isSignIn = child.key == const ValueKey('signin_section');
+                            final inOffset = isSignIn
+                                ? const Offset(0.25, 0.0)
+                                : const Offset(-0.25, 0.0);
 
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: inOffset,
-                              end: Offset.zero,
-                            ).animate(
-                              CurvedAnimation(
-                                parent: animation,
-                                curve: Curves.easeOutCubic,
+                            return SlideTransition(
+                              position: Tween<Offset>(
+                                begin: inOffset,
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
                               ),
-                            ),
-                            child: FadeTransition(
-                              opacity: animation,
-                              child: child,
-                            ),
-                          );
-                        },
-                        child: _activeTabIndex == 0
-                            ? _buildLoginSection()
-                            : _buildSignInSection(),
-                      ),
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: _activeTabIndex == 0
+                              ? _buildLoginSection()
+                              : _buildSignInSection(),
+                        ),
 
-                      const SizedBox(height: 32),
+                        const SizedBox(height: 32),
 
-                      // Legal Terms & Privacy Footer
-                      _buildFooterDisclaimer(),
-                    ],
+                        // Legal Terms & Privacy Footer
+                        _buildFooterDisclaimer(),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // Full-bleed squircle app logo tile
+  // Full-bleed squircle app logo tile matching starter palette
   Widget _buildAppLogoTile() {
     return Container(
       width: 72,
       height: 72,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.cardBorder, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF543EE8).withValues(alpha: 0.14),
+            color: const Color(0xFF8C7A6B).withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         child: Image.asset(
           'assets/images/app_logo.png',
           width: 72,
           height: 72,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) => Container(
-            color: AppColors.loginBrandPurple,
+            color: AppColors.primaryObsidian,
             child: const Icon(
               Icons.eco_rounded,
               color: Colors.white,
@@ -447,21 +464,24 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Top header with full-bleed logo and 2 value chips
+  // Top header with warm luxury card surface, logo, headline, and 2 value chips
   Widget _buildTopHeaderArea() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.only(top: 24, bottom: 26, left: 16, right: 16),
       decoration: BoxDecoration(
-        color: AppColors.loginBgWash,
+        color: AppColors.cardSurface,
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(32),
           bottomRight: Radius.circular(32),
         ),
+        border: Border(
+          bottom: BorderSide(color: AppColors.cardBorder, width: 1.2),
+        ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF543EE8).withValues(alpha: 0.03),
-            blurRadius: 16,
+            color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
+            blurRadius: 20,
             offset: const Offset(0, 4),
           ),
         ],
@@ -480,7 +500,7 @@ class _LoginScreenState extends State<LoginScreen> {
               style: TextStyle(
                 fontSize: 22.5,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF111827),
+                color: AppColors.textObsidian,
                 letterSpacing: -0.4,
               ),
             ),
@@ -496,7 +516,7 @@ class _LoginScreenState extends State<LoginScreen> {
               style: TextStyle(
                 fontSize: 14.5,
                 fontWeight: FontWeight.w600,
-                color: AppColors.loginSubtitlePurple,
+                color: AppColors.accentBronze,
                 letterSpacing: -0.1,
               ),
             ),
@@ -504,7 +524,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 18),
 
-          // 2 Value Chips: Personalized insights & Instant results (Earn rewards removed)
+          // 2 Value Chips: Personalized insights & Instant results
           const Wrap(
             alignment: WrapAlignment.center,
             spacing: 10,
@@ -525,13 +545,14 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Tab bar switcher [ Login | Sign In ]
+  // Tab bar switcher [ Login | Sign In ] matching starter step pill styling
   Widget _buildTabSelector() {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F0F8),
+        color: AppColors.stepPillBg,
         borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.stepPillBorder, width: 1.2),
       ),
       padding: const EdgeInsets.all(4),
       child: Row(
@@ -544,12 +565,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 duration: const Duration(milliseconds: 240),
                 curve: Curves.easeInOut,
                 decoration: BoxDecoration(
-                  color: _activeTabIndex == 0 ? Colors.white : Colors.transparent,
+                  color: _activeTabIndex == 0 ? AppColors.primaryObsidian : Colors.transparent,
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: _activeTabIndex == 0
                       ? [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.07),
+                            color: Colors.black.withValues(alpha: 0.12),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -565,8 +586,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontSize: 15,
                       fontWeight: _activeTabIndex == 0 ? FontWeight.w700 : FontWeight.w500,
                       color: _activeTabIndex == 0
-                          ? AppColors.loginBrandPurple
-                          : const Color(0xFF6B7280),
+                          ? Colors.white
+                          : AppColors.textMutedMocha,
                     ),
                   ),
                 ),
@@ -581,12 +602,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 duration: const Duration(milliseconds: 240),
                 curve: Curves.easeInOut,
                 decoration: BoxDecoration(
-                  color: _activeTabIndex == 1 ? Colors.white : Colors.transparent,
+                  color: _activeTabIndex == 1 ? AppColors.primaryObsidian : Colors.transparent,
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: _activeTabIndex == 1
                       ? [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.07),
+                            color: Colors.black.withValues(alpha: 0.12),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -602,8 +623,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontSize: 15,
                       fontWeight: _activeTabIndex == 1 ? FontWeight.w700 : FontWeight.w500,
                       color: _activeTabIndex == 1
-                          ? AppColors.loginBrandPurple
-                          : const Color(0xFF6B7280),
+                          ? Colors.white
+                          : AppColors.textMutedMocha,
                     ),
                   ),
                 ),
@@ -644,7 +665,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
                 size: 20,
-                color: const Color(0xFF9CA3AF),
+                color: AppColors.accentBronze,
               ),
               onPressed: () {
                 setState(() {
@@ -669,7 +690,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.loginBrandPurple,
+                  color: AppColors.accentBronze,
                 ),
               ),
             ),
@@ -692,7 +713,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 12),
 
-          // Primary "Login" Button
+          // Primary "Login" Button (Midnight Obsidian)
           _buildPrimaryButton(
             label: 'Login',
             onPressed: _handleLogin,
@@ -706,8 +727,8 @@ class _LoginScreenState extends State<LoginScreen> {
               'Or',
               style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF8F95A5),
+                fontWeight: FontWeight.w600,
+                color: AppColors.accentBronze,
               ),
             ),
           ),
@@ -730,7 +751,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     "Don't have an account? ",
                     style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF6B7280),
+                      color: AppColors.textMutedMocha,
                     ),
                   ),
                   GestureDetector(
@@ -740,7 +761,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.loginBrandPurple,
+                        color: AppColors.textObsidian,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.textObsidian,
                       ),
                     ),
                   ),
@@ -802,7 +825,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
                 size: 20,
-                color: const Color(0xFF9CA3AF),
+                color: AppColors.accentBronze,
               ),
               onPressed: () {
                 setState(() {
@@ -826,7 +849,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
                 size: 20,
-                color: const Color(0xFF9CA3AF),
+                color: AppColors.accentBronze,
               ),
               onPressed: () {
                 setState(() {
@@ -853,7 +876,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 18),
 
-          // Primary "Sign In" Button
+          // Primary "Sign In" Button (Midnight Obsidian)
           _buildPrimaryButton(
             label: 'Sign In',
             onPressed: _handleSignIn,
@@ -872,7 +895,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     'Already have an account? ',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF6B7280),
+                      color: AppColors.textMutedMocha,
                     ),
                   ),
                   GestureDetector(
@@ -882,7 +905,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.loginBrandPurple,
+                        color: AppColors.textObsidian,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.textObsidian,
                       ),
                     ),
                   ),
@@ -899,8 +924,8 @@ class _LoginScreenState extends State<LoginScreen> {
               'Or',
               style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF8F95A5),
+                fontWeight: FontWeight.w600,
+                color: AppColors.accentBronze,
               ),
             ),
           ),
@@ -914,7 +939,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Reusable Pill Input Field
+  // Reusable Pill Input Field matching starter luxury card surfaces
   Widget _buildInputField({
     required TextEditingController controller,
     required String hintText,
@@ -932,33 +957,33 @@ class _LoginScreenState extends State<LoginScreen> {
         style: const TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w500,
-          color: Color(0xFF111827),
+          color: AppColors.textObsidian,
         ),
         decoration: InputDecoration(
           hintText: hintText,
-          hintStyle: const TextStyle(
-            color: AppColors.loginInputHint,
+          hintStyle: TextStyle(
+            color: AppColors.textMutedMocha.withValues(alpha: 0.65),
             fontSize: 14.5,
             fontWeight: FontWeight.w400,
           ),
           prefixIcon: prefixIcon != null
-              ? Icon(prefixIcon, size: 20, color: const Color(0xFF9CA3AF))
+              ? Icon(prefixIcon, size: 20, color: AppColors.accentBronze)
               : null,
           suffixIcon: suffixIcon,
           filled: true,
-          fillColor: Colors.white,
+          fillColor: AppColors.cardSurface,
           contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(28),
             borderSide: const BorderSide(
-              color: AppColors.loginInputBorder,
+              color: AppColors.cardBorder,
               width: 1.2,
             ),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(28),
             borderSide: const BorderSide(
-              color: AppColors.loginBrandPurple,
+              color: AppColors.primaryObsidian,
               width: 1.6,
             ),
           ),
@@ -967,7 +992,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Primary Action Button (Login or Sign In)
+  // Primary Action Button (Midnight Obsidian matching starter screen Next button)
   Widget _buildPrimaryButton({
     required String label,
     required VoidCallback onPressed,
@@ -978,8 +1003,8 @@ class _LoginScreenState extends State<LoginScreen> {
       child: ElevatedButton(
         onPressed: _isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.loginBrandPurple,
-          disabledBackgroundColor: AppColors.loginBrandPurple.withValues(alpha: 0.6),
+          backgroundColor: AppColors.primaryObsidian,
+          disabledBackgroundColor: AppColors.primaryObsidian.withValues(alpha: 0.6),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(28),
           ),
@@ -1007,7 +1032,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Outlined Google Sign-In Button
+  // Outlined Google Sign-In Button matching starter frosted card surface
   Widget _buildGoogleButton() {
     return SizedBox(
       height: 52,
@@ -1015,9 +1040,9 @@ class _LoginScreenState extends State<LoginScreen> {
       child: OutlinedButton(
         onPressed: _handleGoogleSignIn,
         style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white,
+          backgroundColor: AppColors.cardSurface,
           side: const BorderSide(
-            color: AppColors.loginGoogleBorder,
+            color: AppColors.cardBorder,
             width: 1.2,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1038,7 +1063,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 15.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF1F2937),
+                  color: AppColors.textObsidian,
                   letterSpacing: -0.2,
                 ),
               ),
@@ -1049,7 +1074,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Legal Disclaimer Footer
+  // Legal Disclaimer Footer matching starter body copy
   Widget _buildFooterDisclaimer() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1059,7 +1084,7 @@ class _LoginScreenState extends State<LoginScreen> {
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 13,
-            color: Color(0xFF6B7280),
+            color: AppColors.textMutedMocha,
             fontWeight: FontWeight.w400,
           ),
         ),
@@ -1071,7 +1096,10 @@ class _LoginScreenState extends State<LoginScreen> {
             GestureDetector(
               onTap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Opening Terms & Conditions...')),
+                  const SnackBar(
+                    content: Text('Opening Terms & Conditions...'),
+                    backgroundColor: AppColors.primaryObsidian,
+                  ),
                 );
               },
               child: const Text(
@@ -1079,9 +1107,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.loginBrandPurple,
+                  color: AppColors.accentBronze,
                   decoration: TextDecoration.underline,
-                  decorationColor: AppColors.loginBrandPurple,
+                  decorationColor: AppColors.accentBronze,
                 ),
               ),
             ),
@@ -1089,13 +1117,16 @@ class _LoginScreenState extends State<LoginScreen> {
               ' & ',
               style: TextStyle(
                 fontSize: 13,
-                color: Color(0xFF6B7280),
+                color: AppColors.textMutedMocha,
               ),
             ),
             GestureDetector(
               onTap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Opening Privacy Policy...')),
+                  const SnackBar(
+                    content: Text('Opening Privacy Policy...'),
+                    backgroundColor: AppColors.primaryObsidian,
+                  ),
                 );
               },
               child: const Text(
@@ -1103,9 +1134,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.loginBrandPurple,
+                  color: AppColors.accentBronze,
                   decoration: TextDecoration.underline,
-                  decorationColor: AppColors.loginBrandPurple,
+                  decorationColor: AppColors.accentBronze,
                 ),
               ),
             ),

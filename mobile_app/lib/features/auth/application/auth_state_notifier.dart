@@ -25,3 +25,4 @@ final isAuthenticatedProvider = Provider<bool>((ref) {
   final user = ref.watch(currentUserProvider);
   return user != null;
 });
+

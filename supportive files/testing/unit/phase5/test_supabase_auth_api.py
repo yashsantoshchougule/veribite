@@ -55,3 +55,4 @@ def test_auth_verify_token_with_mocked_supabase():
         assert data["user"]["id"] == "supa-123"
         assert data["user"]["email"] == "test@veribite.app"
         assert data["user"]["username"] == "veribite_tester"
+
