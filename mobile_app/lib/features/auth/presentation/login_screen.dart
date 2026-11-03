@@ -62,11 +62,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.initState();
     _slideController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 300),
     );
     _slideAnimation = CurvedAnimation(
       parent: _slideController,
-      curve: Curves.easeInOutCubic,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeOutCubic,
     );
   }
 
@@ -93,6 +94,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       if (index == 1) {
         _slideController.forward();
       } else {
+        _slideController.reverse();
+      }
+    } else {
+      if (index == 1 && _slideController.value < 1.0) {
+        _slideController.forward();
+      } else if (index == 0 && _slideController.value > 0.0) {
         _slideController.reverse();
       }
     }
@@ -370,16 +377,27 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       _horizontalDragAccumulator = 0;
                     },
                     onHorizontalDragUpdate: (details) {
-                      _horizontalDragAccumulator += details.primaryDelta ?? 0;
+                      final delta = details.primaryDelta ?? 0;
+                      _horizontalDragAccumulator += delta;
+                      final screenWidth = mediaQuery.size.width;
+                      final progressDelta = -delta / (screenWidth > 0 ? screenWidth : 360.0);
+                      _slideController.value = (_slideController.value + progressDelta).clamp(0.0, 1.0);
                     },
                     onHorizontalDragEnd: (details) {
                       final velocity = details.primaryVelocity ?? 0;
-                      if ((_horizontalDragAccumulator < -40 || velocity < -120) && _activeTabIndex == 0) {
+                      if ((_horizontalDragAccumulator < -40 || velocity < -120 || _slideController.value > 0.5) && _activeTabIndex == 0) {
                         // Swiped Left -> Move to Sign In
                         _switchToTab(1);
-                      } else if ((_horizontalDragAccumulator > 40 || velocity > 120) && _activeTabIndex == 1) {
+                      } else if ((_horizontalDragAccumulator > 40 || velocity > 120 || _slideController.value <= 0.5) && _activeTabIndex == 1) {
                         // Swiped Right -> Move to Login
                         _switchToTab(0);
+                      } else {
+                        // Snap back to active tab
+                        if (_activeTabIndex == 0) {
+                          _slideController.reverse();
+                        } else {
+                          _slideController.forward();
+                        }
                       }
                     },
                     behavior: HitTestBehavior.opaque,
@@ -652,46 +670,70 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  // Butter-Smooth Sliding Form Area with synchronized height interpolation
+  // Butter-Smooth Sliding Form Area with synchronized height interpolation & zero-jank caching
   Widget _buildSlidingFormArea() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
+        // Build both sections once per layout pass so 60fps translation ticks never rebuild widgets
+        final loginWidget = SizedBox(
+          width: width,
+          child: _buildLoginSection(),
+        );
+        final signInWidget = SizedBox(
+          width: width,
+          child: _buildSignInSection(),
+        );
+
         return AnimatedBuilder(
           animation: _slideAnimation,
           builder: (context, child) {
-            // Smoothly interpolate card height between Login (~420px) and Sign In (~580px)
-            final currentHeight = 420.0 + (580.0 - 420.0) * _slideAnimation.value;
+            final t = _slideAnimation.value;
+            // Smoothly interpolate card height between Login (~400px) and Sign In (~585px)
+            const loginHeight = 400.0;
+            const signInHeight = 585.0;
+            final currentHeight = loginHeight + (signInHeight - loginHeight) * t;
+
+            final isLoginOffstage = t >= 0.999;
+            final isSignInOffstage = t <= 0.001;
 
             return SizedBox(
               height: currentHeight,
               child: ClipRect(
                 child: Stack(
                   children: [
-                    // Login Form: slides smoothly to the left
-                    Transform.translate(
-                      offset: Offset(-_slideAnimation.value * width, 0),
-                      child: Opacity(
-                        opacity: (1.0 - _slideAnimation.value * 1.5).clamp(0.0, 1.0),
+                    // Login Form: slides smoothly to the left (-t * width)
+                    Offstage(
+                      offstage: isLoginOffstage,
+                      child: Transform.translate(
+                        offset: Offset(-t * width, 0),
                         child: IgnorePointer(
-                          ignoring: _slideAnimation.value > 0.5,
-                          child: SizedBox(
-                            width: width,
-                            child: _buildLoginSection(),
+                          ignoring: t > 0.5,
+                          child: OverflowBox(
+                            minWidth: width,
+                            maxWidth: width,
+                            minHeight: 0,
+                            maxHeight: double.infinity,
+                            alignment: Alignment.topCenter,
+                            child: loginWidget,
                           ),
                         ),
                       ),
                     ),
-                    // Sign In Form: slides smoothly in from the right
-                    Transform.translate(
-                      offset: Offset((1.0 - _slideAnimation.value) * width, 0),
-                      child: Opacity(
-                        opacity: (_slideAnimation.value * 1.5 - 0.5).clamp(0.0, 1.0),
+                    // Sign In Form: slides smoothly in from the right ((1 - t) * width)
+                    Offstage(
+                      offstage: isSignInOffstage,
+                      child: Transform.translate(
+                        offset: Offset((1.0 - t) * width, 0),
                         child: IgnorePointer(
-                          ignoring: _slideAnimation.value <= 0.5,
-                          child: SizedBox(
-                            width: width,
-                            child: _buildSignInSection(),
+                          ignoring: t <= 0.5,
+                          child: OverflowBox(
+                            minWidth: width,
+                            maxWidth: width,
+                            minHeight: 0,
+                            maxHeight: double.infinity,
+                            alignment: Alignment.topCenter,
+                            child: signInWidget,
                           ),
                         ),
                       ),
