@@ -54,6 +54,16 @@ class AppColors {
   static const Color aiAdvisorBg = Color(0xFFF5F0EB);        // AI Advisor Pill Background
   static const Color aiAdvisorText = Color(0xFF6B5E52);      // AI Advisor Muted Bronze Text
 
+  // Login & Authentication Screen Palette (Matching Reference)
+  static const Color loginBgWash = Color(0xFFF6F5FC);        // Subtle Soft Lavender Canvas Wash
+  static const Color loginBrandPurple = Color(0xFF543EE8);   // Signature Vibrant Violet/Indigo Action
+  static const Color loginSubtitlePurple = Color(0xFF7965E5);// Lavender Medium Subtitle
+  static const Color loginPillBorder = Color(0xFFECEAF6);    // Crisp Feature Chip Border
+  static const Color loginTealAccent = Color(0xFF00C9A7);    // Feature Chip Teal Icon
+  static const Color loginInputBorder = Color(0xFFE2E0EC);   // Input Outline Border
+  static const Color loginInputHint = Color(0xFF9CA3AF);     // Input Placeholder Gray
+  static const Color loginGoogleBorder = Color(0xFFE5E7EB);  // Google Button Outline Border
+
   // Backward-Compatible Aliases
   static const Color primaryPurple = primaryObsidian;
   static const Color darkPurple = textObsidian;
