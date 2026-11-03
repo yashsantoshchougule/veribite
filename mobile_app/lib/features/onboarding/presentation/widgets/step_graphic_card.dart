@@ -49,13 +49,46 @@ class StepGraphicCard extends StatelessWidget {
       case 1:
         return _buildStep1Scanner();
       case 2:
-        return _buildStep2Toxicology();
+        return _wrapWithBlurredBackground(_buildStep2Toxicology());
       case 3:
-        return _buildStep3SafeDosage();
+        return _wrapWithBlurredBackground(_buildStep3SafeDosage());
       case 4:
       default:
-        return _buildStep4Swaps();
+        return _wrapWithBlurredBackground(_buildStep4Swaps());
     }
+  }
+
+  Widget _wrapWithBlurredBackground(Widget foregroundContent) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Background blurred smartphone mockup image
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Image.asset(
+            'assets/images/starter_card_blurred_bg.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) => Container(
+              color: const Color(0xFFF7F2EC),
+            ),
+          ),
+        ),
+        // Frosted warm translucent veil matching reference screenshots
+        Positioned.fill(
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.canvasCream.withValues(alpha: 0.65),
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        ),
+        // Foreground crisp cards & interactive pills
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: foregroundContent,
+        ),
+      ],
+    );
   }
 
   Widget _buildStep1Scanner() {
