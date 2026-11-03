@@ -3,17 +3,23 @@ import '../../../../core/theme/app_colors.dart';
 import 'widgets/google_logo_icon.dart';
 import 'widgets/login_feature_chip.dart';
 
-/// Production-ready VeriBite Login & Authentication Screen
-/// Modeled after the high-converting consumer food intelligence onboarding flow.
+/// Production-ready VeriBite Authentication Screen supporting dual sliding
+/// sections: Login (2 fields + forgot password) and Sign-In (5 fields).
 class LoginScreen extends StatefulWidget {
   final VoidCallback? onGoogleSignIn;
   final ValueChanged<String>? onContinueWithCredential;
+  final Function(String username, String password)? onLoginSubmit;
+  final Function(String name, String username, String email, String password)? onSignInSubmit;
+  final ValueChanged<String>? onForgotPassword;
   final VoidCallback? onSkipOrGuest;
 
   const LoginScreen({
     super.key,
     this.onGoogleSignIn,
     this.onContinueWithCredential,
+    this.onLoginSubmit,
+    this.onSignInSubmit,
+    this.onForgotPassword,
     this.onSkipOrGuest,
   });
 
@@ -22,43 +28,68 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _credentialController = TextEditingController();
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  // Active Tab: 0 = Login, 1 = Sign In
+  int _activeTabIndex = 0;
+  double _horizontalDragAccumulator = 0;
+
+  // Login Form Controllers
+  final TextEditingController _loginUsernameController = TextEditingController();
+  final TextEditingController _loginPasswordController = TextEditingController();
+  bool _obscureLoginPassword = true;
+  String? _loginErrorMessage;
+
+  // Sign-In (Registration) 5-Field Controllers
+  final TextEditingController _signNameController = TextEditingController();
+  final TextEditingController _signUsernameController = TextEditingController();
+  final TextEditingController _signEmailController = TextEditingController();
+  final TextEditingController _signPasswordController = TextEditingController();
+  final TextEditingController _signConfirmPasswordController = TextEditingController();
+  bool _obscureSignPassword = true;
+  bool _obscureSignConfirmPassword = true;
+  String? _signErrorMessage;
+
   bool _isLoading = false;
-  String? _errorMessage;
 
   @override
   void dispose() {
-    _credentialController.dispose();
+    _loginUsernameController.dispose();
+    _loginPasswordController.dispose();
+    _signNameController.dispose();
+    _signUsernameController.dispose();
+    _signEmailController.dispose();
+    _signPasswordController.dispose();
+    _signConfirmPasswordController.dispose();
     super.dispose();
   }
 
-  bool _isValidEmail(String input) {
-    final emailRegex = RegExp(r'^[\w\.\-]+@([\w\-]+\.)+[\w\-]{2,6}$');
-    return emailRegex.hasMatch(input.trim());
+  void _switchToTab(int index) {
+    if (_activeTabIndex != index) {
+      setState(() {
+        _activeTabIndex = index;
+        _loginErrorMessage = null;
+        _signErrorMessage = null;
+      });
+    }
   }
 
-  bool _isValidPhone(String input) {
-    final digitsOnly = input.replaceAll(RegExp(r'\D'), '');
-    return digitsOnly.length >= 10 && digitsOnly.length <= 13;
-  }
-
-  void _handleContinue() {
+  void _handleLogin() {
     setState(() {
-      _errorMessage = null;
+      _loginErrorMessage = null;
     });
 
-    final input = _credentialController.text.trim();
-    if (input.isEmpty) {
+    final username = _loginUsernameController.text.trim();
+    final password = _loginPasswordController.text;
+
+    if (username.isEmpty) {
       setState(() {
-        _errorMessage = 'Please enter your email or phone number';
+        _loginErrorMessage = 'Please enter your username or email';
       });
       return;
     }
 
-    if (!_isValidEmail(input) && !_isValidPhone(input)) {
+    if (password.isEmpty) {
       setState(() {
-        _errorMessage = 'Enter a valid email address or 10-digit mobile number';
+        _loginErrorMessage = 'Please enter your password';
       });
       return;
     }
@@ -67,12 +98,14 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
     });
 
-    if (widget.onContinueWithCredential != null) {
-      widget.onContinueWithCredential!(input);
+    if (widget.onLoginSubmit != null) {
+      widget.onLoginSubmit!(username, password);
+    } else if (widget.onContinueWithCredential != null) {
+      widget.onContinueWithCredential!(username);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Verifying credential for $input...'),
+          content: Text('Logging in as $username...'),
           backgroundColor: AppColors.loginBrandPurple,
         ),
       );
@@ -81,6 +114,182 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _isLoading = false;
     });
+  }
+
+  void _handleSignIn() {
+    setState(() {
+      _signErrorMessage = null;
+    });
+
+    final name = _signNameController.text.trim();
+    final username = _signUsernameController.text.trim();
+    final email = _signEmailController.text.trim();
+    final password = _signPasswordController.text;
+    final confirmPassword = _signConfirmPasswordController.text;
+
+    if (name.isEmpty) {
+      setState(() {
+        _signErrorMessage = 'Please enter your full name';
+      });
+      return;
+    }
+
+    if (username.isEmpty) {
+      setState(() {
+        _signErrorMessage = 'Please choose a username';
+      });
+      return;
+    }
+
+    if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
+      setState(() {
+        _signErrorMessage = 'Please enter a valid Gmail / email address';
+      });
+      return;
+    }
+
+    if (password.isEmpty || password.length < 6) {
+      setState(() {
+        _signErrorMessage = 'Password must be at least 6 characters';
+      });
+      return;
+    }
+
+    if (password != confirmPassword) {
+      setState(() {
+        _signErrorMessage = 'Passwords do not match';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    if (widget.onSignInSubmit != null) {
+      widget.onSignInSubmit!(name, username, email, password);
+    } else if (widget.onContinueWithCredential != null) {
+      widget.onContinueWithCredential!(email);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Account created successfully for $username!'),
+          backgroundColor: AppColors.loginBrandPurple,
+        ),
+      );
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  void _showForgotPasswordSheet() {
+    final resetEmailController = TextEditingController(
+      text: _loginUsernameController.text.contains('@')
+          ? _loginUsernameController.text.trim()
+          : '',
+    );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4.5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Reset Password',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Enter your Gmail address to receive a secure password reset link.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildInputField(
+                controller: resetEmailController,
+                hintText: 'Enter your Gmail address',
+                keyboardType: TextInputType.emailAddress,
+                prefixIcon: Icons.mail_outline_rounded,
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () {
+                    final email = resetEmailController.text.trim();
+                    if (email.isEmpty || !email.contains('@')) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a valid Gmail address'),
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.of(ctx).pop();
+                    if (widget.onForgotPassword != null) {
+                      widget.onForgotPassword!(email);
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Password reset link sent to $email'),
+                        backgroundColor: AppColors.loginBrandPurple,
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.loginBrandPurple,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                  ),
+                  child: const Text(
+                    'Send Reset Link via Gmail',
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _handleGoogleSignIn() {
@@ -113,13 +322,29 @@ class _LoginScreenState extends State<LoginScreen> {
               // Top Soft Lavender Header Canvas
               _buildTopHeaderArea(),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
 
-              // Middle Form & Actions Area
+              // Middle Auth Area with Swipe Gesture Detection
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Form(
-                  key: _formKey,
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: GestureDetector(
+                  onHorizontalDragStart: (_) {
+                    _horizontalDragAccumulator = 0;
+                  },
+                  onHorizontalDragUpdate: (details) {
+                    _horizontalDragAccumulator += details.primaryDelta ?? 0;
+                  },
+                  onHorizontalDragEnd: (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if ((_horizontalDragAccumulator < -40 || velocity < -120) && _activeTabIndex == 0) {
+                      // Swiped Left -> Move to Sign In
+                      _switchToTab(1);
+                    } else if ((_horizontalDragAccumulator > 40 || velocity > 120) && _activeTabIndex == 1) {
+                      // Swiped Right -> Move to Login
+                      _switchToTab(0);
+                    }
+                  },
+                  behavior: HitTestBehavior.opaque,
                   child: Column(
                     children: [
                       // "Welcome to VeriBite" Heading
@@ -134,49 +359,44 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
 
+                      const SizedBox(height: 18),
+
+                      // Animated Dual Tab Selector [ Login | Sign In ]
+                      _buildTabSelector(),
+
                       const SizedBox(height: 22),
 
-                      // "Continue with Google" Outlined Button
-                      _buildGoogleButton(),
+                      // Directional Animated Switcher between Login & Sign-In
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 280),
+                        transitionBuilder: (child, animation) {
+                          final isSignIn = child.key == const ValueKey('signin_section');
+                          final inOffset = isSignIn
+                              ? const Offset(0.25, 0.0)
+                              : const Offset(-0.25, 0.0);
 
-                      const SizedBox(height: 20),
-
-                      // "Or" Divider
-                      const Text(
-                        'Or',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF8F95A5),
-                        ),
+                          return SlideTransition(
+                            position: Tween<Offset>(
+                              begin: inOffset,
+                              end: Offset.zero,
+                            ).animate(
+                              CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutCubic,
+                              ),
+                            ),
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _activeTabIndex == 0
+                            ? _buildLoginSection()
+                            : _buildSignInSection(),
                       ),
 
-                      const SizedBox(height: 20),
-
-                      // Email / Phone Input Field
-                      _buildCredentialInput(),
-
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _errorMessage!,
-                            style: const TextStyle(
-                              color: AppColors.safetyRed,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-
-                      const SizedBox(height: 16),
-
-                      // Primary "Continue" Button
-                      _buildContinueButton(),
-
-                      const SizedBox(height: 44),
+                      const SizedBox(height: 32),
 
                       // Legal Terms & Privacy Footer
                       _buildFooterDisclaimer(),
@@ -191,10 +411,47 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // Full-bleed squircle app logo tile
+  Widget _buildAppLogoTile() {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF543EE8).withValues(alpha: 0.14),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Image.asset(
+          'assets/images/app_logo.png',
+          width: 72,
+          height: 72,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Container(
+            color: AppColors.loginBrandPurple,
+            child: const Icon(
+              Icons.eco_rounded,
+              color: Colors.white,
+              size: 36,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Top header with full-bleed logo and 2 value chips
   Widget _buildTopHeaderArea() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.only(top: 24, bottom: 28, left: 16, right: 16),
+      padding: const EdgeInsets.only(top: 24, bottom: 26, left: 16, right: 16),
       decoration: BoxDecoration(
         color: AppColors.loginBgWash,
         borderRadius: const BorderRadius.only(
@@ -211,12 +468,10 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       child: Column(
         children: [
-          // Logo squircle tile
           _buildAppLogoTile(),
 
           const SizedBox(height: 18),
 
-          // Main Header Headline
           const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
@@ -233,7 +488,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 6),
 
-          // Subtitle
           const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
@@ -250,10 +504,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 18),
 
-          // Value Proposition Pills - Row 1
+          // 2 Value Chips: Personalized insights & Instant results (Earn rewards removed)
           const Wrap(
             alignment: WrapAlignment.center,
-            spacing: 8,
+            spacing: 10,
             runSpacing: 10,
             children: [
               LoginFeatureChip(
@@ -264,10 +518,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.bolt_rounded,
                 label: 'Instant results',
               ),
-              LoginFeatureChip(
-                icon: Icons.star_outline_rounded,
-                label: 'Earn rewards',
-              ),
             ],
           ),
         ],
@@ -275,33 +525,441 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildAppLogoTile() {
+  // Tab bar switcher [ Login | Sign In ]
+  Widget _buildTabSelector() {
     return Container(
-      width: 66,
-      height: 66,
+      height: 48,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF543EE8).withValues(alpha: 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+        color: const Color(0xFFF1F0F8),
+        borderRadius: BorderRadius.circular(26),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _switchToTab(0),
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOut,
+                decoration: BoxDecoration(
+                  color: _activeTabIndex == 0 ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: _activeTabIndex == 0
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.07),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Login',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: _activeTabIndex == 0 ? FontWeight.w700 : FontWeight.w500,
+                      color: _activeTabIndex == 0
+                          ? AppColors.loginBrandPurple
+                          : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _switchToTab(1),
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOut,
+                decoration: BoxDecoration(
+                  color: _activeTabIndex == 1 ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: _activeTabIndex == 1
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.07),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Sign In',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: _activeTabIndex == 1 ? FontWeight.w700 : FontWeight.w500,
+                      color: _activeTabIndex == 1
+                          ? AppColors.loginBrandPurple
+                          : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(10),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.asset(
-          'assets/images/app_logo.png',
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) => Container(
-            color: AppColors.loginBrandPurple,
-            child: const Icon(
-              Icons.eco_rounded,
-              color: Colors.white,
-              size: 32,
+    );
+  }
+
+  // Section 1: Login Form (2 Fields: Username, Password)
+  Widget _buildLoginSection() {
+    return KeyedSubtree(
+      key: const ValueKey('login_section'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. Username Input
+          _buildInputField(
+            controller: _loginUsernameController,
+            hintText: 'Username',
+            keyboardType: TextInputType.text,
+            prefixIcon: Icons.person_outline_rounded,
+          ),
+
+          const SizedBox(height: 14),
+
+          // 2. Password Input with Obscure Toggle
+          _buildInputField(
+            controller: _loginPasswordController,
+            hintText: 'Password',
+            obscureText: _obscureLoginPassword,
+            prefixIcon: Icons.lock_outline_rounded,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureLoginPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 20,
+                color: const Color(0xFF9CA3AF),
+              ),
+              onPressed: () {
+                setState(() {
+                  _obscureLoginPassword = !_obscureLoginPassword;
+                });
+              },
+            ),
+          ),
+
+          // Forgot Password Action (Right-aligned)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _showForgotPasswordSheet,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Forgot Password?',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.loginBrandPurple,
+                ),
+              ),
+            ),
+          ),
+
+          if (_loginErrorMessage != null) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _loginErrorMessage!,
+                style: const TextStyle(
+                  color: AppColors.safetyRed,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+
+          // Primary "Login" Button
+          _buildPrimaryButton(
+            label: 'Login',
+            onPressed: _handleLogin,
+          ),
+
+          const SizedBox(height: 18),
+
+          // Divider
+          const Center(
+            child: Text(
+              'Or',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF8F95A5),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // Continue with Google Button
+          _buildGoogleButton(),
+
+          const SizedBox(height: 20),
+
+          // Shift to Sign In (Right)
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    "Don't have an account? ",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => _switchToTab(1),
+                    child: const Text(
+                      'Create new account',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.loginBrandPurple,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Section 2: Sign-In Form (5 Fields: Name, Username, Gmail, Password, Confirm Password)
+  Widget _buildSignInSection() {
+    return KeyedSubtree(
+      key: const ValueKey('signin_section'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. Name
+          _buildInputField(
+            controller: _signNameController,
+            hintText: 'Full Name',
+            keyboardType: TextInputType.name,
+            prefixIcon: Icons.badge_outlined,
+          ),
+
+          const SizedBox(height: 12),
+
+          // 2. Username to set
+          _buildInputField(
+            controller: _signUsernameController,
+            hintText: 'Username to set',
+            keyboardType: TextInputType.text,
+            prefixIcon: Icons.alternate_email_rounded,
+          ),
+
+          const SizedBox(height: 12),
+
+          // 3. Gmail / Email
+          _buildInputField(
+            controller: _signEmailController,
+            hintText: 'Gmail Address',
+            keyboardType: TextInputType.emailAddress,
+            prefixIcon: Icons.mail_outline_rounded,
+          ),
+
+          const SizedBox(height: 12),
+
+          // 4. Password
+          _buildInputField(
+            controller: _signPasswordController,
+            hintText: 'Password',
+            obscureText: _obscureSignPassword,
+            prefixIcon: Icons.lock_outline_rounded,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureSignPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 20,
+                color: const Color(0xFF9CA3AF),
+              ),
+              onPressed: () {
+                setState(() {
+                  _obscureSignPassword = !_obscureSignPassword;
+                });
+              },
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // 5. Confirm Password
+          _buildInputField(
+            controller: _signConfirmPasswordController,
+            hintText: 'Confirm Password',
+            obscureText: _obscureSignConfirmPassword,
+            prefixIcon: Icons.lock_reset_rounded,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureSignConfirmPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 20,
+                color: const Color(0xFF9CA3AF),
+              ),
+              onPressed: () {
+                setState(() {
+                  _obscureSignConfirmPassword = !_obscureSignConfirmPassword;
+                });
+              },
+            ),
+          ),
+
+          if (_signErrorMessage != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _signErrorMessage!,
+                style: const TextStyle(
+                  color: AppColors.safetyRed,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 18),
+
+          // Primary "Sign In" Button
+          _buildPrimaryButton(
+            label: 'Sign In',
+            onPressed: _handleSignIn,
+          ),
+
+          const SizedBox(height: 18),
+
+          // Shift to Login (Left)
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Already have an account? ',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => _switchToTab(0),
+                    child: const Text(
+                      'Login',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.loginBrandPurple,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // Divider
+          const Center(
+            child: Text(
+              'Or',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF8F95A5),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // Continue with Google Button
+          _buildGoogleButton(),
+        ],
+      ),
+    );
+  }
+
+  // Reusable Pill Input Field
+  Widget _buildInputField({
+    required TextEditingController controller,
+    required String hintText,
+    bool obscureText = false,
+    TextInputType keyboardType = TextInputType.text,
+    IconData? prefixIcon,
+    Widget? suffixIcon,
+  }) {
+    return SizedBox(
+      height: 52,
+      child: TextField(
+        controller: controller,
+        obscureText: obscureText,
+        keyboardType: keyboardType,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: Color(0xFF111827),
+        ),
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: const TextStyle(
+            color: AppColors.loginInputHint,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w400,
+          ),
+          prefixIcon: prefixIcon != null
+              ? Icon(prefixIcon, size: 20, color: const Color(0xFF9CA3AF))
+              : null,
+          suffixIcon: suffixIcon,
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(28),
+            borderSide: const BorderSide(
+              color: AppColors.loginInputBorder,
+              width: 1.2,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(28),
+            borderSide: const BorderSide(
+              color: AppColors.loginBrandPurple,
+              width: 1.6,
             ),
           ),
         ),
@@ -309,6 +967,47 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // Primary Action Button (Login or Sign In)
+  Widget _buildPrimaryButton({
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 52,
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.loginBrandPurple,
+          disabledBackgroundColor: AppColors.loginBrandPurple.withValues(alpha: 0.6),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          elevation: 0,
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: -0.1,
+                ),
+              ),
+      ),
+    );
+  }
+
+  // Outlined Google Sign-In Button
   Widget _buildGoogleButton() {
     return SizedBox(
       height: 52,
@@ -350,84 +1049,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildCredentialInput() {
-    return SizedBox(
-      height: 52,
-      child: TextField(
-        controller: _credentialController,
-        keyboardType: TextInputType.emailAddress,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _handleContinue(),
-        style: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF111827),
-        ),
-        decoration: InputDecoration(
-          hintText: 'Enter your Email/Phone',
-          hintStyle: const TextStyle(
-            color: AppColors.loginInputHint,
-            fontSize: 14.5,
-            fontWeight: FontWeight.w400,
-          ),
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 15),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(28),
-            borderSide: BorderSide(
-              color: _errorMessage != null ? AppColors.safetyRed : AppColors.loginInputBorder,
-              width: 1.2,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(28),
-            borderSide: const BorderSide(
-              color: AppColors.loginBrandPurple,
-              width: 1.6,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildContinueButton() {
-    return SizedBox(
-      height: 52,
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _handleContinue,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.loginBrandPurple,
-          disabledBackgroundColor: AppColors.loginBrandPurple.withValues(alpha: 0.6),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(28),
-          ),
-          elevation: 0,
-        ),
-        child: _isLoading
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-            : const Text(
-                'Continue',
-                style: TextStyle(
-                  fontSize: 16.5,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  letterSpacing: -0.1,
-                ),
-              ),
-      ),
-    );
-  }
-
+  // Legal Disclaimer Footer
   Widget _buildFooterDisclaimer() {
     return Column(
       mainAxisSize: MainAxisSize.min,

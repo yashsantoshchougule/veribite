@@ -7,8 +7,8 @@ import 'package:mobile_app/features/auth/presentation/widgets/login_feature_chip
 import 'package:mobile_app/main.dart';
 
 void main() {
-  group('LoginScreen Visual & Component Tests', () {
-    testWidgets('renders all headers, chips, actions, and disclaimer correctly', (tester) async {
+  group('LoginScreen Visual & Value Chips Tests', () {
+    testWidgets('renders full-bleed logo, 2 value chips, and excludes earn rewards', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: LoginScreen(),
@@ -19,114 +19,236 @@ void main() {
       expect(find.text('Join 1 million+ smart consumers'), findsOneWidget);
       expect(find.text('Scan smarter. Choose wiser.'), findsOneWidget);
 
-      // Verify Value Proposition Chips
-      expect(find.byType(LoginFeatureChip), findsNWidgets(3));
+      // Verify Value Proposition Chips: exactly 2 chips
+      expect(find.byType(LoginFeatureChip), findsNWidgets(2));
       expect(find.text('Personalized insights'), findsOneWidget);
       expect(find.text('Instant results'), findsOneWidget);
-      expect(find.text('Earn rewards'), findsOneWidget);
+      expect(find.text('Earn rewards'), findsNothing);
 
-      // Verify Action Section
-      expect(find.text('Welcome to VeriBite'), findsOneWidget);
-      expect(find.text('Continue with Google'), findsOneWidget);
-      expect(find.byType(GoogleLogoIcon), findsOneWidget);
-      expect(find.text('Or'), findsOneWidget);
-      expect(find.text('Enter your Email/Phone'), findsOneWidget);
-      expect(find.text('Continue'), findsOneWidget);
-
-      // Verify Footer Disclaimer
-      expect(find.text('By continuing you agree to VeriBite'), findsOneWidget);
-      expect(find.text('Terms & Conditions'), findsOneWidget);
-      expect(find.text('Privacy Policy'), findsOneWidget);
-    });
-
-    testWidgets('triggers onGoogleSignIn when Google button is tapped', (tester) async {
-      bool googleTapped = false;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LoginScreen(
-            onGoogleSignIn: () {
-              googleTapped = true;
-            },
-          ),
-        ),
-      );
-
-      await tester.tap(find.text('Continue with Google'));
-      await tester.pumpAndSettle();
-
-      expect(googleTapped, isTrue);
-    });
-
-    testWidgets('shows validation error when continue is tapped with empty input', (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: LoginScreen(),
-        ),
-      );
-
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Please enter your email or phone number'), findsOneWidget);
-    });
-
-    testWidgets('shows validation error when continue is tapped with invalid input', (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: LoginScreen(),
-        ),
-      );
-
-      await tester.enterText(find.byType(TextField), 'invalidinput');
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Enter a valid email address or 10-digit mobile number'), findsOneWidget);
-    });
-
-    testWidgets('succeeds with valid email address', (tester) async {
-      String? submittedCredential;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LoginScreen(
-            onContinueWithCredential: (val) {
-              submittedCredential = val;
-            },
-          ),
-        ),
-      );
-
-      await tester.enterText(find.byType(TextField), 'tester@veribite.app');
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-
-      expect(submittedCredential, equals('tester@veribite.app'));
-    });
-
-    testWidgets('succeeds with valid 10-digit phone number', (tester) async {
-      String? submittedCredential;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LoginScreen(
-            onContinueWithCredential: (val) {
-              submittedCredential = val;
-            },
-          ),
-        ),
-      );
-
-      await tester.enterText(find.byType(TextField), '9876543210');
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-
-      expect(submittedCredential, equals('9876543210'));
+      // Verify Dual Tab Switcher
+      expect(find.text('Login'), findsWidgets);
+      expect(find.text('Sign In'), findsWidgets);
     });
   });
 
-  group('LoginScreen Responsive Layout Tests', () {
+  group('Login Section Tests (2 Fields + Forgot Password)', () {
+    testWidgets('renders Username, Password, Forgot Password, and Google options', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      expect(find.text('Username'), findsOneWidget);
+      expect(find.text('Password'), findsOneWidget);
+      expect(find.text('Forgot Password?'), findsOneWidget);
+      expect(find.text('Continue with Google'), findsOneWidget);
+      expect(find.text('Create new account'), findsOneWidget);
+    });
+
+    testWidgets('shows validation error for empty login fields', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      // Find the Login action button and tap it
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Login'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Please enter your username or email'), findsOneWidget);
+    });
+
+    testWidgets('successful login submission invokes onLoginSubmit callback', (tester) async {
+      String? submittedUser;
+      String? submittedPass;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            onLoginSubmit: (u, p) {
+              submittedUser = u;
+              submittedPass = p;
+            },
+          ),
+        ),
+      );
+
+      await tester.enterText(find.widgetWithText(TextField, 'Username'), 'veribite_user');
+      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'secret123');
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Login'));
+      await tester.pumpAndSettle();
+
+      expect(submittedUser, equals('veribite_user'));
+      expect(submittedPass, equals('secret123'));
+    });
+
+    testWidgets('tapping Forgot Password opens reset sheet and sends Gmail reset link', (tester) async {
+      String? sentEmail;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            onForgotPassword: (email) {
+              sentEmail = email;
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Forgot Password?'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reset Password'), findsOneWidget);
+      expect(find.text('Enter your Gmail address'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Enter your Gmail address'), 'user@gmail.com');
+      await tester.tap(find.text('Send Reset Link via Gmail'));
+      await tester.pumpAndSettle();
+
+      expect(sentEmail, equals('user@gmail.com'));
+      expect(find.text('Password reset link sent to user@gmail.com'), findsOneWidget);
+    });
+  });
+
+  group('Sign-In (Registration) Section Tests (5 Fields)', () {
+    testWidgets('tapping Create new account shifts to Sign In section with 5 fields', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      // Scroll and tap "Create new account" to shift to Sign In tab
+      await tester.ensureVisible(find.text('Create new account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create new account'));
+      await tester.pumpAndSettle();
+
+      // Check all 5 fields
+      expect(find.text('Full Name'), findsOneWidget);
+      expect(find.text('Username to set'), findsOneWidget);
+      expect(find.text('Gmail Address'), findsOneWidget);
+      expect(find.text('Password'), findsOneWidget);
+      expect(find.text('Confirm Password'), findsOneWidget);
+      expect(find.widgetWithText(ElevatedButton, 'Sign In'), findsOneWidget);
+      expect(find.text('Already have an account? '), findsOneWidget);
+      expect(find.text('Continue with Google'), findsOneWidget);
+    });
+
+    testWidgets('validates matching passwords in Sign In section', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      // Switch to Sign In tab
+      await tester.tap(find.text('Sign In').first);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Full Name'), 'John Doe');
+      await tester.enterText(find.widgetWithText(TextField, 'Username to set'), 'johndoe');
+      await tester.enterText(find.widgetWithText(TextField, 'Gmail Address'), 'johndoe@gmail.com');
+      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'pass1234');
+      await tester.enterText(find.widgetWithText(TextField, 'Confirm Password'), 'mismatch');
+
+      await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'Sign In'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Sign In'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Passwords do not match'), findsOneWidget);
+    });
+
+    testWidgets('successful sign-in submits all 5 fields', (tester) async {
+      String? capturedName;
+      String? capturedUsername;
+      String? capturedEmail;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            onSignInSubmit: (n, u, e, p) {
+              capturedName = n;
+              capturedUsername = u;
+              capturedEmail = e;
+            },
+          ),
+        ),
+      );
+
+      // Switch to Sign In tab
+      await tester.tap(find.text('Sign In').first);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Full Name'), 'John Doe');
+      await tester.enterText(find.widgetWithText(TextField, 'Username to set'), 'johndoe');
+      await tester.enterText(find.widgetWithText(TextField, 'Gmail Address'), 'johndoe@gmail.com');
+      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'secure123');
+      await tester.enterText(find.widgetWithText(TextField, 'Confirm Password'), 'secure123');
+
+      await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'Sign In'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Sign In'));
+      await tester.pumpAndSettle();
+
+      expect(capturedName, equals('John Doe'));
+      expect(capturedUsername, equals('johndoe'));
+      expect(capturedEmail, equals('johndoe@gmail.com'));
+    });
+
+    testWidgets('tapping Already have an account? shifts back to Login section', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      // Go to Sign In
+      await tester.ensureVisible(find.text('Create new account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create new account'));
+      await tester.pumpAndSettle();
+      expect(find.text('Full Name'), findsOneWidget);
+
+      // Tap Login link to return
+      await tester.ensureVisible(find.text('Login').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Login').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Full Name'), findsNothing);
+      expect(find.text('Forgot Password?'), findsOneWidget);
+    });
+  });
+
+  group('Swipe Gesture & Responsive Layout Tests', () {
+    testWidgets('swiping horizontally transitions between Login and Sign In', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      expect(find.text('Forgot Password?'), findsOneWidget);
+
+      // Swipe Left on the auth area -> Moves to Sign In
+      await tester.drag(find.text('Welcome to VeriBite'), const Offset(-300, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Full Name'), findsOneWidget);
+
+      // Swipe Right -> Moves back to Login
+      await tester.drag(find.text('Welcome to VeriBite'), const Offset(300, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Forgot Password?'), findsOneWidget);
+    });
+
     testWidgets('renders cleanly on Small Compact Phone (320x568) without overflow', (tester) async {
       tester.view.physicalSize = const Size(320, 568);
       tester.view.devicePixelRatio = 1.0;
@@ -140,7 +262,7 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Welcome to VeriBite'), findsOneWidget);
-      expect(find.text('Continue'), findsOneWidget);
+      expect(find.widgetWithText(ElevatedButton, 'Login'), findsOneWidget);
     });
 
     testWidgets('renders cleanly on Standard Phone (390x844) without overflow', (tester) async {
