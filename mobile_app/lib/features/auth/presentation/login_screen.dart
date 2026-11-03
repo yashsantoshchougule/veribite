@@ -7,7 +7,7 @@ import 'widgets/login_feature_chip.dart';
 /// Production-ready VeriBite Authentication Screen supporting dual sliding
 /// sections: Login (2 fields + forgot password) and Sign-In (5 fields).
 /// Styled in the Warm Luxury Alabaster & Midnight Obsidian editorial aesthetic
-/// identical to the starter walkthrough pages.
+/// with butter-smooth sliding transitions and synchronized tab pill navigation.
 class LoginScreen extends StatefulWidget {
   final VoidCallback? onGoogleSignIn;
   final ValueChanged<String>? onContinueWithCredential;
@@ -30,10 +30,14 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   // Active Tab: 0 = Login, 1 = Sign In
   int _activeTabIndex = 0;
   double _horizontalDragAccumulator = 0;
+
+  // Animation controller for butter-smooth sliding transitions
+  late final AnimationController _slideController;
+  late final Animation<double> _slideAnimation;
 
   // Login Form Controllers
   final TextEditingController _loginUsernameController = TextEditingController();
@@ -54,7 +58,21 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _slideAnimation = CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeInOutCubic,
+    );
+  }
+
+  @override
   void dispose() {
+    _slideController.dispose();
     _loginUsernameController.dispose();
     _loginPasswordController.dispose();
     _signNameController.dispose();
@@ -72,6 +90,11 @@ class _LoginScreenState extends State<LoginScreen> {
         _loginErrorMessage = null;
         _signErrorMessage = null;
       });
+      if (index == 1) {
+        _slideController.forward();
+      } else {
+        _slideController.reverse();
+      }
     }
   }
 
@@ -376,42 +399,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
                         const SizedBox(height: 18),
 
-                        // Animated Dual Tab Selector [ Login | Sign In ]
+                        // Animated Dual Tab Selector [ Login | Sign In ] with Sliding Indicator
                         _buildTabSelector(),
 
                         const SizedBox(height: 22),
 
-                        // Directional Animated Switcher between Login & Sign-In
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 280),
-                          transitionBuilder: (child, animation) {
-                            final isSignIn = child.key == const ValueKey('signin_section');
-                            final inOffset = isSignIn
-                                ? const Offset(0.25, 0.0)
-                                : const Offset(-0.25, 0.0);
+                        // Butter-Smooth Sliding Form Carousel
+                        _buildSlidingFormArea(),
 
-                            return SlideTransition(
-                              position: Tween<Offset>(
-                                begin: inOffset,
-                                end: Offset.zero,
-                              ).animate(
-                                CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                ),
-                              ),
-                              child: FadeTransition(
-                                opacity: animation,
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: _activeTabIndex == 0
-                              ? _buildLoginSection()
-                              : _buildSignInSection(),
-                        ),
-
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 28),
 
                         // Legal Terms & Privacy Footer
                         _buildFooterDisclaimer(),
@@ -545,7 +541,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Tab bar switcher [ Login | Sign In ] matching starter step pill styling
+  // Tab bar switcher [ Login | Sign In ] with physically sliding Midnight Obsidian indicator
   Widget _buildTabSelector() {
     return Container(
       height: 48,
@@ -555,84 +551,158 @@ class _LoginScreenState extends State<LoginScreen> {
         border: Border.all(color: AppColors.stepPillBorder, width: 1.2),
       ),
       padding: const EdgeInsets.all(4),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _switchToTab(0),
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeInOut,
-                decoration: BoxDecoration(
-                  color: _activeTabIndex == 0 ? AppColors.primaryObsidian : Colors.transparent,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: _activeTabIndex == 0
-                      ? [
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = (constraints.maxWidth - 4) / 2;
+          return Stack(
+            children: [
+              // Gliding Midnight Obsidian pill indicator
+              AnimatedBuilder(
+                animation: _slideAnimation,
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(_slideAnimation.value * tabWidth, 0),
+                    child: Container(
+                      width: tabWidth,
+                      height: constraints.maxHeight,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryObsidian,
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
+                            color: Colors.black.withValues(alpha: 0.14),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
-                        ]
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    'Login',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: _activeTabIndex == 0 ? FontWeight.w700 : FontWeight.w500,
-                      color: _activeTabIndex == 0
-                          ? Colors.white
-                          : AppColors.textMutedMocha,
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              // Tab text labels and click handlers
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _switchToTab(0),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        alignment: Alignment.center,
+                        child: AnimatedBuilder(
+                          animation: _slideAnimation,
+                          builder: (context, child) {
+                            final isLoginActive = _slideAnimation.value < 0.5;
+                            return FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Login',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: isLoginActive ? FontWeight.w700 : FontWeight.w500,
+                                  color: Color.lerp(
+                                    Colors.white,
+                                    AppColors.textMutedMocha,
+                                    _slideAnimation.value,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _switchToTab(1),
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeInOut,
-                decoration: BoxDecoration(
-                  color: _activeTabIndex == 1 ? AppColors.primaryObsidian : Colors.transparent,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: _activeTabIndex == 1
-                      ? [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    'Sign In',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: _activeTabIndex == 1 ? FontWeight.w700 : FontWeight.w500,
-                      color: _activeTabIndex == 1
-                          ? Colors.white
-                          : AppColors.textMutedMocha,
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _switchToTab(1),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        alignment: Alignment.center,
+                        child: AnimatedBuilder(
+                          animation: _slideAnimation,
+                          builder: (context, child) {
+                            final isSignInActive = _slideAnimation.value >= 0.5;
+                            return FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Sign In',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: isSignInActive ? FontWeight.w700 : FontWeight.w500,
+                                  color: Color.lerp(
+                                    AppColors.textMutedMocha,
+                                    Colors.white,
+                                    _slideAnimation.value,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  // Butter-Smooth Sliding Form Area with synchronized height interpolation
+  Widget _buildSlidingFormArea() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return AnimatedBuilder(
+          animation: _slideAnimation,
+          builder: (context, child) {
+            // Smoothly interpolate card height between Login (~420px) and Sign In (~580px)
+            final currentHeight = 420.0 + (580.0 - 420.0) * _slideAnimation.value;
+
+            return SizedBox(
+              height: currentHeight,
+              child: ClipRect(
+                child: Stack(
+                  children: [
+                    // Login Form: slides smoothly to the left
+                    Transform.translate(
+                      offset: Offset(-_slideAnimation.value * width, 0),
+                      child: Opacity(
+                        opacity: (1.0 - _slideAnimation.value * 1.5).clamp(0.0, 1.0),
+                        child: IgnorePointer(
+                          ignoring: _slideAnimation.value > 0.5,
+                          child: SizedBox(
+                            width: width,
+                            child: _buildLoginSection(),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Sign In Form: slides smoothly in from the right
+                    Transform.translate(
+                      offset: Offset((1.0 - _slideAnimation.value) * width, 0),
+                      child: Opacity(
+                        opacity: (_slideAnimation.value * 1.5 - 0.5).clamp(0.0, 1.0),
+                        child: IgnorePointer(
+                          ignoring: _slideAnimation.value <= 0.5,
+                          child: SizedBox(
+                            width: width,
+                            child: _buildSignInSection(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
