@@ -6,15 +6,21 @@ import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../profile/presentation/user_details_screen.dart';
+import '../application/home_dashboard_service.dart';
+import '../domain/home_dashboard_data.dart';
 
 /// Page 4: Home Dashboard
 /// Central command hub for VeriBite Safe Consumption Scanner.
 class HomeScreen extends StatefulWidget {
   final String userId;
+  final HomeDashboardService? dashboardService;
+  final UserProfileService? profileService;
 
   const HomeScreen({
     super.key,
     this.userId = 'local_user',
+    this.dashboardService,
+    this.profileService,
   });
 
   @override
@@ -22,20 +28,30 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  late final HomeDashboardService _dashboardService;
+  late final UserProfileService _profileService;
+
   UserProfileModel? _profile;
+  HomeDashboardData? _dashboardData;
+  bool _isLoading = true;
   int _currentBottomNavIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _dashboardService = widget.dashboardService ?? HomeDashboardService();
+    _profileService = widget.profileService ?? UserProfileService();
+    _loadAllData();
   }
 
-  Future<void> _loadProfile() async {
-    final profile = await UserProfileService().getProfile(widget.userId);
+  Future<void> _loadAllData() async {
+    final profile = await _profileService.getProfile(widget.userId) ?? UserProfileModel.defaults(widget.userId);
+    final data = await _dashboardService.getDashboardData(widget.userId, profile);
     if (mounted) {
       setState(() {
-        _profile = profile ?? UserProfileModel.defaults(widget.userId);
+        _profile = profile;
+        _dashboardData = data;
+        _isLoading = false;
       });
     }
   }
@@ -45,7 +61,9 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => const SmartCameraScreen(),
       ),
-    );
+    ).then((_) {
+      _loadAllData();
+    });
   }
 
   void _openProfile() {
@@ -53,10 +71,11 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => ProfileScreen(
           userId: widget.userId,
+          profileService: _profileService,
         ),
       ),
     ).then((_) {
-      _loadProfile();
+      _loadAllData();
     });
   }
 
@@ -337,10 +356,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDailyBudgetMeter() {
-    // Current daily consumption metrics (WHO 25g limit)
-    const double consumedSugarGrams = 4.2;
-    const double maxSugarGrams = 25.0;
-    const double percentUsed = (consumedSugarGrams / maxSugarGrams);
+    final consumedSugarGrams = _dashboardData?.consumedSugarGrams ?? 0.0;
+    final maxSugarGrams = _dashboardData?.maxSugarGrams ?? (_profile?.isDiabetic == true ? 10.0 : 25.0);
+    final percentUsed = (consumedSugarGrams / (maxSugarGrams > 0 ? maxSugarGrams : 25.0)).clamp(0.0, 1.5);
+    final redAdditives = _dashboardData?.redAdditivesToday ?? 0;
+    final isExceeded = consumedSugarGrams > maxSugarGrams;
+
+    Color progressColor = AppColors.safetyGreen;
+    if (percentUsed >= 1.0) {
+      progressColor = AppColors.safetyRed;
+    } else if (percentUsed >= 0.75) {
+      progressColor = AppColors.safetyAmber;
+    }
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -388,15 +415,15 @@ class _HomeScreenState extends State<HomeScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.safetyGreen.withValues(alpha: 0.12),
+                  color: (isExceeded ? AppColors.safetyRed : AppColors.safetyGreen).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
-                  'WHO Safe',
+                child: Text(
+                  isExceeded ? 'Exceeded ⚠️' : 'WHO Safe',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.safetyGreen,
+                    color: isExceeded ? AppColors.safetyRed : AppColors.safetyGreen,
                   ),
                 ),
               ),
@@ -442,21 +469,27 @@ class _HomeScreenState extends State<HomeScreen> {
               value: percentUsed,
               minHeight: 8,
               backgroundColor: AppColors.stepPillBorder,
-              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.safetyGreen),
+              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
             ),
           ),
           const SizedBox(height: 10),
-          const Row(
+          Row(
             children: [
-              Icon(Icons.shield_outlined, size: 14, color: AppColors.safetyGreen),
-              SizedBox(width: 6),
+              Icon(
+                redAdditives == 0 ? Icons.shield_outlined : Icons.warning_amber_rounded,
+                size: 14,
+                color: redAdditives == 0 ? AppColors.safetyGreen : AppColors.safetyRed,
+              ),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '0 Red-tier chemical additives consumed today. All safe.',
+                  redAdditives == 0
+                      ? '0 Red-tier chemical additives consumed today. All safe.'
+                      : '⚠️ $redAdditives Red-tier chemical additive(s) consumed today!',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.textMutedMocha,
+                    color: redAdditives == 0 ? AppColors.textMutedMocha : AppColors.safetyRed,
                   ),
                 ),
               ),
@@ -468,29 +501,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildRecentScansSection() {
-    final recentProducts = [
-      {
-        'title': 'Britannia Bourbon',
-        'score': 28,
-        'tag': 'Capped 🔴',
-        'safePortion': '2 Biscuits',
-        'color': AppColors.safetyRed,
-      },
-      {
-        'title': 'Real Mixed Fruit',
-        'score': 38,
-        'tag': 'Free Sugar 🟠',
-        'safePortion': '80 ml',
-        'color': AppColors.safetyAmber,
-      },
-      {
-        'title': 'Yoga Bar Muesli',
-        'score': 78,
-        'tag': 'Nutri Safe 🟢',
-        'safePortion': '1 Serving',
-        'color': AppColors.safetyGreen,
-      },
-    ];
+    final isUserHistory = _dashboardData?.isUserHistory ?? false;
+    final products = _dashboardData?.recentProducts ?? [];
+    final sectionTitle = isUserHistory ? 'Recent Scans' : 'Featured Database Products';
+    final actionLabel = isUserHistory ? 'Scan New +' : 'Scan Product +';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -498,13 +512,13 @@ class _HomeScreenState extends State<HomeScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Expanded(
+            Expanded(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Recent Scans',
-                  style: TextStyle(
+                  sectionTitle,
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textObsidian,
@@ -516,11 +530,11 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(width: 8),
             GestureDetector(
               onTap: _openCamera,
-              child: const FittedBox(
+              child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
-                  'Scan New +',
-                  style: TextStyle(
+                  actionLabel,
+                  style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.accentBronze,
@@ -531,75 +545,134 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 125,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: recentProducts.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, index) {
-              final prod = recentProducts[index];
-              return Container(
-                width: 160,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.cardSurface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: AppColors.cardBorder, width: 1.0),
+        if (products.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            decoration: BoxDecoration(
+              color: AppColors.cardSurface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.cardBorder, width: 1.0),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    color: AppColors.stepPillBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppColors.accentBronze),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Database Ready',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textObsidian,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Tap "Open Smart Camera" to analyze any packaged food label.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.textMutedMocha,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          SizedBox(
+            height: 125,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: products.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final prod = products[index];
+                return GestureDetector(
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('${prod.productName} • Health Score: ${prod.healthScore}/100'),
+                        backgroundColor: AppColors.primaryObsidian,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    width: 160,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardSurface,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: AppColors.cardBorder, width: 1.0),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: (prod['color'] as Color).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '${prod['score']}/100',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: prod['color'] as Color,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: prod.color.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${prod.healthScore}/100',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: prod.color,
+                                ),
+                              ),
                             ),
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 12,
+                              color: AppColors.cardBorder,
+                            ),
+                          ],
+                        ),
+                        Text(
+                          prod.productName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textObsidian,
                           ),
                         ),
-                        const Icon(
-                          Icons.arrow_forward_ios_rounded,
-                          size: 12,
-                          color: AppColors.cardBorder,
+                        Text(
+                          'Portion: ${prod.safePortion}',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.textMutedMocha,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
-                    Text(
-                      prod['title'] as String,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textObsidian,
-                      ),
-                    ),
-                    Text(
-                      'Max: ${prod['safePortion']}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.textMutedMocha,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }
