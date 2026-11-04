@@ -42,7 +42,7 @@ class HomeDashboardService {
     try {
       final client = _client;
       if (client == null) {
-        return _loadFromCache(userId, maxSugar, profile);
+        return await _loadFromCache(userId, maxSugar, profile);
       }
 
       // 1. Query user's scan history joined with products
@@ -53,7 +53,7 @@ class HomeDashboardService {
           .order('scanned_at', ascending: false)
           .limit(10);
 
-      final List<dynamic> historyRows = historyResponse is List ? historyResponse : [];
+      final List<dynamic> historyRows = historyResponse;
 
       double consumedSugar = 0.0;
       int redAdditivesCount = 0;
@@ -111,7 +111,7 @@ class HomeDashboardService {
           .select('*')
           .limit(5);
 
-      final List<dynamic> catalogRows = catalogResponse is List ? catalogResponse : [];
+      final List<dynamic> catalogRows = catalogResponse;
       final List<DashboardProductItem> featuredProducts = [];
 
       for (final row in catalogRows) {
@@ -209,3 +209,4 @@ class HomeDashboardService {
     }
   }
 }
+

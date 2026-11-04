@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../main.dart';
 import '../../auth/application/supabase_auth_service.dart';
-import '../../auth/presentation/login_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/user_profile_service.dart';
 import '../domain/user_profile_model.dart';

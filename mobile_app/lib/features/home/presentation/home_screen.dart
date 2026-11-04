@@ -5,7 +5,6 @@ import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
-import '../../profile/presentation/user_details_screen.dart';
 import '../application/home_dashboard_service.dart';
 import '../domain/home_dashboard_data.dart';
 
@@ -33,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   UserProfileModel? _profile;
   HomeDashboardData? _dashboardData;
-  bool _isLoading = true;
   int _currentBottomNavIndex = 0;
 
   @override
@@ -51,7 +49,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _profile = profile;
         _dashboardData = data;
-        _isLoading = false;
       });
     }
   }
