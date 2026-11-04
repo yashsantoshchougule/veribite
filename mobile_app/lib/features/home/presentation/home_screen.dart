@@ -52,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => UserDetailsScreen(
           userId: widget.userId,
+          isEditMode: true,
           onComplete: () {
             Navigator.of(context).pop();
             _loadProfile();

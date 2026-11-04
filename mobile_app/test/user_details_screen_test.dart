@@ -78,7 +78,10 @@ void main() {
       expect(find.textContaining('Child Hyperactivity Guard active'), findsNothing);
 
       // Tap Child / Teen
-      await tester.tap(find.text('Child / Teen'));
+      final childFinder = find.text('Child / Teen');
+      await tester.ensureVisible(childFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(childFinder);
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Child Hyperactivity Guard active'), findsOneWidget);
@@ -192,6 +195,48 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Tailor Your Safe Limits'), findsOneWidget);
       expect(find.text('Save & Open Scanner'), findsOneWidget);
+    });
+  });
+
+  group('UserDetailsScreen Edit Mode & Preset Tests', () {
+    testWidgets('renders Edit Safe Limits headline and Save Changes button in edit mode', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UserDetailsScreen(
+            userId: 'edit_mode_user',
+            isEditMode: true,
+            onComplete: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Safe Limits'), findsOneWidget);
+      expect(find.text('Save Changes'), findsOneWidget);
+      expect(find.text('Skip for now'), findsNothing);
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+    });
+
+    testWidgets('1-tap weight preset chips update weight value instantly', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UserDetailsScreen(
+            userId: 'preset_weight_user',
+            onComplete: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('65.0'), findsOneWidget);
+
+      // Tap 80 kg chip
+      final chip80 = find.text('80 kg');
+      expect(chip80, findsOneWidget);
+      await tester.tap(chip80);
+      await tester.pumpAndSettle();
+
+      expect(find.text('80.0'), findsOneWidget);
     });
   });
 }

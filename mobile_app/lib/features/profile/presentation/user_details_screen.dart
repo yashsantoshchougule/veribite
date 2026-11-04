@@ -12,12 +12,14 @@ class UserDetailsScreen extends StatefulWidget {
   final String userId;
   final VoidCallback onComplete;
   final UserProfileService? profileService;
+  final bool isEditMode;
 
   const UserDetailsScreen({
     super.key,
     required this.userId,
     required this.onComplete,
     this.profileService,
+    this.isEditMode = false,
   });
 
   @override
@@ -227,27 +229,37 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
           Expanded(
             child: Row(
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryObsidian,
-                    borderRadius: BorderRadius.circular(10),
+                if (widget.isEditMode) ...[
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.textObsidian),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
-                  child: const Icon(
-                    Icons.eco_rounded,
-                    color: Colors.white,
-                    size: 18,
+                  const SizedBox(width: 4),
+                ] else ...[
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryObsidian,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.eco_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                const Flexible(
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Personalize Limits',
-                      style: TextStyle(
+                      widget.isEditMode ? 'Edit Profile' : 'Personalize Limits',
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textObsidian,
@@ -259,25 +271,32 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
               ],
             ),
           ),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: TextButton(
-              onPressed: _isSaving ? null : _handleSkip,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Skip for now',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.accentBronze,
+          if (widget.isEditMode)
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMutedMocha),
+              onPressed: () => Navigator.of(context).maybePop(),
+              tooltip: 'Close',
+            )
+          else
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: TextButton(
+                onPressed: _isSaving ? null : _handleSkip,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Skip for now',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.accentBronze,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -294,9 +313,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.stepPillBorder, width: 1.0),
           ),
-          child: const Text(
-            'Step 1 of 1 • Health Baseline',
-            style: TextStyle(
+          child: Text(
+            widget.isEditMode ? 'PROFILE SETTINGS • EDIT CEILINGS' : 'Step 1 of 1 • Health Baseline',
+            style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
               color: AppColors.textObsidian,
@@ -305,9 +324,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Tailor Your Safe Limits',
-          style: TextStyle(
+        Text(
+          widget.isEditMode ? 'Edit Safe Limits' : 'Tailor Your Safe Limits',
+          style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w800,
             color: AppColors.textObsidian,
@@ -315,9 +334,11 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Safe daily sugar ceilings and chemical intake portions are calculated directly from your body weight and health needs.',
-          style: TextStyle(
+        Text(
+          widget.isEditMode
+              ? 'Update your body weight or dietary guardrails. Changes take effect instantly across all barcode scans.'
+              : 'Safe daily sugar ceilings and chemical intake portions are calculated directly from your body weight and health needs.',
+          style: const TextStyle(
             fontSize: 14,
             height: 1.4,
             color: AppColors.textMutedMocha,
@@ -446,6 +467,50 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                         : null,
                   ),
                 ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Quick 1-tap preset chips for instant friction-free weight selection
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [50.0, 60.0, 70.0, 80.0].map((preset) {
+                  final isSelected = (_weightKg - preset).abs() < 0.5;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _weightKg = preset;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.primaryObsidian : AppColors.stepPillBg,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? AppColors.primaryObsidian : AppColors.stepPillBorder,
+                            width: 1.0,
+                          ),
+                        ),
+                        child: Text(
+                          '${preset.toInt()} kg',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                            color: isSelected ? Colors.white : AppColors.textObsidian,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ),
@@ -990,11 +1055,11 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                  : const FittedBox(
+                  : FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        'Save & Open Scanner',
-                        style: TextStyle(
+                        widget.isEditMode ? 'Save Changes' : 'Save & Open Scanner',
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
@@ -1004,23 +1069,25 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                     ),
             ),
           ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            onTap: _isSaving ? null : _handleSkip,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Text(
-                'Skip for now & use standard defaults (65 kg Adult)',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textMutedMocha,
-                  decoration: TextDecoration.underline,
+          if (!widget.isEditMode) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: _isSaving ? null : _handleSkip,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  'Skip for now & use standard defaults (65 kg Adult)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textMutedMocha,
+                    decoration: TextDecoration.underline,
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

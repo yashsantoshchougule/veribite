@@ -54,9 +54,16 @@ class UserProfileService {
       } catch (_) {}
     }
 
-    // 3. Check Supabase cloud if online
+    // 3. Check Supabase cloud if online (handles cross-device login for same Gmail)
     final client = _client;
     if (client != null && client.auth.currentUser?.id == userId) {
+      final userMetadata = client.auth.currentUser?.userMetadata;
+      if (userMetadata != null &&
+          (userMetadata['profile_completed'] == true ||
+           userMetadata['is_completed'] == true)) {
+        return true;
+      }
+
       try {
         final res = await client
             .from('user_profiles')
@@ -144,8 +151,16 @@ class UserProfileService {
           'is_child': profile.isChild,
           'is_diabetic': profile.isDiabetic,
           'is_hypertensive': profile.isHypertensive,
+          'is_completed': profile.isCompleted,
           'updated_at': DateTime.now().toIso8601String(),
         }, onConflict: 'device_id');
+
+        // When saved, mark profile_completed on user metadata for cross-device sync
+        if (profile.isCompleted) {
+          await client.auth.updateUser(
+            UserAttributes(data: {'profile_completed': true}),
+          );
+        }
       } catch (e) {
         debugPrint('Supabase cloud profile upsert notice (offline fallback preserved): $e');
       }
