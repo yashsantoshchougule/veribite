@@ -77,6 +77,8 @@ class ScannerApp extends StatelessWidget {
     }
   }
 
+  static Widget buildLoginScreen(BuildContext context) => AppStartupGate.buildLoginScreen(context);
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -161,7 +163,7 @@ class AppStartupGate extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.data == true) {
           // Already completed starter walkthrough once -> directly open LoginScreen
-          return _buildLoginScreen(context);
+          return buildLoginScreen(context);
         } else {
           // 1st time opening app or fresh install -> show Starter Walkthrough
           return _buildWalkthrough(context);
@@ -178,14 +180,14 @@ class AppStartupGate extends StatelessWidget {
 
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (ctx) => _buildLoginScreen(ctx),
+            builder: (ctx) => buildLoginScreen(ctx),
           ),
         );
       },
     );
   }
 
-  static Widget _buildLoginScreen(BuildContext context) {
+  static Widget buildLoginScreen(BuildContext context) {
     return LoginScreen(
       onLoginSubmit: (usernameOrEmail, password) async {
         try {

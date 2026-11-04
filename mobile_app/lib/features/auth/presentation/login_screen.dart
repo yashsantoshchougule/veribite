@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../application/supabase_auth_service.dart';
 import 'widgets/google_logo_icon.dart';
 import 'widgets/login_feature_chip.dart';
 
@@ -56,6 +57,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   String? _signErrorMessage;
 
   bool _isLoading = false;
+  bool _isGoogleSigningIn = false;
 
   @override
   void initState() {
@@ -335,16 +337,51 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  void _handleGoogleSignIn() {
-    if (widget.onGoogleSignIn != null) {
-      widget.onGoogleSignIn!();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Connecting with Google...'),
-          backgroundColor: AppColors.primaryObsidian,
-        ),
-      );
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isGoogleSigningIn = true);
+    try {
+      if (widget.onGoogleSignIn != null) {
+        widget.onGoogleSignIn!();
+      } else {
+        final authService = SupabaseAuthService();
+        if (authService.isAvailable) {
+          final launched = await authService.signInWithGoogle();
+          if (!launched && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not open Google sign-in. Please check your browser.'),
+                backgroundColor: AppColors.safetyRed,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            if (widget.onContinueWithCredential != null) {
+              widget.onContinueWithCredential!('demo_google_user');
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Supabase Cloud is not configured.'),
+                  backgroundColor: AppColors.safetyAmber,
+                ),
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Google Sign-In notice: $e'),
+            backgroundColor: AppColors.safetyRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isGoogleSigningIn = false);
+      }
     }
   }
 
@@ -1150,7 +1187,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       height: 52,
       width: double.infinity,
       child: OutlinedButton(
-        onPressed: _handleGoogleSignIn,
+        onPressed: _isGoogleSigningIn ? null : _handleGoogleSignIn,
         style: OutlinedButton.styleFrom(
           backgroundColor: AppColors.cardSurface,
           side: const BorderSide(
@@ -1163,24 +1200,48 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           ),
           elevation: 0,
         ),
-        child: const FittedBox(
+        child: FittedBox(
           fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GoogleLogoIcon(size: 20),
-              SizedBox(width: 10),
-              Text(
-                'Continue with Google',
-                style: TextStyle(
-                  fontSize: 15.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textObsidian,
-                  letterSpacing: -0.2,
+          child: _isGoogleSigningIn
+              ? const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.accentBronze),
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Connecting to Google...',
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textObsidian,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ],
+                )
+              : const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GoogleLogoIcon(size: 20),
+                    SizedBox(width: 10),
+                    Text(
+                      'Continue with Google',
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textObsidian,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
         ),
       ),
     );

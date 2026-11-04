@@ -114,6 +114,7 @@ class SupabaseAuthService {
       final success = await client.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: kIsWeb ? null : 'io.supabase.veribite://login-callback/',
+        authScreenLaunchMode: LaunchMode.externalApplication,
       );
       return success;
     } on AuthException {
