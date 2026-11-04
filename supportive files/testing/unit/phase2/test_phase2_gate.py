@@ -3,8 +3,11 @@ import sqlite3
 import time
 from pathlib import Path
 
+def _get_workspace():
+    return next(p for p in Path(__file__).resolve().parents if (p / "mobile_app").is_dir())
+
 def test_phase_2_master_release_gate():
-    workspace = Path(__file__).resolve().parents[3]
+    workspace = _get_workspace()
     master_db = workspace / "data_pipeline" / "toxicology_master.db"
     bundled_db = workspace / "mobile_app" / "assets" / "db" / "toxicology_master.db"
     

@@ -65,6 +65,8 @@ class AppColors {
   static const Color loginGoogleBorder = Color(0xFFE5E7EB);  // Google Button Outline Border
 
   // Backward-Compatible Aliases
+  static const Color safetyGreen = safetyMint;
+  static const Color safetyAmber = sugarPeachText;
   static const Color primaryPurple = primaryObsidian;
   static const Color darkPurple = textObsidian;
   static const Color lightPurple = stepPillBg;

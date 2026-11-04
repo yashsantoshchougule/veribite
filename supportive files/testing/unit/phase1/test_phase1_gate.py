@@ -2,12 +2,16 @@
 from pathlib import Path
 from fastapi.testclient import TestClient
 
+def _get_workspace():
+    return next(p for p in Path(__file__).resolve().parents if (p / "mobile_app").is_dir())
+
 def test_phase_1_full_toolchain_gate():
-    workspace = Path(__file__).resolve().parents[3]
+    workspace = _get_workspace()
     
     # 1. Monorepo core directories
-    for d in ["data_pipeline", "backend", "mobile_app", "testing"]:
+    for d in ["data_pipeline", "backend", "mobile_app"]:
         assert (workspace / d).is_dir(), f"Missing core dir: {d}"
+    assert (workspace / "testing").is_dir() or (workspace / "supportive files" / "testing").is_dir()
         
     # 2. Backend health endpoint contract
     from backend.main import app

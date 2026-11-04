@@ -2,8 +2,11 @@
 from pathlib import Path
 import yaml
 
+def _get_workspace():
+    return next(p for p in Path(__file__).resolve().parents if (p / "mobile_app").is_dir())
+
 def test_flutter_pubspec_contains_all_blueprint_dependencies():
-    workspace = Path(__file__).resolve().parents[3]
+    workspace = _get_workspace()
     pubspec_path = workspace / "mobile_app" / "pubspec.yaml"
     assert pubspec_path.is_file(), "mobile_app/pubspec.yaml not found"
     
@@ -29,7 +32,7 @@ def test_flutter_pubspec_contains_all_blueprint_dependencies():
         assert pkg in deps, f"Required dependency missing from pubspec.yaml: {pkg}"
 
 def test_flutter_main_entry_scaffold_exists():
-    workspace = Path(__file__).resolve().parents[3]
+    workspace = _get_workspace()
     main_dart = workspace / "mobile_app" / "lib" / "main.dart"
     assert main_dart.is_file(), "mobile_app/lib/main.dart not found"
     content = main_dart.read_text(encoding="utf-8")

@@ -5,7 +5,7 @@ import 'core/config/supabase_config.dart';
 import 'core/theme/app_colors.dart';
 import 'features/auth/application/supabase_auth_service.dart';
 import 'features/auth/presentation/login_screen.dart';
-import 'features/camera/presentation/smart_camera_screen.dart';
+import 'features/home/presentation/home_screen.dart';
 import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
 import 'features/profile/application/user_profile_service.dart';
 import 'features/profile/presentation/user_details_screen.dart';
@@ -41,7 +41,7 @@ class ScannerApp extends StatelessWidget {
     if (hasCompleted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => const SmartCameraScreen(),
+          builder: (_) => HomeScreen(userId: uid),
         ),
       );
     } else {
@@ -53,7 +53,7 @@ class ScannerApp extends StatelessWidget {
               if (context.mounted) {
                 Navigator.of(context).pushReplacement(
                   MaterialPageRoute(
-                    builder: (_) => const SmartCameraScreen(),
+                    builder: (_) => HomeScreen(userId: uid),
                   ),
                 );
               }
