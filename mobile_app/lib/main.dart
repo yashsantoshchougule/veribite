@@ -10,6 +10,8 @@ import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
 import 'features/profile/application/user_profile_service.dart';
 import 'features/profile/presentation/user_details_screen.dart';
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -20,6 +22,16 @@ Future<void> main() async {
         url: SupabaseConfig.supabaseUrl,
         anonKey: SupabaseConfig.supabaseAnonKey,
       );
+
+      // Listen for OAuth deep link callback (Google Sign-In)
+      Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+        if (data.event == AuthChangeEvent.signedIn) {
+          final navContext = rootNavigatorKey.currentContext;
+          if (navContext != null) {
+            ScannerApp._navigatePostAuth(navContext, userId: data.session?.user.id);
+          }
+        }
+      });
     } catch (e) {
       debugPrint('Supabase initialization notice: $e');
     }
@@ -67,6 +79,7 @@ class ScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'VeriBite Safe Consumption Scanner',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
