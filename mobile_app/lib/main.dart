@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/supabase_config.dart';
 import 'core/theme/app_colors.dart';
@@ -92,51 +93,78 @@ class ScannerApp extends StatelessWidget {
   }
 }
 
-/// Dynamic Startup Gate: Handles Cold Boot Session Routing & Skip-Retry Lifecycle
+/// Dynamic Startup Gate: Handles Cold Boot Session Routing, Walkthrough 1-Time Display & Skip-Retry Lifecycle
 class AppStartupGate extends StatelessWidget {
   const AppStartupGate({super.key});
+
+  static Future<bool> _hasSeenWalkthrough() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool('veribite_has_seen_walkthrough') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> _markWalkthroughSeen() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('veribite_has_seen_walkthrough', true);
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final authService = SupabaseAuthService();
     final user = authService.currentUser;
 
-    // 1. If no user is logged in, boot to Starter Walkthrough
-    if (user == null) {
-      return _buildWalkthrough(context);
+    // 1. If user is logged in, evaluate profile completion lifecycle
+    if (user != null) {
+      return FutureBuilder<bool>(
+        future: UserProfileService().hasCompletedProfile(user.id),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              backgroundColor: AppColors.canvasCream,
+              body: Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryObsidian),
+                ),
+              ),
+            );
+          }
+
+          final hasCompleted = snapshot.data ?? false;
+          if (hasCompleted) {
+            // Profile previously filled and saved -> Straight to Dashboard
+            return HomeScreen(userId: user.id);
+          } else {
+            // User skipped previously and cut app -> Prompt User Details again until filled
+            return UserDetailsScreen(
+              userId: user.id,
+              onComplete: () {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => HomeScreen(userId: user.id),
+                  ),
+                );
+              },
+            );
+          }
+        },
+      );
     }
 
-    // 2. If authenticated session exists, evaluate profile completion lifecycle
+    // 2. User is NOT logged in: show Starter Walkthrough ONLY ONCE (on 1st install or reinstall)
     return FutureBuilder<bool>(
-      future: UserProfileService().hasCompletedProfile(user.id),
+      future: _hasSeenWalkthrough(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: AppColors.canvasCream,
-            body: Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryObsidian),
-              ),
-            ),
-          );
-        }
-
-        final hasCompleted = snapshot.data ?? false;
-        if (hasCompleted) {
-          // Profile previously filled and saved -> Straight to Dashboard
-          return HomeScreen(userId: user.id);
+        if (snapshot.data == true) {
+          // Already completed starter walkthrough once -> directly open LoginScreen
+          return _buildLoginScreen(context);
         } else {
-          // User skipped previously and cut app -> Prompt User Details again until filled
-          return UserDetailsScreen(
-            userId: user.id,
-            onComplete: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => HomeScreen(userId: user.id),
-                ),
-              );
-            },
-          );
+          // 1st time opening app or fresh install -> show Starter Walkthrough
+          return _buildWalkthrough(context);
         }
       },
     );
@@ -145,124 +173,131 @@ class AppStartupGate extends StatelessWidget {
   static Widget _buildWalkthrough(BuildContext context) {
     return StarterWalkthroughScreen(
       onFinish: () {
+        // Mark walkthrough as seen permanently for this installation
+        _markWalkthroughSeen();
+
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => LoginScreen(
-              onLoginSubmit: (usernameOrEmail, password) async {
-                try {
-                  final authService = SupabaseAuthService();
-                  String? uid;
-                  if (authService.isAvailable) {
-                    final res = await authService.signInWithEmail(
-                      email: usernameOrEmail,
-                      password: password,
-                    );
-                    uid = res.user?.id;
-                  }
-                  if (context.mounted) {
-                    await ScannerApp._navigatePostAuth(context, userId: uid);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          e is AuthException ? e.message : 'Login failed: $e',
-                        ),
-                        backgroundColor: AppColors.safetyRed,
-                      ),
-                    );
-                  }
-                }
-              },
-              onSignInSubmit: (name, username, email, password) async {
-                try {
-                  final authService = SupabaseAuthService();
-                  String? uid;
-                  if (authService.isAvailable) {
-                    final res = await authService.signUp(
-                      fullName: name,
-                      username: username,
-                      email: email,
-                      password: password,
-                    );
-                    if (context.mounted) {
-                      if (res.session == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Registration successful! Please check your Gmail to confirm your account.',
-                            ),
-                            backgroundColor: AppColors.loginBrandPurple,
-                          ),
-                        );
-                        return;
-                      }
-                    }
-                    uid = res.user?.id;
-                  }
-                  if (context.mounted) {
-                    await ScannerApp._navigatePostAuth(context, userId: uid);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          e is AuthException ? e.message : 'Registration failed: $e',
-                        ),
-                        backgroundColor: AppColors.safetyRed,
-                      ),
-                    );
-                  }
-                }
-              },
-              onForgotPassword: (email) async {
-                try {
-                  final authService = SupabaseAuthService();
-                  if (authService.isAvailable) {
-                    await authService.resetPasswordForEmail(email);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          e is AuthException ? e.message : 'Reset failed: $e',
-                        ),
-                        backgroundColor: AppColors.safetyRed,
-                      ),
-                    );
-                  }
-                }
-              },
-              onGoogleSignIn: () async {
-                try {
-                  final authService = SupabaseAuthService();
-                  if (authService.isAvailable) {
-                    await authService.signInWithGoogle();
-                  } else {
-                    if (context.mounted) {
-                      await ScannerApp._navigatePostAuth(context);
-                    }
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Google Sign-In notice: $e'),
-                        backgroundColor: AppColors.loginBrandPurple,
-                      ),
-                    );
-                  }
-                }
-              },
-              onContinueWithCredential: (credential) async {
-                await ScannerApp._navigatePostAuth(context);
-              },
-            ),
+            builder: (ctx) => _buildLoginScreen(ctx),
           ),
         );
+      },
+    );
+  }
+
+  static Widget _buildLoginScreen(BuildContext context) {
+    return LoginScreen(
+      onLoginSubmit: (usernameOrEmail, password) async {
+        try {
+          final authService = SupabaseAuthService();
+          String? uid;
+          if (authService.isAvailable) {
+            final res = await authService.signInWithEmail(
+              email: usernameOrEmail,
+              password: password,
+            );
+            uid = res.user?.id;
+          }
+          if (context.mounted) {
+            await ScannerApp._navigatePostAuth(context, userId: uid);
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  e is AuthException ? e.message : 'Login failed: $e',
+                ),
+                backgroundColor: AppColors.safetyRed,
+              ),
+            );
+          }
+        }
+      },
+      onSignInSubmit: (name, username, email, password) async {
+        try {
+          final authService = SupabaseAuthService();
+          String? uid;
+          if (authService.isAvailable) {
+            final res = await authService.signUp(
+              fullName: name,
+              username: username,
+              email: email,
+              password: password,
+            );
+            if (context.mounted) {
+              if (res.session == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Registration successful! Please check your Gmail to confirm your account.',
+                    ),
+                    backgroundColor: AppColors.loginBrandPurple,
+                  ),
+                );
+                return;
+              }
+            }
+            uid = res.user?.id;
+          }
+          if (context.mounted) {
+            await ScannerApp._navigatePostAuth(context, userId: uid);
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  e is AuthException ? e.message : 'Registration failed: $e',
+                ),
+                backgroundColor: AppColors.safetyRed,
+              ),
+            );
+          }
+        }
+      },
+      onForgotPassword: (email) async {
+        try {
+          final authService = SupabaseAuthService();
+          if (authService.isAvailable) {
+            await authService.resetPasswordForEmail(email);
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  e is AuthException ? e.message : 'Reset failed: $e',
+                ),
+                backgroundColor: AppColors.safetyRed,
+              ),
+            );
+          }
+        }
+      },
+      onGoogleSignIn: () async {
+        try {
+          final authService = SupabaseAuthService();
+          if (authService.isAvailable) {
+            await authService.signInWithGoogle();
+          } else {
+            if (context.mounted) {
+              await ScannerApp._navigatePostAuth(context);
+            }
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Google Sign-In notice: $e'),
+                backgroundColor: AppColors.loginBrandPurple,
+              ),
+            );
+          }
+        }
+      },
+      onContinueWithCredential: (credential) async {
+        await ScannerApp._navigatePostAuth(context);
       },
     );
   }
