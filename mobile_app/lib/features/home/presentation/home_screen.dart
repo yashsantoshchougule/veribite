@@ -4,6 +4,7 @@ import '../../camera/presentation/smart_camera_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
+import '../../profile/presentation/profile_screen.dart';
 import '../../profile/presentation/user_details_screen.dart';
 
 /// Page 4: Home Dashboard
@@ -50,16 +51,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openProfile() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => UserDetailsScreen(
+        builder: (_) => ProfileScreen(
           userId: widget.userId,
-          isEditMode: true,
-          onComplete: () {
-            Navigator.of(context).pop();
-            _loadProfile();
-          },
         ),
       ),
-    );
+    ).then((_) {
+      _loadProfile();
+    });
   }
 
   @override

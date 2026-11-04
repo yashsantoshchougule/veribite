@@ -5,6 +5,7 @@ import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart
 import 'package:mobile_app/features/home/presentation/home_screen.dart';
 import 'package:mobile_app/features/profile/application/user_profile_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
+import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
 import 'package:mobile_app/features/profile/presentation/user_details_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -107,7 +108,7 @@ void main() {
       expect(find.byType(SmartCameraScreen), findsOneWidget);
     });
 
-    testWidgets('tapping Profile on Top Header navigates to UserDetailsScreen', (tester) async {
+    testWidgets('tapping Profile on Top Header navigates to ProfileScreen', (tester) async {
       await tester.pumpWidget(buildTestableHomeScreen());
       await tester.pumpAndSettle();
 
@@ -115,7 +116,7 @@ void main() {
       await tester.tap(profilePill);
       await tester.pumpAndSettle();
 
-      expect(find.byType(UserDetailsScreen), findsOneWidget);
+      expect(find.byType(ProfileScreen), findsOneWidget);
     });
   });
 
