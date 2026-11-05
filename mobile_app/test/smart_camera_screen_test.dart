@@ -5,7 +5,6 @@ import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart
 import 'package:mobile_app/features/camera/presentation/widgets/camera_reticle_painter.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/quick_macro_slider_sheet.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/scan_result_sheet.dart';
-import 'package:mobile_app/features/camera/presentation/widgets/transient_focus_ring.dart';
 
 void main() {
   testWidgets('SmartCameraScreen renders reticle, torch toggle, and mode chips', (tester) async {
@@ -113,7 +112,7 @@ void main() {
     expect(find.text('Tap barcode or ingredients to focus • Pinch to zoom'), findsOneWidget);
   });
 
-  testWidgets('tapping inside reticle triggers transient focus ring that auto-clears', (tester) async {
+  testWidgets('tapping inside reticle triggers tap-to-focus without drawing any green box or clutter', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
@@ -126,15 +125,9 @@ void main() {
     await tester.tapAt(const Offset(400, 300));
     await tester.pump();
 
-    // Verify transient focus ring appears
-    expect(find.byType(TransientFocusRing), findsOneWidget);
-
-    // Fast-forward past 650ms animation duration
-    await tester.pump(const Duration(milliseconds: 700));
-
-    // Focus ring has automatically vanished with zero permanent clutter
-    expect(find.byType(TransientFocusRing), findsNothing);
+    // Verify completely clean UI: no green boxes, no lock badges, no pills
     expect(find.text('AF Lock Active • Tap to Release'), findsNothing);
+    expect(find.text('🔒 AF LOCK'), findsNothing);
   });
 
   testWidgets('pinch-to-zoom gesture displays ephemeral zoom indicator and auto-fades', (tester) async {

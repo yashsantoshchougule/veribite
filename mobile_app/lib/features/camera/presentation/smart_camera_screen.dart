@@ -14,7 +14,6 @@ import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
 import 'widgets/quick_macro_slider_sheet.dart';
 import 'widgets/scan_result_sheet.dart';
-import 'widgets/transient_focus_ring.dart';
 
 /// Smart Camera Viewfinder Screen for VeriBite.
 /// Integrates live MobileScanner hardware stream, barcode lock-on, specular glare detection,
@@ -48,7 +47,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   bool _isPinching = false;
   Timer? _zoomOverlayTimer;
   Timer? _scanWindowResetTimer;
-  Offset? _transientFocusPoint;
 
   @override
   void initState() {
@@ -60,6 +58,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       detectionSpeed: DetectionSpeed.normal,
       facing: CameraFacing.back,
       torchEnabled: false,
+      cameraResolution: const Size(1920, 1080),
+      useNewCameraSelector: true,
+      formats: const [BarcodeFormat.all],
     );
 
     if (_profile == null && widget.userId != null) {
@@ -249,32 +250,33 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   void _handleTapToFocus(Offset tapPos, Rect reticleRect) {
     if (reticleRect.contains(tapPos)) {
-      setState(() {
-        _transientFocusPoint = tapPos;
-      });
       HapticFeedback.selectionClick();
 
-      // Temporarily direct scanner scan window to the tapped product region (barcode or ingredients)
-      final targetWindow = Rect.fromCenter(
-        center: tapPos,
-        width: 180,
-        height: 180,
-      );
       if (!widget.useSimulatedFeed) {
         try {
+          // Re-assert zoom scale to trigger CameraX optical autofocus re-metering
+          final normalized = (_currentZoomScale - 1.0) / 4.0;
+          _scannerController.setZoomScale(normalized);
+
+          // Focus detection specifically to the tapped product region
+          final targetWindow = Rect.fromCenter(
+            center: tapPos,
+            width: 220,
+            height: 220,
+          );
           _scannerController.updateScanWindow(targetWindow);
         } catch (_) {}
-      }
 
-      // Smoothly reset scan window back to full reticle after 4 seconds
-      _scanWindowResetTimer?.cancel();
-      _scanWindowResetTimer = Timer(const Duration(seconds: 4), () {
-        if (mounted && !widget.useSimulatedFeed) {
-          try {
-            _scannerController.updateScanWindow(reticleRect);
-          } catch (_) {}
-        }
-      });
+        // Smoothly reset scan window back to full reticle after 4 seconds
+        _scanWindowResetTimer?.cancel();
+        _scanWindowResetTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted && !widget.useSimulatedFeed) {
+            try {
+              _scannerController.updateScanWindow(reticleRect);
+            } catch (_) {}
+          }
+        });
+      }
     } else {
       // Tap outside reticle: reset hardware scan window back to full reticle
       if (!widget.useSimulatedFeed) {
@@ -317,7 +319,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
             ),
           ),
 
-          // 2. Central Reticle Overlay (Clean corner brackets, no permanent badges)
+          // 2. Central Reticle Overlay (Clean corner brackets, zero permanent or tap badges)
           IgnorePointer(
             child: CameraReticleOverlay(
               status: state.status,
@@ -327,18 +329,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
             ),
           ),
 
-          // 3. Transient Focus Ring (Pulses for 600ms on tapped barcode/ingredients and vanishes)
-          if (_transientFocusPoint != null)
-            TransientFocusRing(
-              position: _transientFocusPoint!,
-              onComplete: () {
-                if (mounted) {
-                  setState(() => _transientFocusPoint = null);
-                }
-              },
-            ),
-
-          // 4. Specular Glare Alert Banner
+          // 3. Specular Glare Alert Banner
           if (state.hasGlareAlert && state.glareBadgeText != null)
             Positioned(
               top: 110,
