@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/features/auth/presentation/login_screen.dart';
 import 'package:mobile_app/features/auth/presentation/widgets/login_feature_chip.dart';
+import 'package:mobile_app/features/legal/presentation/legal_policy_screen.dart';
 import 'package:mobile_app/main.dart';
 
 void main() {
@@ -277,6 +278,48 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Welcome to VeriBite'), findsOneWidget);
+    });
+  });
+
+  group('Legal & Privacy Policy Navigation Tests', () {
+    testWidgets('tapping Terms & Conditions in footer navigates to LegalPolicyScreen on terms tab', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      final termsFinder = find.text('Terms & Conditions');
+      await tester.ensureVisible(termsFinder);
+      await tester.pumpAndSettle();
+      expect(termsFinder, findsOneWidget);
+
+      await tester.tap(termsFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LegalPolicyScreen), findsOneWidget);
+      expect(find.text('VeriBite Terms of Service'), findsOneWidget);
+      expect(find.text('CRITICAL MEDICAL & NUTRITIONAL DISCLAIMER'), findsOneWidget);
+    });
+
+    testWidgets('tapping Privacy Policy in footer navigates to LegalPolicyScreen on privacy tab', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: LoginScreen(),
+        ),
+      );
+
+      final privacyFinder = find.text('Privacy Policy');
+      await tester.ensureVisible(privacyFinder);
+      await tester.pumpAndSettle();
+      expect(privacyFinder, findsOneWidget);
+
+      await tester.tap(privacyFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LegalPolicyScreen), findsOneWidget);
+      expect(find.text('VeriBite Privacy Policy'), findsOneWidget);
+      expect(find.text('OUR ZERO-TRACKING & ZERO-AD PLEDGE'), findsOneWidget);
     });
   });
 

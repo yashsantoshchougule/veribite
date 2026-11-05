@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../main.dart';
 import '../../auth/application/supabase_auth_service.dart';
+import '../../legal/presentation/legal_policy_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/user_profile_service.dart';
 import '../domain/user_profile_model.dart';
@@ -985,6 +986,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
               color: AppColors.textMutedMocha,
               fontWeight: FontWeight.w500,
             ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const LegalPolicyScreen(initialTab: LegalTab.terms),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.description_outlined, size: 15, color: AppColors.textObsidian),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Terms of Service',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textObsidian,
+                      ),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.cardBorder, width: 1.2),
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const LegalPolicyScreen(initialTab: LegalTab.privacy),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.shield_outlined, size: 15, color: AppColors.textObsidian),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Privacy Policy',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textObsidian,
+                      ),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.cardBorder, width: 1.2),
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

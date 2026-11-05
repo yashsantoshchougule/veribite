@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../legal/presentation/legal_policy_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/supabase_auth_service.dart';
 import 'widgets/google_logo_icon.dart';
@@ -526,7 +527,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           bottomLeft: Radius.circular(32),
           bottomRight: Radius.circular(32),
         ),
-        border: Border(
+        border: const Border(
           bottom: BorderSide(color: AppColors.cardBorder, width: 1.2),
         ),
         boxShadow: [
@@ -1268,10 +1269,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           children: [
             GestureDetector(
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Opening Terms & Conditions...'),
-                    backgroundColor: AppColors.primaryObsidian,
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const LegalPolicyScreen(initialTab: LegalTab.terms),
                   ),
                 );
               },
@@ -1295,10 +1295,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             ),
             GestureDetector(
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Opening Privacy Policy...'),
-                    backgroundColor: AppColors.primaryObsidian,
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const LegalPolicyScreen(initialTab: LegalTab.privacy),
                   ),
                 );
               },

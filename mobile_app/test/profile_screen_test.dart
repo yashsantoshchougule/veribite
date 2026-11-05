@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/features/auth/application/supabase_auth_service.dart';
-import 'package:mobile_app/features/auth/presentation/login_screen.dart';
+import 'package:mobile_app/features/legal/presentation/legal_policy_screen.dart';
 import 'package:mobile_app/features/profile/application/user_profile_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
@@ -212,6 +212,40 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('My Health Profile'), findsOneWidget);
+    });
+
+    testWidgets('renders Terms of Service and Privacy Policy buttons and navigates to LegalPolicyScreen', (tester) async {
+      await tester.pumpWidget(buildTestableProfileScreen());
+      await tester.pumpAndSettle();
+
+      // Scroll down to the Offline Engine & Privacy Guard card
+      final termsFinder = find.widgetWithText(OutlinedButton, 'Terms of Service');
+      final privacyFinder = find.widgetWithText(OutlinedButton, 'Privacy Policy');
+
+      await tester.ensureVisible(termsFinder);
+      await tester.pumpAndSettle();
+      expect(termsFinder, findsOneWidget);
+      expect(privacyFinder, findsOneWidget);
+
+      // Tap Terms of Service
+      await tester.tap(termsFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LegalPolicyScreen), findsOneWidget);
+      expect(find.text('VeriBite Terms of Service'), findsOneWidget);
+
+      // Tap Back
+      await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded));
+      await tester.pumpAndSettle();
+
+      // Tap Privacy Policy
+      await tester.ensureVisible(privacyFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(privacyFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LegalPolicyScreen), findsOneWidget);
+      expect(find.text('VeriBite Privacy Policy'), findsOneWidget);
     });
 
     testWidgets('renders cleanly on Tablet (768x1024) with centered constraints', (tester) async {
