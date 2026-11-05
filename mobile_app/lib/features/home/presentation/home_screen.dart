@@ -56,7 +56,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openCamera() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const SmartCameraScreen(),
+        builder: (_) => SmartCameraScreen(
+          userId: widget.userId,
+          userProfile: _profile,
+        ),
       ),
     ).then((_) {
       _loadAllData();

@@ -52,7 +52,7 @@ class _ReticlePainter extends CustomPainter {
     );
 
     // Dark translucent background outside the reticle box
-    final bgPaint = Paint()..color = Colors.black.withOpacity(0.45);
+    final bgPaint = Paint()..color = Colors.black.withValues(alpha: 0.45);
     final bgPath = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
       ..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)))
@@ -66,7 +66,7 @@ class _ReticlePainter extends CustomPainter {
     } else if (hasGlareAlert) {
       strokeColor = const Color(0xFFF4B400); // Amber/Yellow
     } else {
-      strokeColor = Colors.white.withOpacity(0.85); // Neutral White
+      strokeColor = Colors.white.withValues(alpha: 0.85); // Neutral White
     }
 
     final cornerPaint = Paint()
