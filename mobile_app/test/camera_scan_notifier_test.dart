@@ -38,4 +38,31 @@ void main() {
     expect(state.isMultiAngleMode, isTrue);
     expect(state.capturedFrames.length, 1);
   });
+
+  test('CameraScanNotifier manages focusPoint, isFocusLocked, and zoomScale', () {
+    final container = ProviderContainer();
+    final notifier = container.read(cameraScanNotifierProvider.notifier);
+
+    // Initial state
+    expect(container.read(cameraScanNotifierProvider).isFocusLocked, isFalse);
+    expect(container.read(cameraScanNotifierProvider).focusPoint, isNull);
+    expect(container.read(cameraScanNotifierProvider).zoomScale, 1.0);
+
+    // Set focus
+    notifier.setFocusPoint(const Offset(150, 250));
+    final focusedState = container.read(cameraScanNotifierProvider);
+    expect(focusedState.isFocusLocked, isTrue);
+    expect(focusedState.focusPoint, const Offset(150, 250));
+
+    // Clear focus
+    notifier.clearFocus();
+    final clearedState = container.read(cameraScanNotifierProvider);
+    expect(clearedState.isFocusLocked, isFalse);
+    expect(clearedState.focusPoint, isNull);
+
+    // Set zoom scale
+    notifier.setZoomScale(1.5);
+    final zoomedState = container.read(cameraScanNotifierProvider);
+    expect(zoomedState.zoomScale, 1.5);
+  });
 }

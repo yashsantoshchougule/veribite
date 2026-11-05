@@ -24,6 +24,26 @@ void main() {
     expect(overlay.status, CameraScanStatus.barcodeLocked);
   });
 
+  testWidgets('CameraReticleOverlay renders with focusPoint and isFocusLocked', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: CameraReticleOverlay(
+            status: CameraScanStatus.searching,
+            hasGlareAlert: false,
+            focusPoint: Offset(200, 200),
+            isFocusLocked: true,
+          ),
+        ),
+      ),
+    );
+
+    final overlay = tester.widget<CameraReticleOverlay>(find.byType(CameraReticleOverlay));
+    expect(overlay.isFocusLocked, isTrue);
+    expect(overlay.focusPoint, const Offset(200, 200));
+    expect(find.byType(CustomPaint), findsWidgets);
+  });
+
   testWidgets('GlareAlertBanner displays warning text when active', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(

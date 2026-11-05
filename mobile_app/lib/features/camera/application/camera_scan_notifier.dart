@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_app/core/vision/barcode_scanner_service.dart';
 import 'package:mobile_app/core/vision/ocr_parser.dart';
@@ -56,6 +57,24 @@ class CameraScanNotifier extends StateNotifier<CameraScanState> {
 
   void toggleTorch() {
     state = state.copyWith(isTorchOn: !state.isTorchOn);
+  }
+
+  void setFocusPoint(Offset point) {
+    state = state.copyWith(
+      focusPoint: point,
+      isFocusLocked: true,
+    );
+  }
+
+  void clearFocus() {
+    state = state.copyWith(
+      clearFocusPoint: true,
+      isFocusLocked: false,
+    );
+  }
+
+  void setZoomScale(double scale) {
+    state = state.copyWith(zoomScale: scale);
   }
 
   void reset() {

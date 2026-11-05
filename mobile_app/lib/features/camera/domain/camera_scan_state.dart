@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 /// Camera scan status and reactive state models.
 
 enum CameraScanStatus {
@@ -17,6 +19,9 @@ class CameraScanState {
   final List<List<int>> capturedFrames;
   final bool isTorchOn;
   final String? errorMessage;
+  final Offset? focusPoint;
+  final bool isFocusLocked;
+  final double zoomScale;
 
   const CameraScanState({
     this.status = CameraScanStatus.searching,
@@ -27,6 +32,9 @@ class CameraScanState {
     this.capturedFrames = const [],
     this.isTorchOn = false,
     this.errorMessage,
+    this.focusPoint,
+    this.isFocusLocked = false,
+    this.zoomScale = 1.0,
   });
 
   CameraScanState copyWith({
@@ -38,6 +46,10 @@ class CameraScanState {
     List<List<int>>? capturedFrames,
     bool? isTorchOn,
     String? errorMessage,
+    Offset? focusPoint,
+    bool? isFocusLocked,
+    double? zoomScale,
+    bool clearFocusPoint = false,
   }) {
     return CameraScanState(
       status: status ?? this.status,
@@ -48,6 +60,9 @@ class CameraScanState {
       capturedFrames: capturedFrames ?? this.capturedFrames,
       isTorchOn: isTorchOn ?? this.isTorchOn,
       errorMessage: errorMessage ?? this.errorMessage,
+      focusPoint: clearFocusPoint ? null : (focusPoint ?? this.focusPoint),
+      isFocusLocked: isFocusLocked ?? this.isFocusLocked,
+      zoomScale: zoomScale ?? this.zoomScale,
     );
   }
 }

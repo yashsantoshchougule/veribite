@@ -4,7 +4,7 @@ import 'package:mobile_app/features/camera/application/product_scanner_service.d
 import 'package:mobile_app/features/camera/presentation/widgets/scan_result_sheet.dart';
 
 void main() {
-  final safeProduct = ScannedProductResult(
+  const safeProduct = ScannedProductResult(
     barcode: '8901491101837',
     productName: '100% Whole Grain Rolled Oats',
     brandName: 'Quaker',
@@ -26,7 +26,7 @@ void main() {
     isExceededBudget: false,
   );
 
-  final toxicProduct = ScannedProductResult(
+  const toxicProduct = ScannedProductResult(
     barcode: '8901058852339',
     productName: '2-Minute Masala Noodles',
     brandName: 'Maggi',
