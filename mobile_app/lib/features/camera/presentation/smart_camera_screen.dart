@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,7 @@ import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
 import 'widgets/quick_macro_slider_sheet.dart';
 import 'widgets/scan_result_sheet.dart';
+import 'widgets/transient_focus_ring.dart';
 
 /// Smart Camera Viewfinder Screen for VeriBite.
 /// Integrates live MobileScanner hardware stream, barcode lock-on, specular glare detection,
@@ -41,6 +43,13 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   UserProfileModel? _profile;
   bool _isProcessingScan = false;
 
+  double _baseZoomScale = 1.0;
+  double _currentZoomScale = 1.0;
+  bool _isPinching = false;
+  Timer? _zoomOverlayTimer;
+  Timer? _scanWindowResetTimer;
+  Offset? _transientFocusPoint;
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +77,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   @override
   void dispose() {
+    _zoomOverlayTimer?.cancel();
+    _scanWindowResetTimer?.cancel();
     _scannerController.dispose();
     super.dispose();
   }
@@ -203,14 +214,73 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
   }
 
-  void _onZoomSelected(double scale, CameraScanNotifier notifier) {
-    notifier.setZoomScale(scale);
-    HapticFeedback.selectionClick();
-    if (!widget.useSimulatedFeed) {
-      try {
-        _scannerController.setZoomScale(scale);
-      } catch (e) {
-        debugPrint('Error setting zoom scale $scale: $e');
+  void _handleScaleStart(ScaleStartDetails details) {
+    _baseZoomScale = _currentZoomScale;
+  }
+
+  void _handleScaleUpdate(ScaleUpdateDetails details, CameraScanNotifier notifier) {
+    if (details.pointerCount >= 2) {
+      final newZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
+      setState(() {
+        _currentZoomScale = newZoom;
+        _isPinching = true;
+      });
+      notifier.setZoomScale(newZoom);
+
+      // MobileScannerController expects normalized scale between 0.0 and 1.0
+      final normalized = (newZoom - 1.0) / 4.0;
+      if (!widget.useSimulatedFeed) {
+        try {
+          _scannerController.setZoomScale(normalized);
+        } catch (_) {}
+      }
+      _zoomOverlayTimer?.cancel();
+    }
+  }
+
+  void _handleScaleEnd(ScaleEndDetails details) {
+    _zoomOverlayTimer?.cancel();
+    _zoomOverlayTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) {
+        setState(() => _isPinching = false);
+      }
+    });
+  }
+
+  void _handleTapToFocus(Offset tapPos, Rect reticleRect) {
+    if (reticleRect.contains(tapPos)) {
+      setState(() {
+        _transientFocusPoint = tapPos;
+      });
+      HapticFeedback.selectionClick();
+
+      // Temporarily direct scanner scan window to the tapped product region (barcode or ingredients)
+      final targetWindow = Rect.fromCenter(
+        center: tapPos,
+        width: 180,
+        height: 180,
+      );
+      if (!widget.useSimulatedFeed) {
+        try {
+          _scannerController.updateScanWindow(targetWindow);
+        } catch (_) {}
+      }
+
+      // Smoothly reset scan window back to full reticle after 4 seconds
+      _scanWindowResetTimer?.cancel();
+      _scanWindowResetTimer = Timer(const Duration(seconds: 4), () {
+        if (mounted && !widget.useSimulatedFeed) {
+          try {
+            _scannerController.updateScanWindow(reticleRect);
+          } catch (_) {}
+        }
+      });
+    } else {
+      // Tap outside reticle: reset hardware scan window back to full reticle
+      if (!widget.useSimulatedFeed) {
+        try {
+          _scannerController.updateScanWindow(reticleRect);
+        } catch (_) {}
       }
     }
   }
@@ -233,54 +303,42 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. Live Camera Feed or Test Viewport with Tap-to-Focus Detection
+          // 1. Live Camera Feed or Test Viewport with Multi-Touch Pinch-to-Zoom & Tap-to-Focus
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTapDown: (details) {
-                final tapPos = details.localPosition;
-                if (reticleRect.contains(tapPos)) {
-                  // If tapping on or near existing focus point, toggle it off
-                  if (state.isFocusLocked &&
-                      state.focusPoint != null &&
-                      (tapPos - state.focusPoint!).distance < 36.0) {
-                    notifier.clearFocus();
-                    HapticFeedback.lightImpact();
-                  } else {
-                    notifier.setFocusPoint(tapPos);
-                    HapticFeedback.selectionClick();
-                  }
-                } else {
-                  // Outside reticle box: release focus lock if active
-                  if (state.isFocusLocked) {
-                    notifier.clearFocus();
-                    HapticFeedback.lightImpact();
-                  }
-                }
-              },
+              onScaleStart: _handleScaleStart,
+              onScaleUpdate: (d) => _handleScaleUpdate(d, notifier),
+              onScaleEnd: _handleScaleEnd,
+              onTapUp: (details) => _handleTapToFocus(details.localPosition, reticleRect),
               child: widget.useSimulatedFeed
                   ? _buildSimulatedViewport()
-                  : _buildLiveScannerViewport(
-                      scanWindow: state.isFocusLocked && state.focusPoint != null
-                          ? Rect.fromCenter(center: state.focusPoint!, width: 140, height: 140)
-                          : reticleRect,
-                    ),
+                  : _buildLiveScannerViewport(scanWindow: reticleRect),
             ),
           ),
 
-          // 2. Central Reticle Overlay
+          // 2. Central Reticle Overlay (Clean corner brackets, no permanent badges)
           IgnorePointer(
             child: CameraReticleOverlay(
               status: state.status,
               hasGlareAlert: state.hasGlareAlert,
               reticleWidth: reticleWidth,
               reticleHeight: reticleHeight,
-              focusPoint: state.focusPoint,
-              isFocusLocked: state.isFocusLocked,
             ),
           ),
 
-          // 3. Specular Glare Alert Banner
+          // 3. Transient Focus Ring (Pulses for 600ms on tapped barcode/ingredients and vanishes)
+          if (_transientFocusPoint != null)
+            TransientFocusRing(
+              position: _transientFocusPoint!,
+              onComplete: () {
+                if (mounted) {
+                  setState(() => _transientFocusPoint = null);
+                }
+              },
+            ),
+
+          // 4. Specular Glare Alert Banner
           if (state.hasGlareAlert && state.glareBadgeText != null)
             Positioned(
               top: 110,
@@ -291,7 +349,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               ),
             ),
 
-          // 4. Top Action Bar
+          // 5. Ephemeral Pinch-to-Zoom Floating Indicator
+          if (_isPinching)
+            _buildPinchZoomIndicator(),
+
+          // 6. Top Action Bar
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -360,7 +422,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
             ),
           ),
 
-          // 5. Bottom Controls & Guidance
+          // 7. Bottom Controls & Guidance (Zero permanent badges or clutter)
           Positioned(
             left: 20,
             right: 20,
@@ -369,52 +431,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 1-Tap Macro Zoom Selector (1.0x / 1.5x / 2.0x)
-                  _buildMacroZoomSelector(state.zoomScale, notifier),
-                  const SizedBox(height: 12),
-
-                  // AF Lock Indicator & Quick Release Pill
-                  if (state.isFocusLocked) ...[
-                    GestureDetector(
-                      onTap: () {
-                        notifier.clearFocus();
-                        HapticFeedback.lightImpact();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0F9D58).withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black38,
-                              blurRadius: 6,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.lock_rounded, size: 14, color: Colors.white),
-                            SizedBox(width: 6),
-                            Text(
-                              'AF Lock Active • Tap to Release',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            SizedBox(width: 6),
-                            Icon(Icons.close_rounded, size: 14, color: Colors.white70),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
                   if (state.isMultiAngleMode)
                     MultiAngleCaptureStrip(
                       capturedFramesCount: state.capturedFrames.length,
@@ -439,9 +455,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       child: Text(
                         _isProcessingScan
                             ? 'Resolving product toxicology...'
-                            : state.isFocusLocked
-                                ? 'Target locked • Hold steady or tap outside box to release'
-                                : 'Tap barcode to lock focus • Align within reticle',
+                            : 'Tap barcode or ingredients to focus • Pinch to zoom',
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                         textAlign: TextAlign.center,
                       ),
@@ -481,43 +495,46 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     );
   }
 
-  Widget _buildMacroZoomSelector(double currentZoom, CameraScanNotifier notifier) {
-    final zoomOptions = [1.0, 1.5, 2.0];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E1424).withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.15),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: zoomOptions.map((zoom) {
-          final isSelected = (currentZoom - zoom).abs() < 0.05;
-          final label = zoom == 1.5 ? '1.5x Macro' : '${zoom.toStringAsFixed(1)}x';
-          return GestureDetector(
-            onTap: () => _onZoomSelected(zoom, notifier),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF0F9D58) : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
+  Widget _buildPinchZoomIndicator() {
+    return Positioned(
+      top: 90,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0E1424).withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF0F9D58).withValues(alpha: 0.7),
+              width: 1.2,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black45,
+                blurRadius: 8,
+                offset: Offset(0, 2),
               ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white70,
-                  fontSize: 11.5,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.zoom_in_rounded, size: 16, color: Color(0xFF0F9D58)),
+              const SizedBox(width: 6),
+              Text(
+                '${_currentZoomScale.toStringAsFixed(1)}x',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3,
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            ],
+          ),
+        ),
       ),
     );
   }

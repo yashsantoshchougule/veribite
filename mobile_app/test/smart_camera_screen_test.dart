@@ -5,6 +5,7 @@ import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart
 import 'package:mobile_app/features/camera/presentation/widgets/camera_reticle_painter.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/quick_macro_slider_sheet.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/scan_result_sheet.dart';
+import 'package:mobile_app/features/camera/presentation/widgets/transient_focus_ring.dart';
 
 void main() {
   testWidgets('SmartCameraScreen renders reticle, torch toggle, and mode chips', (tester) async {
@@ -89,7 +90,7 @@ void main() {
     expect(find.text('Quick Macro Manual Input'), findsOneWidget);
   });
 
-  testWidgets('SmartCameraScreen renders enlarged reticle (>= 320px) and macro zoom selector', (tester) async {
+  testWidgets('SmartCameraScreen renders enlarged reticle (>= 320px) without static AF lock or zoom pills', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
@@ -102,13 +103,17 @@ void main() {
     expect(overlay.reticleWidth, greaterThanOrEqualTo(320.0));
     expect(overlay.reticleHeight, greaterThanOrEqualTo(300.0));
 
-    // Verify 1-tap macro zoom options
-    expect(find.text('1.0x'), findsOneWidget);
-    expect(find.text('1.5x Macro'), findsOneWidget);
-    expect(find.text('2.0x'), findsOneWidget);
+    // Confirm complete removal of permanent clutter
+    expect(find.text('AF Lock Active • Tap to Release'), findsNothing);
+    expect(find.text('1.0x'), findsNothing);
+    expect(find.text('1.5x Macro'), findsNothing);
+    expect(find.text('2.0x'), findsNothing);
+
+    // Confirm clean native guidance
+    expect(find.text('Tap barcode or ingredients to focus • Pinch to zoom'), findsOneWidget);
   });
 
-  testWidgets('tapping inside reticle locks focus and renders AF lock indicators', (tester) async {
+  testWidgets('tapping inside reticle triggers transient focus ring that auto-clears', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
@@ -117,28 +122,22 @@ void main() {
       ),
     );
 
-    // Center of screen (default 800x600 in test environment) is inside reticle
+    // Tap center of screen (inside reticle box)
     await tester.tapAt(const Offset(400, 300));
     await tester.pump();
 
-    // Verify AF lock pill and guidance text are displayed
-    expect(find.text('AF Lock Active • Tap to Release'), findsOneWidget);
-    expect(find.textContaining('Target locked • Hold steady'), findsOneWidget);
+    // Verify transient focus ring appears
+    expect(find.byType(TransientFocusRing), findsOneWidget);
 
-    final overlay = tester.widget<CameraReticleOverlay>(find.byType(CameraReticleOverlay));
-    expect(overlay.isFocusLocked, isTrue);
-    expect(overlay.focusPoint, isNotNull);
+    // Fast-forward past 650ms animation duration
+    await tester.pump(const Duration(milliseconds: 700));
 
-    // Tapping the AF lock release pill clears focus
-    await tester.tap(find.text('AF Lock Active • Tap to Release'));
-    await tester.pump();
-
+    // Focus ring has automatically vanished with zero permanent clutter
+    expect(find.byType(TransientFocusRing), findsNothing);
     expect(find.text('AF Lock Active • Tap to Release'), findsNothing);
-    final overlayAfter = tester.widget<CameraReticleOverlay>(find.byType(CameraReticleOverlay));
-    expect(overlayAfter.isFocusLocked, isFalse);
   });
 
-  testWidgets('tapping outside reticle box auto-releases focus lock', (tester) async {
+  testWidgets('pinch-to-zoom gesture displays ephemeral zoom indicator and auto-fades', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
@@ -147,38 +146,29 @@ void main() {
       ),
     );
 
-    // Lock focus first
-    await tester.tapAt(const Offset(400, 300));
-    await tester.pump();
-    expect(find.text('AF Lock Active • Tap to Release'), findsOneWidget);
+    // Initial state has no zoom indicator
+    expect(find.byIcon(Icons.zoom_in_rounded), findsNothing);
 
-    // Tap outside reticle (e.g. top-left corner at 15, 15)
-    await tester.tapAt(const Offset(15, 15));
-    await tester.pump();
-
-    expect(find.text('AF Lock Active • Tap to Release'), findsNothing);
-    final overlay = tester.widget<CameraReticleOverlay>(find.byType(CameraReticleOverlay));
-    expect(overlay.isFocusLocked, isFalse);
-  });
-
-  testWidgets('tapping macro zoom button updates active zoom scale', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(
-        child: MaterialApp(
-          home: SmartCameraScreen(useSimulatedFeed: true),
-        ),
-      ),
-    );
-
-    // Tap 1.5x Macro
-    await tester.tap(find.text('1.5x Macro'));
+    // Perform two-finger pinch-out gesture
+    final touch1 = await tester.startGesture(const Offset(350, 300));
+    final touch2 = await tester.startGesture(const Offset(450, 300));
     await tester.pump();
 
-    // Tap 2.0x
-    await tester.tap(find.text('2.0x'));
+    // Spread fingers apart to zoom in
+    await touch1.moveTo(const Offset(280, 300));
+    await touch2.moveTo(const Offset(520, 300));
     await tester.pump();
 
-    // Verify widget did not throw and remains stable
-    expect(find.text('2.0x'), findsOneWidget);
+    // Zoom readout icon and text should now be visible
+    expect(find.byIcon(Icons.zoom_in_rounded), findsOneWidget);
+
+    // Release fingers
+    await touch1.up();
+    await touch2.up();
+    await tester.pump();
+
+    // After 1000ms, zoom indicator fades away
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(find.byIcon(Icons.zoom_in_rounded), findsNothing);
   });
 }

@@ -20,8 +20,8 @@ void main() {
     safePortionGrams: 40,
     limitingFactor: 'Sugar',
     frequencySchedule: 'Daily Safe',
-    additives: const [],
-    splitSugars: const [],
+    additives: [],
+    splitSugars: [],
     portionAdvice: 'Safe consumption portion: 40 g (max 1.0 serving). Limiting constraint: Sugar.',
     isExceededBudget: false,
   );
@@ -42,10 +42,10 @@ void main() {
     safePortionGrams: 30,
     limitingFactor: 'Sodium',
     frequencySchedule: 'Strictly Avoid',
-    additives: const [
+    additives: [
       {'ins_code': '635', 'primary_name': 'Disodium 5-Ribonucleotides', 'risk_tier': 'RED', 'triggers_red_cap': 1},
     ],
-    splitSugars: const ['Invert Sugar Syrup'],
+    splitSugars: ['Invert Sugar Syrup'],
     portionAdvice: 'Safe consumption portion: 30 g (max 0.4 serving). Limiting constraint: Sodium.',
     isExceededBudget: true,
   );
