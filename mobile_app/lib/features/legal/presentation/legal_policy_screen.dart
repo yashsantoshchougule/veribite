@@ -656,3 +656,4 @@ class _QuickChip {
 
   _QuickChip(this.label, this.onTap);
 }
+
