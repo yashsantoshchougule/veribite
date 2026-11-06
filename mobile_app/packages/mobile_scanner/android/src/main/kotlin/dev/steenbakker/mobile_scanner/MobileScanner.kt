@@ -502,26 +502,12 @@ class MobileScanner(
 
             // Build the preview to be shown on the Flutter texture
             val previewBuilder = Preview.Builder()
-            val camera2PreviewExtender = Camera2Interop.Extender(previewBuilder)
-            camera2PreviewExtender.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-            camera2PreviewExtender.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_MODE,
-                CaptureRequest.CONTROL_AE_MODE_ON
-            )
             preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
             // Build the analyzer to be passed on to MLKit
             val analysisBuilder = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            val camera2AnalysisExtender = Camera2Interop.Extender(analysisBuilder)
-            camera2AnalysisExtender.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
 
             val cameraResolution =  cameraResolutionWanted ?: Size(1920, 1080)
 
@@ -536,7 +522,6 @@ class MobileScanner(
 
             deviceOrientationListener.onDisplayRotationChanged = { rotation ->
                 imageAnalysis?.targetRotation = rotation
-                preview?.targetRotation = rotation
             }
 
             val analysis = analysisBuilder.build().apply { setAnalyzer(analysisExecutor, captureOutput) }
@@ -851,28 +836,18 @@ class MobileScanner(
         // Cancel previous manual focus/metering to start from a clean slate
         cam.cameraControl.cancelFocusAndMetering()
 
-        // Use DisplayOrientedMeteringPointFactory which properly maps normalized screen touch coordinates
-        // taking into account device display orientation, camera sensor orientation, and lens facing.
-        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            activity.display ?: (activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
-        } else {
-            @Suppress("DEPRECATION")
-            (activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
-        }
-
-        val factory: MeteringPointFactory = if (display != null) {
-            DisplayOrientedMeteringPointFactory(display, cam.cameraInfo, 1f, 1f)
+        // Use SurfaceOrientedMeteringPointFactory bound to the active Preview UseCase
+        // so CameraX maps normalized coordinates into sensor coordinates without aspect ratio squashing
+        val currentPreview = preview
+        val factory: MeteringPointFactory = if (currentPreview != null) {
+            SurfaceOrientedMeteringPointFactory(1f, 1f, currentPreview)
         } else {
             SurfaceOrientedMeteringPointFactory(1f, 1f)
         }
         val afPoint: MeteringPoint = factory.createPoint(x, y, 0.20f)
 
-        // Meter both Auto-Focus (AF) and Auto-Exposure (AE) so white packaging is crisp and readable
-        val action = FocusMeteringAction.Builder(
-            afPoint,
-            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
-        )
-            .setAutoCancelDuration(2, TimeUnit.SECONDS)
+        val action = FocusMeteringAction.Builder(afPoint, FocusMeteringAction.FLAG_AF)
+            .setAutoCancelDuration(3, TimeUnit.SECONDS)
             .build()
 
         val future = cam.cameraControl.startFocusAndMetering(action)
@@ -880,14 +855,8 @@ class MobileScanner(
             try {
                 val result = future.get()
                 Log.d("MobileScanner", "startFocusAndMetering completed: isFocusSuccessful=${result.isFocusSuccessful}")
-                // If focus fails (e.g. object is closer than minimum focal distance or low contrast),
-                // cancel metering immediately so the camera does not freeze in a blurry locked state!
-                if (!result.isFocusSuccessful) {
-                    cam.cameraControl.cancelFocusAndMetering()
-                }
             } catch (e: Exception) {
                 Log.e("MobileScanner", "startFocusAndMetering error: ${e.message}")
-                cam.cameraControl.cancelFocusAndMetering()
             }
         }, ContextCompat.getMainExecutor(activity))
     }
