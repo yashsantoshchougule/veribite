@@ -44,8 +44,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
-  bool _isPinching = false;
+  DateTime _lastZoomDispatchTime = DateTime.fromMillisecondsSinceEpoch(0);
+  final ValueNotifier<double> _zoomScaleNotifier = ValueNotifier<double>(1.0);
+  final ValueNotifier<bool> _isPinchingNotifier = ValueNotifier<bool>(false);
   Timer? _zoomOverlayTimer;
+  Timer? _focusResetTimer;
 
   @override
   void initState() {
@@ -77,6 +80,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   @override
   void dispose() {
     _zoomOverlayTimer?.cancel();
+    _focusResetTimer?.cancel();
+    _zoomScaleNotifier.dispose();
+    _isPinchingNotifier.dispose();
     _scannerController.dispose();
     super.dispose();
   }
@@ -214,33 +220,49 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   void _handleScaleStart(ScaleStartDetails details) {
     _baseZoomScale = _currentZoomScale;
+    _lastZoomDispatchTime = DateTime.now();
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details, CameraScanNotifier notifier) {
     if (details.pointerCount >= 2) {
-      final newZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
-      setState(() {
-        _currentZoomScale = newZoom;
-        _isPinching = true;
-      });
-      notifier.setZoomScale(newZoom);
+      final targetZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
 
-      // MobileScannerController expects normalized scale between 0.0 and 1.0
-      final normalized = (newZoom - 1.0) / 4.0;
-      if (!widget.useSimulatedFeed) {
-        try {
-          _scannerController.setZoomScale(normalized);
-        } catch (_) {}
-      }
+      // Low-pass exponential smoothing filter for buttery fluid tracking without capacitive jitter
+      _currentZoomScale = _currentZoomScale + (targetZoom - _currentZoomScale) * 0.45;
+      _currentZoomScale = _currentZoomScale.clamp(1.0, 5.0);
+
+      _zoomScaleNotifier.value = _currentZoomScale;
+      _isPinchingNotifier.value = true;
       _zoomOverlayTimer?.cancel();
+
+      // Throttle platform channel calls to 30Hz (~32ms) to prevent IPC backlog and frame drops
+      final now = DateTime.now();
+      if (now.difference(_lastZoomDispatchTime).inMilliseconds >= 32) {
+        _lastZoomDispatchTime = now;
+        final normalized = (_currentZoomScale - 1.0) / 4.0;
+        if (!widget.useSimulatedFeed) {
+          try {
+            _scannerController.setZoomScale(normalized);
+          } catch (_) {}
+        }
+      }
     }
   }
 
-  void _handleScaleEnd(ScaleEndDetails details) {
+  void _handleScaleEnd(ScaleEndDetails details, CameraScanNotifier notifier) {
+    // Settle camera hardware at exact final zoom ratio
+    final normalized = (_currentZoomScale - 1.0) / 4.0;
+    if (!widget.useSimulatedFeed) {
+      try {
+        _scannerController.setZoomScale(normalized);
+      } catch (_) {}
+    }
+    notifier.setZoomScale(_currentZoomScale);
+
     _zoomOverlayTimer?.cancel();
     _zoomOverlayTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) {
-        setState(() => _isPinching = false);
+        _isPinchingNotifier.value = false;
       }
     });
   }
@@ -254,8 +276,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         final relativeX = (tapPos.dx / size.width).clamp(0.0, 1.0);
         final relativeY = (tapPos.dy / size.height).clamp(0.0, 1.0);
 
-        // Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
+        // 1. Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
         _scannerController.setFocusPoint(Offset(relativeX, relativeY));
+
+        // 2. Safety fallback: automatically reset focus back to continuous mode after 2.5s
+        // ensuring the lens NEVER gets stuck in a blurred lock state
+        _focusResetTimer?.cancel();
+        _focusResetTimer = Timer(const Duration(milliseconds: 2500), () {
+          if (mounted && !widget.useSimulatedFeed) {
+            try {
+              _scannerController.resetFocus();
+            } catch (_) {}
+          }
+        });
       } catch (e) {
         debugPrint('Error triggering hardware focus: $e');
       }
@@ -286,7 +319,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               behavior: HitTestBehavior.opaque,
               onScaleStart: _handleScaleStart,
               onScaleUpdate: (d) => _handleScaleUpdate(d, notifier),
-              onScaleEnd: _handleScaleEnd,
+              onScaleEnd: (d) => _handleScaleEnd(d, notifier),
               onTapUp: (details) => _handleTapToFocus(details.globalPosition),
               child: widget.useSimulatedFeed
                   ? _buildSimulatedViewport()
@@ -315,9 +348,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               ),
             ),
 
-          // 5. Ephemeral Pinch-to-Zoom Floating Indicator
-          if (_isPinching)
-            _buildPinchZoomIndicator(),
+          // 5. Ephemeral Pinch-to-Zoom Floating Indicator (Isolated via ValueListenableBuilder)
+          _buildPinchZoomIndicator(),
 
           // 6. Top Action Bar
           SafeArea(
@@ -462,46 +494,58 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   Widget _buildPinchZoomIndicator() {
-    return Positioned(
-      top: 90,
-      left: 0,
-      right: 0,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0E1424).withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFF0F9D58).withValues(alpha: 0.7),
-              width: 1.2,
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black45,
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.zoom_in_rounded, size: 16, color: Color(0xFF0F9D58)),
-              const SizedBox(width: 6),
-              Text(
-                '${_currentZoomScale.toStringAsFixed(1)}x',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.3,
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isPinchingNotifier,
+      builder: (context, isPinching, _) {
+        if (!isPinching) return const SizedBox.shrink();
+
+        return Positioned(
+          top: 90,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E1424).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFF0F9D58).withValues(alpha: 0.7),
+                  width: 1.2,
                 ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black45,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
               ),
-            ],
+              child: ValueListenableBuilder<double>(
+                valueListenable: _zoomScaleNotifier,
+                builder: (context, zoom, _) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.zoom_in_rounded, size: 16, color: Color(0xFF0F9D58)),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${zoom.toStringAsFixed(1)}x',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
