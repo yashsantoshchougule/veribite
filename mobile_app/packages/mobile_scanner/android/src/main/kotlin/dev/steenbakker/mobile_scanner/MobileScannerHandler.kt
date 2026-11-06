@@ -446,8 +446,8 @@ class MobileScannerHandler(
     }
 
     private fun setFocus(call: MethodCall, result: MethodChannel.Result) {
-        val dx = call.argument<Double>("dx")?.toFloat()
-        val dy = call.argument<Double>("dy")?.toFloat()
+        val dx = (call.argument<Double>("dx") ?: call.argument<Double>("x"))?.toFloat()
+        val dy = (call.argument<Double>("dy") ?: call.argument<Double>("y"))?.toFloat()
 
         if (dx == null || dy == null || dx !in 0f..1f || dy !in 0f..1f) {
             result.error(

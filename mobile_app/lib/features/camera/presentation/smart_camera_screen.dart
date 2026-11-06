@@ -52,9 +52,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   DateTime _lastHardwareZoomTime = DateTime.fromMillisecondsSinceEpoch(0);
   final ValueNotifier<double> _zoomScaleNotifier = ValueNotifier<double>(1.0);
   final ValueNotifier<bool> _isPinchingNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<Offset?> _tapFocusOffset = ValueNotifier<Offset?>(null);
   Timer? _zoomOverlayTimer;
   Timer? _zoomThrottleTimer;
   Timer? _focusResetTimer;
+  Timer? _tapFocusTimer;
 
   @override
   void initState() {
@@ -68,6 +70,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       torchEnabled: false,
       cameraResolution: const Size(1920, 1080),
       formats: const [BarcodeFormat.all],
+      autoZoom: true,
     );
 
     if (_profile == null && widget.userId != null) {
@@ -88,8 +91,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     _zoomOverlayTimer?.cancel();
     _zoomThrottleTimer?.cancel();
     _focusResetTimer?.cancel();
+    _tapFocusTimer?.cancel();
     _zoomScaleNotifier.dispose();
     _isPinchingNotifier.dispose();
+    _tapFocusOffset.dispose();
     _scannerController.dispose();
     super.dispose();
   }
@@ -328,7 +333,16 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   void _handleTapToFocus(Offset tapPos) {
-    HapticFeedback.selectionClick();
+    HapticFeedback.mediumImpact();
+
+    // Show ephemeral pulsing focus ring at tapped coordinates for 1.2s
+    _tapFocusOffset.value = tapPos;
+    _tapFocusTimer?.cancel();
+    _tapFocusTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) {
+        _tapFocusOffset.value = null;
+      }
+    });
 
     if (!widget.useSimulatedFeed) {
       try {
@@ -407,6 +421,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                 child: GlareAlertBanner(message: state.glareBadgeText!),
               ),
             ),
+
+          // 4. Ephemeral Tap-to-Focus Indicator (Transient pulse ring)
+          _buildTapFocusIndicator(),
 
           // 5. Ephemeral Pinch-to-Zoom Floating Indicator (Isolated via ValueListenableBuilder)
           _buildPinchZoomIndicator(),
@@ -550,6 +567,55 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTapFocusIndicator() {
+    return ValueListenableBuilder<Offset?>(
+      valueListenable: _tapFocusOffset,
+      builder: (context, offset, _) {
+        if (offset == null) return const SizedBox.shrink();
+
+        const double ringSize = 48.0;
+        return Positioned(
+          left: offset.dx - (ringSize / 2),
+          top: offset.dy - (ringSize / 2),
+          child: IgnorePointer(
+            child: TweenAnimationBuilder<double>(
+              key: ValueKey(offset),
+              tween: Tween<double>(begin: 1.35, end: 1.0),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutBack,
+              builder: (context, scale, _) {
+                return Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: ringSize,
+                    height: ringSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF0F9D58),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 4.0,
+                        height: 4.0,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0F9D58),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
