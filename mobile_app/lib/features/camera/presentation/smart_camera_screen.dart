@@ -46,7 +46,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   double _currentZoomScale = 1.0;
   bool _isPinching = false;
   Timer? _zoomOverlayTimer;
-  Timer? _scanWindowResetTimer;
 
   @override
   void initState() {
@@ -59,7 +58,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       facing: CameraFacing.back,
       torchEnabled: false,
       cameraResolution: const Size(1920, 1080),
-      useNewCameraSelector: true,
       formats: const [BarcodeFormat.all],
     );
 
@@ -79,7 +77,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   @override
   void dispose() {
     _zoomOverlayTimer?.cancel();
-    _scanWindowResetTimer?.cancel();
     _scannerController.dispose();
     super.dispose();
   }
@@ -248,41 +245,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     });
   }
 
-  void _handleTapToFocus(Offset tapPos, Rect reticleRect) {
-    if (reticleRect.contains(tapPos)) {
-      HapticFeedback.selectionClick();
+  void _handleTapToFocus(Offset tapPos) {
+    HapticFeedback.selectionClick();
 
-      if (!widget.useSimulatedFeed) {
-        try {
-          // Re-assert zoom scale to trigger CameraX optical autofocus re-metering
-          final normalized = (_currentZoomScale - 1.0) / 4.0;
-          _scannerController.setZoomScale(normalized);
+    if (!widget.useSimulatedFeed) {
+      try {
+        final size = MediaQuery.of(context).size;
+        final relativeX = (tapPos.dx / size.width).clamp(0.0, 1.0);
+        final relativeY = (tapPos.dy / size.height).clamp(0.0, 1.0);
 
-          // Focus detection specifically to the tapped product region
-          final targetWindow = Rect.fromCenter(
-            center: tapPos,
-            width: 220,
-            height: 220,
-          );
-          _scannerController.updateScanWindow(targetWindow);
-        } catch (_) {}
-
-        // Smoothly reset scan window back to full reticle after 4 seconds
-        _scanWindowResetTimer?.cancel();
-        _scanWindowResetTimer = Timer(const Duration(seconds: 4), () {
-          if (mounted && !widget.useSimulatedFeed) {
-            try {
-              _scannerController.updateScanWindow(reticleRect);
-            } catch (_) {}
-          }
-        });
-      }
-    } else {
-      // Tap outside reticle: reset hardware scan window back to full reticle
-      if (!widget.useSimulatedFeed) {
-        try {
-          _scannerController.updateScanWindow(reticleRect);
-        } catch (_) {}
+        // Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
+        _scannerController.setFocusPoint(Offset(relativeX, relativeY));
+      } catch (e) {
+        debugPrint('Error triggering hardware focus: $e');
       }
     }
   }
@@ -312,7 +287,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               onScaleStart: _handleScaleStart,
               onScaleUpdate: (d) => _handleScaleUpdate(d, notifier),
               onScaleEnd: _handleScaleEnd,
-              onTapUp: (details) => _handleTapToFocus(details.localPosition, reticleRect),
+              onTapUp: (details) => _handleTapToFocus(details.globalPosition),
               child: widget.useSimulatedFeed
                   ? _buildSimulatedViewport()
                   : _buildLiveScannerViewport(scanWindow: reticleRect),
@@ -535,7 +510,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       controller: _scannerController,
       scanWindow: scanWindow,
       onDetect: _handleBarcodeCapture,
-      errorBuilder: (context, error, child) {
+      errorBuilder: (context, error) {
         return _buildSimulatedViewport(
           errorMessage: 'Camera preview unavailable: ${error.errorCode.name}',
         );
