@@ -154,6 +154,35 @@ class HomeDashboardService {
     }
   }
 
+  /// Log consumed product portion and deduct from today's safe sugar ceiling
+  Future<void> logConsumedProduct({
+    required String userId,
+    required String barcode,
+    required double consumedSugarGrams,
+    required bool hasRedAdditives,
+  }) async {
+    // 1. Record scan entry in database history
+    await recordScan(userId: userId, barcode: barcode);
+
+    // 2. Update local cache immediately for offline responsiveness
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_cachePrefix$userId');
+      if (raw != null) {
+        final Map<String, dynamic> cacheMap = jsonDecode(raw);
+        final currentSugar = (cacheMap['consumed_sugar'] as num?)?.toDouble() ?? 0.0;
+        final currentRed = (cacheMap['red_additives'] as num?)?.toInt() ?? 0;
+        cacheMap['consumed_sugar'] = double.parse((currentSugar + consumedSugarGrams).toStringAsFixed(1));
+        if (hasRedAdditives) {
+          cacheMap['red_additives'] = currentRed + 1;
+        }
+        await prefs.setString('$_cachePrefix$userId', jsonEncode(cacheMap));
+      }
+    } catch (e) {
+      debugPrint('Dashboard logConsumedProduct error: $e');
+    }
+  }
+
   Future<void> _saveToCache(String userId, HomeDashboardData data) async {
     try {
       final prefs = await SharedPreferences.getInstance();

@@ -14,6 +14,7 @@ import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
 import 'widgets/quick_macro_slider_sheet.dart';
 import 'widgets/scan_result_sheet.dart';
+import '../../results/presentation/verdict_report_screen.dart';
 
 /// Smart Camera Viewfinder Screen for VeriBite.
 /// Integrates live MobileScanner hardware stream, barcode lock-on, specular glare detection,
@@ -31,7 +32,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
     this.userProfile,
     this.onProductResolved,
     this.useSimulatedFeed = false,
-    this.disableResultSheet = true, // Temporarily disabled by default for camera testing
+    this.disableResultSheet = false, // Live scan active by default, toggleable on screen
   });
 
   @override
@@ -43,6 +44,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   late final ProductScannerService _productService;
   UserProfileModel? _profile;
   bool _isProcessingScan = false;
+  late bool _isLiveScanMode;
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
@@ -61,6 +63,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   @override
   void initState() {
     super.initState();
+    _isLiveScanMode = !widget.disableResultSheet;
     _productService = ProductScannerService();
     _profile = widget.userProfile;
 
@@ -112,10 +115,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   Future<void> _onBarcodeDetected(String rawBarcode) async {
-    // TEMPORARY: Result sheet popup suppressed for camera testing
-    if (widget.disableResultSheet) {
+    if (!_isLiveScanMode) {
       await HapticFeedback.selectionClick();
-      debugPrint('[Camera Test Mode] Barcode detected: $rawBarcode (Result sheet suppressed)');
+      debugPrint('[Camera Test Mode] Barcode detected: $rawBarcode (Result report suppressed in test mode)');
       return;
     }
 
@@ -134,7 +136,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
 
       if (!mounted) return;
-      _showScanResultSheet(resolvedProduct);
+      _showScanResultReport(resolvedProduct, activeProfile);
     } catch (e) {
       debugPrint('Error resolving barcode $rawBarcode: $e');
       if (mounted) {
@@ -150,6 +152,27 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         setState(() => _isProcessingScan = false);
       }
     }
+  }
+
+  void _showScanResultReport(ScannedProductResult product, UserProfileModel profile) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VerdictReportScreen(
+          product: product,
+          userProfile: profile,
+        ),
+      ),
+    ).then((result) {
+      if (widget.onProductResolved != null) {
+        widget.onProductResolved!({
+          'source': 'barcode',
+          'product_name': product.productName,
+          'health_score': product.healthScore,
+          'eaten': result == true,
+        });
+      }
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+    });
   }
 
   void _showScanResultSheet(ScannedProductResult product) {
@@ -480,6 +503,31 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                     ),
                   ),
                   const Spacer(),
+                  // Scan Mode Toggle (Live Scan vs Lens Testing Mode)
+                  CircleAvatar(
+                    backgroundColor: Colors.black45,
+                    child: IconButton(
+                      icon: Icon(
+                        _isLiveScanMode ? Icons.qr_code_scanner_rounded : Icons.camera_alt_outlined,
+                        color: _isLiveScanMode ? const Color(0xFF0F9D58) : Colors.white70,
+                      ),
+                      onPressed: () {
+                        setState(() => _isLiveScanMode = !_isLiveScanMode);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              _isLiveScanMode
+                                  ? 'Live Scan Active: Barcodes open Master Verdict'
+                                  : 'Lens Test Mode: Scan reports suppressed for camera testing',
+                            ),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      tooltip: _isLiveScanMode ? 'Live Scan Active' : 'Lens Test Mode',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   // Torch Toggle Button
                   CircleAvatar(
                     backgroundColor: Colors.black45,

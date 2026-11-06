@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/camera_reticle_painter.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/quick_macro_slider_sheet.dart';
-import 'package:mobile_app/features/camera/presentation/widgets/scan_result_sheet.dart';
+import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
 
 void main() {
   testWidgets('SmartCameraScreen renders reticle, torch toggle, and mode chips', (tester) async {
@@ -47,11 +47,11 @@ void main() {
     expect(find.textContaining('Curved Bottle Multi-Angle Mode'), findsOneWidget);
   });
 
-  testWidgets('SmartCameraScreen defaults to suppressing ScanResultSheet for camera testing', (tester) async {
+  testWidgets('SmartCameraScreen suppresses VerdictReportScreen when disableResultSheet is true', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
-          home: SmartCameraScreen(useSimulatedFeed: true),
+          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: true),
         ),
       ),
     );
@@ -63,11 +63,11 @@ void main() {
     await tester.tap(sampleButton);
     await tester.pumpAndSettle();
 
-    // Verify ScanResultSheet is suppressed and not shown
-    expect(find.byType(ScanResultSheet), findsNothing);
+    // Verify VerdictReportScreen is suppressed and not shown
+    expect(find.byType(VerdictReportScreen), findsNothing);
   });
 
-  testWidgets('SmartCameraScreen sample scan triggers lock-on and presents ScanResultSheet when enabled', (tester) async {
+  testWidgets('SmartCameraScreen sample scan triggers lock-on and presents VerdictReportScreen when enabled', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
@@ -83,11 +83,11 @@ void main() {
     await tester.tap(sampleButton);
     await tester.pumpAndSettle();
 
-    // Verify ScanResultSheet appeared with Good Day cookies
-    expect(find.byType(ScanResultSheet), findsOneWidget);
+    // Verify VerdictReportScreen appeared with Good Day cookies
+    expect(find.byType(VerdictReportScreen), findsOneWidget);
     expect(find.text('Good Day Butter Cookies'), findsOneWidget);
     expect(find.text('Britannia • Biscuits & Cookies'), findsOneWidget);
-    expect(find.text('I Ate This (Add to Today\'s Sugar Budget)'), findsOneWidget);
+    expect(find.text('I Ate This (Log to Today\'s Budget)'), findsOneWidget);
     expect(find.text('Just Checking (Don\'t Add to Budget)'), findsOneWidget);
   });
 
