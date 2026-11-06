@@ -46,10 +46,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
-  DateTime _lastZoomDispatchTime = DateTime.fromMillisecondsSinceEpoch(0);
+  int _activePointers = 0;
+  bool _isZoomDispatching = false;
+  double? _pendingZoomRatio;
+  DateTime _lastHardwareZoomTime = DateTime.fromMillisecondsSinceEpoch(0);
   final ValueNotifier<double> _zoomScaleNotifier = ValueNotifier<double>(1.0);
   final ValueNotifier<bool> _isPinchingNotifier = ValueNotifier<bool>(false);
   Timer? _zoomOverlayTimer;
+  Timer? _zoomThrottleTimer;
   Timer? _focusResetTimer;
 
   @override
@@ -82,6 +86,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   @override
   void dispose() {
     _zoomOverlayTimer?.cancel();
+    _zoomThrottleTimer?.cancel();
     _focusResetTimer?.cancel();
     _zoomScaleNotifier.dispose();
     _isPinchingNotifier.dispose();
@@ -228,44 +233,46 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
+    _activePointers = details.pointerCount;
     _baseZoomScale = _currentZoomScale;
-    _lastZoomDispatchTime = DateTime.now();
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details, CameraScanNotifier notifier) {
     if (details.pointerCount >= 2) {
-      final targetZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
+      // Re-anchor baseline if transitioning into a multi-finger pinch gesture
+      if (_activePointers < 2) {
+        _activePointers = details.pointerCount;
+        _baseZoomScale = _currentZoomScale;
+        return;
+      }
+      _activePointers = details.pointerCount;
 
-      // Low-pass exponential smoothing filter for buttery fluid tracking without capacitive jitter
-      _currentZoomScale = _currentZoomScale + (targetZoom - _currentZoomScale) * 0.45;
-      _currentZoomScale = _currentZoomScale.clamp(1.0, 5.0);
+      // Direct 1:1 hardware magnification ratio without artificial lag or non-linear jumps
+      final targetZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
+      _currentZoomScale = targetZoom;
 
       _zoomScaleNotifier.value = _currentZoomScale;
       _isPinchingNotifier.value = true;
       _zoomOverlayTimer?.cancel();
 
-      // Throttle platform channel calls to 30Hz (~32ms) to prevent IPC backlog and frame drops
-      final now = DateTime.now();
-      if (now.difference(_lastZoomDispatchTime).inMilliseconds >= 32) {
-        _lastZoomDispatchTime = now;
-        final normalized = (_currentZoomScale - 1.0) / 4.0;
-        if (!widget.useSimulatedFeed) {
-          try {
-            _scannerController.setZoomScale(normalized);
-          } catch (_) {}
-        }
-      }
+      _dispatchZoomRatio(_currentZoomScale);
+    } else {
+      _activePointers = details.pointerCount;
     }
   }
 
   void _handleScaleEnd(ScaleEndDetails details, CameraScanNotifier notifier) {
-    // Settle camera hardware at exact final zoom ratio
-    final normalized = (_currentZoomScale - 1.0) / 4.0;
-    if (!widget.useSimulatedFeed) {
-      try {
-        _scannerController.setZoomScale(normalized);
-      } catch (_) {}
+    _activePointers = 0;
+    _zoomThrottleTimer?.cancel();
+
+    // Guarantee the final settled zoom ratio reaches camera hardware
+    _pendingZoomRatio = _currentZoomScale;
+    if (!_isZoomDispatching) {
+      final toSend = _pendingZoomRatio!;
+      _pendingZoomRatio = null;
+      _sendZoomToHardware(toSend);
     }
+
     notifier.setZoomScale(_currentZoomScale);
 
     _zoomOverlayTimer?.cancel();
@@ -273,6 +280,50 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       if (mounted) {
         _isPinchingNotifier.value = false;
       }
+    });
+  }
+
+  void _dispatchZoomRatio(double ratio) {
+    if (widget.useSimulatedFeed) return;
+    _pendingZoomRatio = ratio;
+
+    if (_isZoomDispatching) return;
+
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastHardwareZoomTime).inMilliseconds;
+
+    // Pace requests to max ~60fps (16ms) to avoid saturating Camera2 capture session
+    if (elapsed < 16) {
+      _zoomThrottleTimer?.cancel();
+      _zoomThrottleTimer = Timer(Duration(milliseconds: 16 - elapsed), () {
+        if (mounted && _pendingZoomRatio != null && !_isZoomDispatching) {
+          final toSend = _pendingZoomRatio!;
+          _pendingZoomRatio = null;
+          _sendZoomToHardware(toSend);
+        }
+      });
+      return;
+    }
+
+    _zoomThrottleTimer?.cancel();
+    final toSend = _pendingZoomRatio!;
+    _pendingZoomRatio = null;
+    _sendZoomToHardware(toSend);
+  }
+
+  void _sendZoomToHardware(double ratio) {
+    _isZoomDispatching = true;
+    _lastHardwareZoomTime = DateTime.now();
+
+    _scannerController.setZoomRatio(ratio).then((_) {
+      _isZoomDispatching = false;
+      if (_pendingZoomRatio != null && mounted) {
+        final next = _pendingZoomRatio!;
+        _pendingZoomRatio = null;
+        _dispatchZoomRatio(next);
+      }
+    }).catchError((_) {
+      _isZoomDispatching = false;
     });
   }
 

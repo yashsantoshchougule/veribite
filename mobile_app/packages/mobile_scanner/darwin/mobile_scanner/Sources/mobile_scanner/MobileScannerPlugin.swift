@@ -162,6 +162,8 @@ public class MobileScannerPlugin: NSObject, FlutterPlugin, FlutterStreamHandler,
             getBestCloseRangeScanningLens(call, result)
         case "setScale":
             setScale(call, result)
+        case "setZoomRatio":
+            setZoomRatio(call, result)
         case "setFocus":
             setFocus(call, result)
         case "resetFocus":
@@ -728,6 +730,27 @@ public class MobileScannerPlugin: NSObject, FlutterPlugin, FlutterStreamHandler,
             result(FlutterError(code: MobileScannerErrorCodes.GENERIC_ERROR,
                                 message: MobileScannerErrorCodes.GENERIC_ERROR_MESSAGE,
                                 details: nil))
+        }
+    }
+
+    private func setZoomRatio(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let ratio = args["ratio"] as? CGFloat else {
+            result(nil)
+            return
+        }
+        guard let device = device else {
+            result(nil)
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 10.0)
+            device.videoZoomFactor = max(1.0, min(ratio, maxZoom))
+            device.unlockForConfiguration()
+            result(nil)
+        } catch {
+            result(nil)
         }
     }
 

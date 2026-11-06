@@ -430,6 +430,20 @@ class MobileScannerController extends ValueNotifier<MobileScannerState> {
     await MobileScannerPlatform.instance.setZoomScale(clampedZoomScale);
   }
 
+  /// Set the actual magnification ratio of the camera (e.g. 1.0 to 10.0).
+  ///
+  /// Does nothing if the camera is not running.
+  Future<void> setZoomRatio(double ratio) async {
+    _throwIfNotInitialized();
+
+    if (!value.isRunning) {
+      return;
+    }
+
+    final clampedRatio = ratio.clamp(1.0, 10.0);
+    await MobileScannerPlatform.instance.setZoomRatio(clampedRatio);
+  }
+
   /// Set the focus point for the camera.
   ///
   /// The [position] must be a point between `0,0` and `1,1`, both inclusive.

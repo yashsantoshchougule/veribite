@@ -63,6 +63,10 @@ class MethodChannelMobileScanner extends MobileScannerPlatform {
   @visibleForTesting
   static const String kSetScaleMethodName = 'setScale';
 
+  /// The name of the method that sets the zoom ratio.
+  @visibleForTesting
+  static const String kSetZoomRatioMethodName = 'setZoomRatio';
+
   /// The name of the method that sets the focus point.
   @visibleForTesting
   static const String kSetFocusMethodName = 'setFocus';
@@ -350,6 +354,16 @@ class MethodChannelMobileScanner extends MobileScannerPlatform {
   @override
   Future<void> setZoomScale(double zoomScale) async {
     await methodChannel.invokeMethod<void>(kSetScaleMethodName, zoomScale);
+  }
+
+  @override
+  Future<void> setZoomRatio(double ratio) async {
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    await methodChannel.invokeMethod<void>(kSetZoomRatioMethodName, {'ratio': ratio});
   }
 
   @override

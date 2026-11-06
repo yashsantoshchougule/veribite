@@ -96,6 +96,11 @@ abstract class MobileScannerPlatform extends PlatformInterface {
     throw UnimplementedError('setZoomScale() has not been implemented.');
   }
 
+  /// Set the actual magnification ratio of the camera (e.g. 1.0 to 10.0).
+  Future<void> setZoomRatio(double ratio) {
+    throw UnimplementedError('setZoomRatio() has not been implemented.');
+  }
+
   /// Set the focus position for the camera.
   ///
   /// The provided point should be in the range `(0,0) - (1,1)`, both inclusive,

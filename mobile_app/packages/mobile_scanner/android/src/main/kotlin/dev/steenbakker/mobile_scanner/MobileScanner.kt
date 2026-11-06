@@ -804,8 +804,12 @@ class MobileScanner(
     }
 
     fun setZoomRatio(zoomRatio: Double) {
-        if (camera == null) throw ZoomWhenStopped()
-        camera?.cameraControl?.setZoomRatio(zoomRatio.toFloat())
+        val cam = camera ?: throw ZoomWhenStopped()
+        val zoomState = cam.cameraInfo.zoomState.value
+        val minRatio = zoomState?.minZoomRatio ?: 1f
+        val maxRatio = zoomState?.maxZoomRatio ?: 10f
+        val clamped = zoomRatio.toFloat().coerceIn(minRatio, maxRatio)
+        cam.cameraControl.setZoomRatio(clamped)
     }
 
     /**

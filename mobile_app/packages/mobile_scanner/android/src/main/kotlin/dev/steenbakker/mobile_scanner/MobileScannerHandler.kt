@@ -157,6 +157,7 @@ class MobileScannerHandler(
             "getBestCloseRangeScanningLens" -> getBestCloseRangeScanningLens(result)
             "analyzeImage" -> analyzeImage(call, result)
             "setScale" -> setScale(call, result)
+            "setZoomRatio" -> setZoomRatioMethod(call, result)
             "resetScale" -> resetScale(result)
             "updateScanWindow" -> updateScanWindow(call, result)
             "setFocus" -> setFocus(call, result)
@@ -360,6 +361,22 @@ class MobileScannerHandler(
             return true
         } catch (e: ZoomWhenStopped) { }
         return false
+    }
+
+    private fun setZoomRatioMethod(call: MethodCall, result: MethodChannel.Result) {
+        val ratio: Double? = call.argument<Double>("ratio")
+        if (ratio == null) {
+            result.error(MobileScannerErrorCodes.GENERIC_ERROR, "Zoom ratio cannot be null", null)
+            return
+        }
+        try {
+            mobileScanner?.setZoomRatio(ratio)
+            result.success(null)
+        } catch (e: ZoomWhenStopped) {
+            result.error(MobileScannerErrorCodes.SET_SCALE_WHEN_STOPPED_ERROR, "Cannot set zoom when stopped", null)
+        } catch (e: Exception) {
+            result.error(MobileScannerErrorCodes.GENERIC_ERROR, e.localizedMessage, null)
+        }
     }
 
     private fun resetScale(result: MethodChannel.Result) {
