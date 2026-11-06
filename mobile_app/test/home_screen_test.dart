@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/core/theme/app_colors.dart';
+import 'package:mobile_app/features/advisor/presentation/advisor_chat_screen.dart';
 import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart';
 import 'package:mobile_app/features/home/application/home_dashboard_service.dart';
 import 'package:mobile_app/features/home/domain/home_dashboard_data.dart';
@@ -240,6 +241,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(SmartCameraScreen), findsOneWidget);
+    });
+
+    testWidgets('tapping Advisor tab on Bottom Nav navigates to AdvisorChatScreen', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      final advisorTab = find.byIcon(Icons.auto_awesome_outlined);
+      await tester.tap(advisorTab);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdvisorChatScreen), findsOneWidget);
+      expect(find.text('VeriBite AI Advisor'), findsAtLeastNWidgets(1));
     });
 
     testWidgets('tapping Profile on Top Header navigates to ProfileScreen', (tester) async {

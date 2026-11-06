@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../advisor/domain/advisor_chat_model.dart';
+import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
@@ -109,6 +111,28 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     );
   }
 
+  void _openAdvisor() {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AdvisorChatScreen(
+          userProfile: widget.userProfile,
+          initialProductContext: ProductAdvisorContext(
+            productName: widget.product.productName,
+            barcode: widget.product.barcode,
+            healthScore: widget.product.healthScore,
+            additives: widget.product.additives,
+            nutrition: {
+              'sugars_100g': widget.product.sugarGPer100g,
+              'sugar_per_serving_g': widget.product.sugarGPerServing,
+              'calories': widget.product.caloriesPerServing,
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
@@ -160,9 +184,14 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                           // 5. Prescribed Safe Consumption Portion Card
                           _buildSafePortionPrescriptionCard(),
 
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
 
-                          // 6. Navigation CTA: View Full Ingredients Breakdown
+                          // 6. Navigation CTA: Ask AI About This Product
+                          _buildAskAIAdvisorCTA(),
+
+                          const SizedBox(height: 14),
+
+                          // 7. Navigation CTA: View Full Ingredients Breakdown
                           _buildIngredientsCTA(),
 
                           const SizedBox(height: 18),
@@ -584,6 +613,51 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAskAIAdvisorCTA() {
+    return InkWell(
+      onTap: _openAdvisor,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE6F4EA),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF0F9D58).withValues(alpha: 0.35), width: 1.2),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: Color(0xFF0F9D58), size: 22),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ask AI About This Product',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                  Text(
+                    'Get personalized advice, diabetic safety & alternatives',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMutedMocha,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_rounded, color: Color(0xFF0F9D58), size: 20),
+          ],
+        ),
       ),
     );
   }

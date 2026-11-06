@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/presentation/smart_camera_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/application/user_profile_service.dart';
@@ -77,6 +78,16 @@ class _HomeScreenState extends State<HomeScreen> {
     ).then((_) {
       _loadAllData();
     });
+  }
+
+  void _openAdvisor() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AdvisorChatScreen(
+          userProfile: _profile,
+        ),
+      ),
+    );
   }
 
   @override
@@ -829,6 +840,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (index == 2) {
             // Center Scan Button opens camera
             _openCamera();
+          } else if (index == 3) {
+            // Advisor Tab opens Advisor Chat Screen
+            _openAdvisor();
           } else if (index == 4) {
             // Profile Tab opens User Details Screen
             _openProfile();

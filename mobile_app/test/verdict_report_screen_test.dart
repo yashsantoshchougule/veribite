@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_app/features/advisor/presentation/advisor_chat_screen.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/results/presentation/ingredient_breakdown_screen.dart';
@@ -95,6 +96,7 @@ void main() {
     // Verify action buttons
     expect(find.text('I Ate This (Log to Today\'s Budget)'), findsOneWidget);
     expect(find.text('Just Checking (Don\'t Add to Budget)'), findsOneWidget);
+    expect(find.text('Ask AI About This Product'), findsOneWidget);
     expect(find.text('Full Ingredients & Toxicology Breakdown'), findsOneWidget);
   });
 
@@ -204,5 +206,25 @@ void main() {
     await tester.tap(gotItFinder);
     await tester.pumpAndSettle();
     expect(find.byType(IngredientDeepDiveSheet), findsNothing);
+  });
+
+  testWidgets('VerdictReportScreen tapping Ask AI CTA navigates to AdvisorChatScreen with product context', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testSafeProduct,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final askAIFinder = find.text('Ask AI About This Product');
+    await tester.ensureVisible(askAIFinder);
+    await tester.tap(askAIFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AdvisorChatScreen), findsOneWidget);
+    expect(find.textContaining('100% Whole Grain Rolled Oats'), findsAtLeastNWidgets(1));
   });
 }
