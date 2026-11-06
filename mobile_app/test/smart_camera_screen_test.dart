@@ -47,11 +47,31 @@ void main() {
     expect(find.textContaining('Curved Bottle Multi-Angle Mode'), findsOneWidget);
   });
 
-  testWidgets('SmartCameraScreen sample scan triggers lock-on and presents ScanResultSheet', (tester) async {
+  testWidgets('SmartCameraScreen defaults to suppressing ScanResultSheet for camera testing', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
           home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+
+    // Tap sample scan button
+    final sampleButton = find.text('Simulate Sample Scan (Good Day)');
+    expect(sampleButton, findsOneWidget);
+
+    await tester.tap(sampleButton);
+    await tester.pumpAndSettle();
+
+    // Verify ScanResultSheet is suppressed and not shown
+    expect(find.byType(ScanResultSheet), findsNothing);
+  });
+
+  testWidgets('SmartCameraScreen sample scan triggers lock-on and presents ScanResultSheet when enabled', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: false),
         ),
       ),
     );

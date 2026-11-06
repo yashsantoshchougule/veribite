@@ -23,6 +23,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
   final UserProfileModel? userProfile;
   final ValueChanged<Map<String, dynamic>>? onProductResolved;
   final bool useSimulatedFeed;
+  final bool disableResultSheet;
 
   const SmartCameraScreen({
     super.key,
@@ -30,6 +31,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
     this.userProfile,
     this.onProductResolved,
     this.useSimulatedFeed = false,
+    this.disableResultSheet = true, // Temporarily disabled by default for camera testing
   });
 
   @override
@@ -100,6 +102,13 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   Future<void> _onBarcodeDetected(String rawBarcode) async {
+    // TEMPORARY: Result sheet popup suppressed for camera testing
+    if (widget.disableResultSheet) {
+      await HapticFeedback.selectionClick();
+      debugPrint('[Camera Test Mode] Barcode detected: $rawBarcode (Result sheet suppressed)');
+      return;
+    }
+
     if (_isProcessingScan) return;
     setState(() => _isProcessingScan = true);
 
