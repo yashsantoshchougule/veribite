@@ -7,17 +7,22 @@ import android.graphics.Rect
 import android.hardware.SensorManager
 import android.media.Image
 import android.net.Uri
+import android.hardware.camera2.CaptureRequest
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import android.view.WindowManager
 import androidx.annotation.VisibleForTesting
 import androidx.camera.camera2.Camera2Config
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
 import androidx.camera.core.CameraXConfig
+import androidx.camera.core.DisplayOrientedMeteringPointFactory
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ExperimentalLensFacing
 import androidx.camera.core.FocusMeteringAction
@@ -495,14 +500,40 @@ class MobileScanner(
 
             // Preview
 
-            // Build the preview to be shown on the Flutter texture
+            // Build the preview to be shown on the Flutter texture with continuous AF
             val previewBuilder = Preview.Builder()
+            try {
+                val extender = Camera2Interop.Extender(previewBuilder)
+                extender.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                )
+                extender.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON
+                )
+            } catch (e: Exception) {
+                Log.w("MobileScanner", "Failed to configure Camera2 continuous AF mode: ${e.message}")
+            }
             preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
-            // Build the analyzer to be passed on to MLKit
+            // Build the analyzer to be passed on to MLKit with continuous AF tracking
             val analysisBuilder = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            try {
+                val extender = Camera2Interop.Extender(analysisBuilder)
+                extender.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                )
+                extender.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON
+                )
+            } catch (e: Exception) {
+                Log.w("MobileScanner", "Failed to configure Camera2 continuous AF on analyzer: ${e.message}")
+            }
 
             val cameraResolution =  cameraResolutionWanted ?: Size(1920, 1080)
 
@@ -831,19 +862,39 @@ class MobileScanner(
         // Cancel previous manual focus/metering to start from a clean slate
         cam.cameraControl.cancelFocusAndMetering()
 
-        val currentPreview = preview
-        val factory: MeteringPointFactory = if (currentPreview != null) {
-            SurfaceOrientedMeteringPointFactory(1f, 1f, currentPreview)
-        } else {
-            SurfaceOrientedMeteringPointFactory(1f, 1f)
+        // Use DisplayOrientedMeteringPointFactory to account for the physical 90° sensor rotation
+        // relative to portrait display coordinates. Fallback to SurfaceOriented if display is unavailable.
+        val factory: MeteringPointFactory = try {
+            @Suppress("DEPRECATION")
+            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activity.display ?: (activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
+            } else {
+                (activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
+            }
+            DisplayOrientedMeteringPointFactory(display, cam.cameraInfo, 1f, 1f)
+        } catch (_: Exception) {
+            val currentPreview = preview
+            if (currentPreview != null) {
+                SurfaceOrientedMeteringPointFactory(1f, 1f, currentPreview)
+            } else {
+                SurfaceOrientedMeteringPointFactory(1f, 1f)
+            }
         }
-        val afPoint: MeteringPoint = factory.createPoint(x, y)
+        val afPoint: MeteringPoint = factory.createPoint(x, y, 0.15f)
 
         val action = FocusMeteringAction.Builder(afPoint, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
-            .setAutoCancelDuration(2, TimeUnit.SECONDS)
+            .setAutoCancelDuration(3, TimeUnit.SECONDS)
             .build()
 
-        cam.cameraControl.startFocusAndMetering(action)
+        val future = cam.cameraControl.startFocusAndMetering(action)
+        future.addListener({
+            try {
+                val result = future.get()
+                Log.d("MobileScanner", "startFocusAndMetering completed: isFocusSuccessful=${result.isFocusSuccessful}")
+            } catch (e: Exception) {
+                Log.e("MobileScanner", "startFocusAndMetering error: ${e.message}")
+            }
+        }, ContextCompat.getMainExecutor(activity))
     }
 
     fun resetFocus() {

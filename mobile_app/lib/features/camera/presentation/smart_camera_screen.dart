@@ -339,10 +339,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         // 1. Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
         _scannerController.setFocusPoint(Offset(relativeX, relativeY));
 
-        // 2. Safety fallback: automatically reset focus back to continuous mode after 2.5s
+        // 2. Safety fallback: automatically reset focus back to continuous mode after 3.0s
         // ensuring the lens NEVER gets stuck in a blurred lock state
         _focusResetTimer?.cancel();
-        _focusResetTimer = Timer(const Duration(milliseconds: 2500), () {
+        _focusResetTimer = Timer(const Duration(milliseconds: 3000), () {
           if (mounted && !widget.useSimulatedFeed) {
             try {
               _scannerController.resetFocus();

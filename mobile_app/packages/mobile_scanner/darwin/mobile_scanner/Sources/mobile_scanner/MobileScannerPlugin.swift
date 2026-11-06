@@ -796,8 +796,8 @@ public class MobileScannerPlugin: NSObject, FlutterPlugin, FlutterStreamHandler,
     
     private func setFocus(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
         guard let args = call.arguments as? [String: Any],
-                  let dx = args["dx"] as? CGFloat,
-                  let dy = args["dy"] as? CGFloat else {
+              let dx = (args["dx"] ?? args["x"]) as? CGFloat,
+              let dy = (args["dy"] ?? args["y"]) as? CGFloat else {
                 result(FlutterError(code: MobileScannerErrorCodes.INVALID_FOCUS_POINT,
                                     message: MobileScannerErrorCodes.INVALID_FOCUS_POINT_MESSAGE,
                                     details: nil))
