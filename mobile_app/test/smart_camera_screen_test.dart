@@ -122,14 +122,17 @@ void main() {
     expect(overlay.reticleWidth, greaterThanOrEqualTo(320.0));
     expect(overlay.reticleHeight, greaterThanOrEqualTo(300.0));
 
-    // Confirm complete removal of permanent clutter
+    // Confirm complete removal of legacy permanent clutter
     expect(find.text('AF Lock Active • Tap to Release'), findsNothing);
-    expect(find.text('1.0x'), findsNothing);
     expect(find.text('1.5x Macro'), findsNothing);
-    expect(find.text('2.0x'), findsNothing);
 
-    // Confirm clean native guidance
-    expect(find.text('Tap barcode or ingredients to focus • Pinch to zoom'), findsOneWidget);
+    // Confirm presence of quick zoom preset pills
+    expect(find.text('1x'), findsOneWidget);
+    expect(find.text('1.5x'), findsOneWidget);
+    expect(find.text('2.0x'), findsOneWidget);
+
+    // Confirm clean distance guidance
+    expect(find.text('Hold 15-20 cm away • Tap 1.5x/2x for close barcodes'), findsOneWidget);
   });
 
   testWidgets('tapping inside reticle triggers tap-to-focus without drawing any green box or clutter', (tester) async {
@@ -183,5 +186,21 @@ void main() {
     // After 1000ms, zoom indicator fades away
     await tester.pump(const Duration(milliseconds: 1000));
     expect(find.byIcon(Icons.zoom_in_rounded), findsNothing);
+  });
+
+  testWidgets('tapping quick zoom preset pill smoothly updates zoom level', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+
+    expect(find.text('1.5x'), findsOneWidget);
+    await tester.tap(find.text('1.5x'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1.5x'), findsOneWidget);
   });
 }

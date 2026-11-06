@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../home/application/home_dashboard_service.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../application/camera_scan_notifier.dart';
@@ -13,7 +12,6 @@ import 'widgets/camera_reticle_painter.dart';
 import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
 import 'widgets/quick_macro_slider_sheet.dart';
-import 'widgets/scan_result_sheet.dart';
 import '../../results/presentation/verdict_report_screen.dart';
 
 /// Smart Camera Viewfinder Screen for VeriBite.
@@ -39,7 +37,8 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
   ConsumerState<SmartCameraScreen> createState() => _SmartCameraScreenState();
 }
 
-class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
+class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen>
+    with SingleTickerProviderStateMixin {
   late final MobileScannerController _scannerController;
   late final ProductScannerService _productService;
   UserProfileModel? _profile;
@@ -49,6 +48,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
   int _activePointers = 0;
+  bool _wasPinching = false;
+  double _lastDispatchedZoom = 1.0;
   bool _isZoomDispatching = false;
   double? _pendingZoomRatio;
   DateTime _lastHardwareZoomTime = DateTime.fromMillisecondsSinceEpoch(0);
@@ -59,6 +60,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   Timer? _zoomThrottleTimer;
   Timer? _focusResetTimer;
   Timer? _tapFocusTimer;
+  late final AnimationController _zoomAnimController;
+  Animation<double>? _zoomAnimation;
 
   @override
   void initState() {
@@ -66,6 +69,17 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     _isLiveScanMode = !widget.disableResultSheet;
     _productService = ProductScannerService();
     _profile = widget.userProfile;
+
+    _zoomAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    )..addListener(() {
+        if (_zoomAnimation != null) {
+          _currentZoomScale = _zoomAnimation!.value;
+          _zoomScaleNotifier.value = _currentZoomScale;
+          _dispatchZoomRatio(_currentZoomScale);
+        }
+      });
 
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.normal,
@@ -95,11 +109,40 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     _zoomThrottleTimer?.cancel();
     _focusResetTimer?.cancel();
     _tapFocusTimer?.cancel();
+    _zoomAnimController.dispose();
     _zoomScaleNotifier.dispose();
     _isPinchingNotifier.dispose();
     _tapFocusOffset.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  void _animateToZoom(double targetZoom) {
+    if (widget.useSimulatedFeed) {
+      _currentZoomScale = targetZoom;
+      _zoomScaleNotifier.value = targetZoom;
+      ref.read(cameraScanNotifierProvider.notifier).setZoomScale(targetZoom);
+      return;
+    }
+    HapticFeedback.selectionClick();
+    _zoomOverlayTimer?.cancel();
+    _isPinchingNotifier.value = true;
+
+    _zoomAnimController.stop();
+    final startZoom = _currentZoomScale;
+    _zoomAnimation = Tween<double>(begin: startZoom, end: targetZoom).animate(
+      CurvedAnimation(parent: _zoomAnimController, curve: Curves.easeInOutCubic),
+    );
+    _zoomAnimController.forward(from: 0.0).then((_) {
+      if (mounted) {
+        ref.read(cameraScanNotifierProvider.notifier).setZoomScale(targetZoom);
+        _zoomOverlayTimer = Timer(const Duration(milliseconds: 900), () {
+          if (mounted) {
+            _isPinchingNotifier.value = false;
+          }
+        });
+      }
+    });
   }
 
   void _handleBarcodeCapture(BarcodeCapture capture) {
@@ -172,63 +215,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         });
       }
       ref.read(cameraScanNotifierProvider.notifier).reset();
-    });
-  }
-
-  void _showScanResultSheet(ScannedProductResult product) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ScanResultSheet(
-        product: product,
-        onLogConsumed: () async {
-          Navigator.of(ctx).pop();
-
-          // Record scan in Supabase / Local History
-          if (widget.userId != null) {
-            await HomeDashboardService().recordScan(
-              userId: widget.userId!,
-              barcode: product.barcode,
-            );
-          }
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Added ${product.productName} to today\'s consumption budget!'),
-                backgroundColor: AppColors.primaryObsidian,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
-
-          if (widget.onProductResolved != null) {
-            widget.onProductResolved!({
-              'source': 'barcode',
-              'product_name': product.productName,
-              'health_score': product.healthScore,
-              'eaten': true,
-            });
-          }
-
-          ref.read(cameraScanNotifierProvider.notifier).reset();
-        },
-        onDismissWithoutLog: () {
-          Navigator.of(ctx).pop();
-          if (widget.onProductResolved != null) {
-            widget.onProductResolved!({
-              'source': 'barcode',
-              'product_name': product.productName,
-              'health_score': product.healthScore,
-              'eaten': false,
-            });
-          }
-          ref.read(cameraScanNotifierProvider.notifier).reset();
-        },
-      ),
-    ).then((_) {
-      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (result == true && mounted) {
+        // If meal was consumed, return to Dashboard to show updated daily meters
+        Navigator.of(context).maybePop();
+      }
     });
   }
 
@@ -245,7 +235,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
             macros: macros,
             userProfile: activeProfile,
           );
-          _showScanResultSheet(resolved);
+          _showScanResultReport(resolved, activeProfile);
         },
       ),
     );
@@ -263,10 +253,15 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   void _handleScaleStart(ScaleStartDetails details) {
     _activePointers = details.pointerCount;
     _baseZoomScale = _currentZoomScale;
+    _wasPinching = details.pointerCount >= 2;
+    if (_wasPinching) {
+      _zoomAnimController.stop();
+    }
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details, CameraScanNotifier notifier) {
     if (details.pointerCount >= 2) {
+      _wasPinching = true;
       // Re-anchor baseline if transitioning into a multi-finger pinch gesture
       if (_activePointers < 2) {
         _activePointers = details.pointerCount;
@@ -291,6 +286,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   void _handleScaleEnd(ScaleEndDetails details, CameraScanNotifier notifier) {
     _activePointers = 0;
+    if (!_wasPinching) {
+      // Single tap release - NEVER send hardware zoom that cancels autofocus!
+      return;
+    }
+    _wasPinching = false;
     _zoomThrottleTimer?.cancel();
 
     // Guarantee the final settled zoom ratio reaches camera hardware
@@ -320,10 +320,15 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     final now = DateTime.now();
     final elapsed = now.difference(_lastHardwareZoomTime).inMilliseconds;
 
-    // Pace requests to max ~60fps (16ms) to avoid saturating Camera2 capture session
-    if (elapsed < 16) {
+    // Deadband check: if change is smaller than 0.03 and within 30ms window, avoid flooding Camera2
+    if ((ratio - _lastDispatchedZoom).abs() < 0.03 && elapsed < 30) {
+      return;
+    }
+
+    // Pace requests to ~30fps (30ms) to prevent Camera2 pipeline congestion
+    if (elapsed < 30) {
       _zoomThrottleTimer?.cancel();
-      _zoomThrottleTimer = Timer(Duration(milliseconds: 16 - elapsed), () {
+      _zoomThrottleTimer = Timer(Duration(milliseconds: 30 - elapsed), () {
         if (mounted && _pendingZoomRatio != null && !_isZoomDispatching) {
           final toSend = _pendingZoomRatio!;
           _pendingZoomRatio = null;
@@ -342,6 +347,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   void _sendZoomToHardware(double ratio) {
     _isZoomDispatching = true;
     _lastHardwareZoomTime = DateTime.now();
+    _lastDispatchedZoom = ratio;
 
     _scannerController.setZoomRatio(ratio).then((_) {
       _isZoomDispatching = false;
@@ -373,13 +379,13 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         final relativeX = (tapPos.dx / size.width).clamp(0.0, 1.0);
         final relativeY = (tapPos.dy / size.height).clamp(0.0, 1.0);
 
-        // 1. Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
+        // 1. Hardware optical auto-focus and auto-exposure metering
         _scannerController.setFocusPoint(Offset(relativeX, relativeY));
 
-        // 2. Safety fallback: automatically reset focus back to continuous mode after 3.0s
+        // 2. Safety fallback: automatically reset focus back to continuous mode after 2.0s
         // ensuring the lens NEVER gets stuck in a blurred lock state
         _focusResetTimer?.cancel();
-        _focusResetTimer = Timer(const Duration(milliseconds: 3000), () {
+        _focusResetTimer = Timer(const Duration(milliseconds: 2000), () {
           if (mounted && !widget.useSimulatedFeed) {
             try {
               _scannerController.resetFocus();
@@ -480,8 +486,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                           label: const Text('Barcode / Auto', style: TextStyle(fontSize: 12)),
                           selected: !state.isMultiAngleMode,
                           selectedColor: const Color(0xFF0F9D58),
+                          backgroundColor: Colors.white12,
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           labelStyle: TextStyle(
                             color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                            fontWeight: FontWeight.w600,
                           ),
                           onSelected: (val) {
                             if (val) notifier.setMultiAngleMode(false);
@@ -492,8 +502,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                           label: const Text('Curved Bottle', style: TextStyle(fontSize: 12)),
                           selected: state.isMultiAngleMode,
                           selectedColor: const Color(0xFF4285F4),
+                          backgroundColor: Colors.white12,
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           labelStyle: TextStyle(
                             color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                            fontWeight: FontWeight.w600,
                           ),
                           onSelected: (val) {
                             if (val) notifier.setMultiAngleMode(true);
@@ -554,6 +568,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Quick Zoom Pills (1x, 1.5x, 2x)
+                  _buildQuickZoomSelector(),
+                  const SizedBox(height: 10),
                   if (state.isMultiAngleMode)
                     MultiAngleCaptureStrip(
                       capturedFramesCount: state.capturedFrames.length,
@@ -578,7 +595,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       child: Text(
                         _isProcessingScan
                             ? 'Resolving product toxicology...'
-                            : 'Tap barcode or ingredients to focus • Pinch to zoom',
+                            : 'Hold 15-20 cm away • Tap 1.5x/2x for close barcodes',
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                         textAlign: TextAlign.center,
                       ),
@@ -717,6 +734,52 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                 },
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildQuickZoomSelector() {
+    final presets = [1.0, 1.5, 2.0];
+    return ValueListenableBuilder<double>(
+      valueListenable: _zoomScaleNotifier,
+      builder: (context, currentZoom, _) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: presets.map((preset) {
+              final isSelected = (currentZoom - preset).abs() < 0.15;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: InkWell(
+                  onTap: () => _animateToZoom(preset),
+                  borderRadius: BorderRadius.circular(16),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF0F9D58) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '${preset == 1.0 ? '1' : preset.toStringAsFixed(1)}x',
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontSize: 12.5,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         );
       },
