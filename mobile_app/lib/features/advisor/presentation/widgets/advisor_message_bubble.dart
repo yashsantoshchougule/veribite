@@ -4,7 +4,8 @@ import '../../domain/advisor_chat_model.dart';
 
 /// Formatted message card for both user questions and AI advisor answers.
 /// AI bubbles display official regulatory citation tags, safe portion badges,
-/// and engine provenance pills (Gemini 2.5 Flash vs Offline Fallback).
+/// and engine provenance pills (Gemini 2.5 Flash vs Offline Fallback) styled
+/// with VeriBite's Warm Luxury Alabaster & Midnight Obsidian palette.
 class AdvisorMessageBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -28,14 +29,21 @@ class AdvisorMessageBubble extends StatelessWidget {
         margin: const EdgeInsets.only(left: 48, right: 16, top: 6, bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
+          color: AppColors.primaryObsidian,
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(18),
             topRight: Radius.circular(18),
             bottomLeft: Radius.circular(18),
             bottomRight: Radius.circular(4),
           ),
-          border: Border.all(color: const Color(0xFF334155)),
+          border: Border.all(color: AppColors.primaryObsidian),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF8C7A6B).withValues(alpha: 0.12),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Text(
           message.text,
@@ -43,6 +51,7 @@ class AdvisorMessageBubble extends StatelessWidget {
             color: Colors.white,
             fontSize: 14.5,
             height: 1.4,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),
@@ -60,30 +69,42 @@ class AdvisorMessageBubble extends StatelessWidget {
             : 'Rule-Based Evidence Fallback';
 
     final badgeColor = isGemini
-        ? const Color(0xFF0F9D58)
+        ? AppColors.safetyMint
         : isOffline
             ? AppColors.accentBronze
-            : const Color(0xFF4285F4);
+            : AppColors.textObsidian;
+
+    final badgeBg = isGemini
+        ? AppColors.safetyMintBg
+        : isOffline
+            ? AppColors.ceilingCardBg
+            : AppColors.stepPillBg;
+
+    final badgeBorder = isGemini
+        ? AppColors.safetyMintBorder
+        : isOffline
+            ? AppColors.ceilingCardBorder
+            : AppColors.stepPillBorder;
 
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(left: 16, right: 40, top: 6, bottom: 8),
+        margin: const EdgeInsets.only(left: 16, right: 36, top: 6, bottom: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AppColors.cardSurface,
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(4),
-            topRight: Radius.circular(18),
-            bottomLeft: Radius.circular(18),
-            bottomRight: Radius.circular(18),
+            topRight: Radius.circular(20),
+            bottomLeft: Radius.circular(20),
+            bottomRight: Radius.circular(20),
           ),
-          border: Border.all(color: AppColors.cardBorder),
-          boxShadow: const [
+          border: Border.all(color: AppColors.cardBorder, width: 1.2),
+          boxShadow: [
             BoxShadow(
-              color: Colors.black26,
-              blurRadius: 6,
-              offset: Offset(0, 2),
+              color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -91,37 +112,40 @@ class AdvisorMessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Engine Header & Provenance Badge
+            // Engine Header & Provenance Badge with zero layout overflow
             Row(
               children: [
                 const Icon(
                   Icons.auto_awesome_rounded,
                   size: 16,
-                  color: Color(0xFF0F9D58),
+                  color: AppColors.safetyMint,
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'VeriBite AI Advisor',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                const Expanded(
+                  child: Text(
+                    'VeriBite AI Advisor',
+                    style: TextStyle(
+                      color: AppColors.textObsidian,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: badgeColor.withValues(alpha: 0.15),
+                    color: badgeBg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
+                    border: Border.all(color: badgeBorder),
                   ),
                   child: Text(
                     badgeLabel,
                     style: TextStyle(
                       color: badgeColor,
                       fontSize: 10,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -129,13 +153,14 @@ class AdvisorMessageBubble extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // Message Body Text
+            // Message Body Text (Crisp Obsidian on Ivory Surface)
             Text(
               message.text,
               style: const TextStyle(
-                color: Color(0xFFE2E8F0),
+                color: AppColors.textObsidian,
                 fontSize: 14,
-                height: 1.45,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
               ),
             ),
 
@@ -143,15 +168,15 @@ class AdvisorMessageBubble extends StatelessWidget {
             if (message.safePortionGrams != null || message.frequencySchedule != null) ...[
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF1E293B)),
+                  color: AppColors.ceilingCardBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.ceilingCardBorder),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.scale_rounded, size: 20, color: Color(0xFF0F9D58)),
+                    const Icon(Icons.verified_outlined, size: 20, color: AppColors.accentBronze),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -161,17 +186,18 @@ class AdvisorMessageBubble extends StatelessWidget {
                             Text(
                               'Prescribed Safe Portion: ${message.safePortionGrams!.toStringAsFixed(0)}g',
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: AppColors.textObsidian,
                                 fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           if (message.frequencySchedule != null)
                             Text(
                               'Schedule: ${message.frequencySchedule}',
                               style: const TextStyle(
-                                color: Color(0xFF94A3B8),
+                                color: AppColors.textMutedMocha,
                                 fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                         ],
@@ -185,19 +211,19 @@ class AdvisorMessageBubble extends StatelessWidget {
             // Verified Citation Pills
             if (message.citations.isNotEmpty) ...[
               const SizedBox(height: 12),
-              const Divider(color: Color(0xFF334155), height: 1),
+              const Divider(color: AppColors.cardBorder, height: 1),
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.verified_outlined, size: 14, color: Color(0xFF0F9D58)),
+                  const Icon(Icons.verified_outlined, size: 14, color: AppColors.safetyMint),
                   const SizedBox(width: 6),
                   const Text(
                     'Scientific Groundings: ',
                     style: TextStyle(
-                      color: Color(0xFF94A3B8),
+                      color: AppColors.textMutedMocha,
                       fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   Expanded(
@@ -206,18 +232,18 @@ class AdvisorMessageBubble extends StatelessWidget {
                       runSpacing: 4,
                       children: message.citations.map((citation) {
                         return Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
+                            color: AppColors.stepPillBg,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF334155)),
+                            border: Border.all(color: AppColors.stepPillBorder),
                           ),
                           child: Text(
                             citation,
                             style: const TextStyle(
-                              color: Color(0xFFCBD5E1),
+                              color: AppColors.textObsidian,
                               fontSize: 10,
-                              fontWeight: FontWeight.w500,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         );
@@ -233,4 +259,3 @@ class AdvisorMessageBubble extends StatelessWidget {
     );
   }
 }
-

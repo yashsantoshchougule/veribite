@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../domain/advisor_chat_model.dart';
 
 /// Horizontally scrollable list of 1-tap starter prompts
 /// designed to help users ask critical toxicology and dietary questions quickly.
+/// Styled with VeriBite's Warm Luxury Alabaster & Midnight Obsidian palette.
 class QuickPromptCarousel extends StatelessWidget {
   final ValueChanged<String> onPromptSelected;
   final ProductAdvisorContext? productContext;
@@ -30,21 +32,23 @@ class QuickPromptCarousel extends StatelessWidget {
             label: Text(
               prompt,
               style: const TextStyle(
-                color: Color(0xFFE2E8F0),
+                color: AppColors.textObsidian,
                 fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
               ),
             ),
             avatar: const Icon(
               Icons.auto_awesome_rounded,
               size: 14,
-              color: Color(0xFF0F9D58),
+              color: AppColors.safetyMint,
             ),
-            backgroundColor: const Color(0xFF1E293B),
-            side: const BorderSide(color: Color(0xFF334155)),
+            backgroundColor: AppColors.cardSurface,
+            side: const BorderSide(color: AppColors.cardBorder, width: 1.0),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(18),
             ),
+            elevation: 0,
+            shadowColor: Colors.transparent,
             onPressed: () => onPromptSelected(prompt),
           );
         },
@@ -54,7 +58,9 @@ class QuickPromptCarousel extends StatelessWidget {
 
   List<String> _buildContextualPrompts() {
     if (productContext != null) {
-      final hasRedTier = productContext!.additives.any((a) => a['risk_tier'] == 'Red');
+      final hasRedTier = productContext!.additives.any(
+        (a) => (a['risk_tier']?.toString().toUpperCase() == 'RED'),
+      );
       final sugars = (productContext!.nutrition['sugars_100g'] as num?)?.toDouble() ?? 0.0;
 
       return [
@@ -76,4 +82,3 @@ class QuickPromptCarousel extends StatelessWidget {
     ];
   }
 }
-
