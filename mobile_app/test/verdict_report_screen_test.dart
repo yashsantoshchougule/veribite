@@ -142,6 +142,60 @@ void main() {
     expect(find.text('1.2'), findsOneWidget);
   });
 
+  testWidgets('VerdictReportScreen renders real sat fat and sodium, and computes dynamic pack weight multiplier', (tester) async {
+    const customPackProduct = ScannedProductResult(
+      barcode: '8901234567890',
+      productName: 'Nutri Crisp Bar',
+      brandName: 'HealthyBites',
+      category: 'Snack Bar',
+      servingSizeG: 25.0,
+      packWeightG: 50.0, // Exactly 2 servings (2.0x multiplier)
+      sugarGPer100g: 8.0,
+      sugarGPerServing: 2.0,
+      satFatGPer100g: 11.2,
+      satFatGPerServing: 2.8,
+      sodiumMgPer100g: 280.0,
+      sodiumMgPerServing: 70.0,
+      caloriesPerServing: 110.0,
+      healthScore: 78,
+      verdictTag: 'Nutri Safe 🟢',
+      novaGrade: 2,
+      redCapTriggered: false,
+      safePortionGrams: 25,
+      safePieces: null,
+      limitingFactor: 'Sugar',
+      frequencySchedule: 'Daily Safe',
+      additives: [],
+      splitSugars: [],
+      portionAdvice: 'Safe consumption portion: 25g.',
+      isExceededBudget: false,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: customPackProduct,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify 1-serving real values
+    expect(find.text('Whole Pack (50g)'), findsOneWidget);
+    expect(find.text('2.8'), findsOneWidget); // Real Sat Fat
+    expect(find.text('70'), findsOneWidget); // Real Sodium
+
+    // Switch to Whole Pack (2.0x multiplier, NOT hardcoded 3.0x)
+    await tester.tap(find.text('Whole Pack (50g)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('220'), findsOneWidget); // 110 * 2 = 220 kcal
+    expect(find.text('4.0'), findsOneWidget); // 2.0 * 2 = 4.0 g sugar
+    expect(find.text('5.6'), findsOneWidget); // 2.8 * 2 = 5.6 g Sat Fat
+    expect(find.text('140'), findsOneWidget); // 70 * 2 = 140 mg Sodium
+  });
+
   testWidgets('VerdictReportScreen tapping Full Ingredients CTA navigates to IngredientBreakdownScreen', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

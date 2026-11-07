@@ -57,20 +57,27 @@ class HomeDashboardService {
 
       double consumedSugar = 0.0;
       int redAdditivesCount = 0;
-      final todayIso = DateTime.now().toUtc().toIso8601String().substring(0, 10);
+      final nowLocal = DateTime.now().toLocal();
       final List<DashboardProductItem> historyProducts = [];
 
       for (final row in historyRows) {
         if (row is! Map<String, dynamic>) continue;
-        final scannedAt = (row['scanned_at'] ?? '').toString();
+        final scannedAtStr = (row['scanned_at'] ?? '').toString();
+        final scannedAtDate = DateTime.tryParse(scannedAtStr)?.toLocal();
         final productMap = row['products'] as Map<String, dynamic>?;
 
         if (productMap != null) {
           final item = DashboardProductItem.fromDatabaseRow(productMap);
           historyProducts.add(item);
 
-          // If scanned today, add to today's consumption budget
-          if (scannedAt.startsWith(todayIso)) {
+          // Compare against user's local calendar day
+          final isSameDay = scannedAtDate != null &&
+              scannedAtDate.year == nowLocal.year &&
+              scannedAtDate.month == nowLocal.month &&
+              scannedAtDate.day == nowLocal.day;
+
+          // If scanned today in local time, add to today's consumption budget
+          if (isSameDay) {
             final nutrition = productMap['nutrition_json'];
             double sugarPer100 = 0.0;
             if (nutrition is Map) {
@@ -170,12 +177,29 @@ class HomeDashboardService {
       final raw = prefs.getString('$_cachePrefix$userId');
       if (raw != null) {
         final Map<String, dynamic> cacheMap = jsonDecode(raw);
+
+        // Reset if cache is from a previous calendar day
+        final cachedAtStr = cacheMap['cached_at'] as String?;
+        if (cachedAtStr != null) {
+          final cachedDate = DateTime.tryParse(cachedAtStr)?.toLocal();
+          final today = DateTime.now().toLocal();
+          final isSameDay = cachedDate != null &&
+              cachedDate.year == today.year &&
+              cachedDate.month == today.month &&
+              cachedDate.day == today.day;
+          if (!isSameDay) {
+            cacheMap['consumed_sugar'] = 0.0;
+            cacheMap['red_additives'] = 0;
+          }
+        }
+
         final currentSugar = (cacheMap['consumed_sugar'] as num?)?.toDouble() ?? 0.0;
         final currentRed = (cacheMap['red_additives'] as num?)?.toInt() ?? 0;
         cacheMap['consumed_sugar'] = double.parse((currentSugar + consumedSugarGrams).toStringAsFixed(1));
         if (hasRedAdditives) {
           cacheMap['red_additives'] = currentRed + 1;
         }
+        cacheMap['cached_at'] = DateTime.now().toIso8601String();
         await prefs.setString('$_cachePrefix$userId', jsonEncode(cacheMap));
       }
     } catch (e) {
@@ -210,6 +234,24 @@ class HomeDashboardService {
       final raw = prefs.getString('$_cachePrefix$userId');
       if (raw != null) {
         final Map<String, dynamic> cacheMap = jsonDecode(raw);
+
+        // Reset daily consumed counters if cache belongs to a past calendar day
+        final cachedAtStr = cacheMap['cached_at'] as String?;
+        if (cachedAtStr != null) {
+          final cachedDate = DateTime.tryParse(cachedAtStr)?.toLocal();
+          final today = DateTime.now().toLocal();
+          final isSameDay = cachedDate != null &&
+              cachedDate.year == today.year &&
+              cachedDate.month == today.month &&
+              cachedDate.day == today.day;
+          if (!isSameDay) {
+            cacheMap['consumed_sugar'] = 0.0;
+            cacheMap['red_additives'] = 0;
+            cacheMap['cached_at'] = DateTime.now().toIso8601String();
+            await prefs.setString('$_cachePrefix$userId', jsonEncode(cacheMap));
+          }
+        }
+
         final rawProducts = cacheMap['products'] as List<dynamic>? ?? [];
         final products = rawProducts
             .map((p) => DashboardProductItem.fromCacheMap(p as Map<String, dynamic>))

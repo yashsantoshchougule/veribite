@@ -316,4 +316,53 @@ void main() {
       expect(find.text('Point & Scan Backside Label'), findsOneWidget);
     });
   });
+
+  group('HomeScreen Search Tab Integration Tests', () {
+    testWidgets('tapping Search tab switches to Search Catalog View with verified products and navigation', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      // Tap Search tab in bottom nav
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+
+      // Verify search view is rendered
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Search foods, brands, or barcodes...'), findsOneWidget);
+      expect(find.textContaining('Verified Products ('), findsOneWidget);
+
+      // Verify catalog items appear
+      expect(find.text('Good Day Butter Cookies'), findsOneWidget);
+      expect(find.text('2-Minute Masala Noodles'), findsOneWidget);
+      expect(find.text('100% Whole Grain Rolled Oats'), findsOneWidget);
+
+      // Filter by search query
+      await tester.enterText(find.byType(TextField), 'Noodles');
+      await tester.pumpAndSettle();
+
+      expect(find.text('2-Minute Masala Noodles'), findsOneWidget);
+      expect(find.text('Good Day Butter Cookies'), findsNothing);
+
+      // Tapping on product card navigates to VerdictReportScreen
+      await tester.tap(find.text('2-Minute Masala Noodles'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('32'), findsOneWidget);
+      expect(find.text('Toxic / Capped 🔴'), findsOneWidget);
+    });
+
+    testWidgets('empty search results show empty state with camera trigger CTA', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'UnknownItem12345');
+      await tester.pumpAndSettle();
+
+      expect(find.text('No products found matching "UnknownItem12345"'), findsOneWidget);
+      expect(find.text('Open Smart Camera'), findsOneWidget);
+    });
+  });
 }

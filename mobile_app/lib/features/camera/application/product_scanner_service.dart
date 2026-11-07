@@ -14,6 +14,11 @@ class ScannedProductResult {
   final double sugarGPer100g;
   final double sugarGPerServing;
   final double caloriesPerServing;
+  final double satFatGPer100g;
+  final double satFatGPerServing;
+  final double sodiumMgPer100g;
+  final double sodiumMgPerServing;
+  final double packWeightG;
   final int healthScore;
   final String verdictTag; // 'Nutri Safe 🟢', 'Caution 🟠', 'Toxic / Capped 🔴'
   final int novaGrade;
@@ -36,6 +41,11 @@ class ScannedProductResult {
     required this.sugarGPer100g,
     required this.sugarGPerServing,
     required this.caloriesPerServing,
+    this.satFatGPer100g = 0.0,
+    this.satFatGPerServing = 0.0,
+    this.sodiumMgPer100g = 0.0,
+    this.sodiumMgPerServing = 0.0,
+    this.packWeightG = 0.0,
     required this.healthScore,
     required this.verdictTag,
     required this.novaGrade,
@@ -155,6 +165,28 @@ class ProductScannerService {
     final energyKj = (nutritionMap['energy_kj'] as num?)?.toDouble() ?? 500.0;
     final caloriesPerServing = double.parse(((energyKj / 4.184) * (servingSize / 100.0)).toStringAsFixed(0));
 
+    // Parse real saturated fat & sodium per 100g and calculate per-serving values
+    final satFatPer100 = (nutritionMap['sat_fat_g_per_100g'] ?? nutritionMap['sat_fat_g'] ?? 0.0 as num).toDouble();
+    final satFatPerServing = double.parse((satFatPer100 * (servingSize / 100.0)).toStringAsFixed(1));
+
+    double sodiumPer100 = 0.0;
+    if (nutritionMap['sodium_mg_per_100g'] != null) {
+      sodiumPer100 = (nutritionMap['sodium_mg_per_100g'] as num).toDouble();
+    } else if (nutritionMap['sodium_mg'] != null) {
+      sodiumPer100 = (nutritionMap['sodium_mg'] as num).toDouble();
+    } else if (nutritionMap['salt_g_per_100g'] != null) {
+      // 1g salt ≈ 400mg sodium
+      sodiumPer100 = (nutritionMap['salt_g_per_100g'] as num).toDouble() * 400.0;
+    } else if (nutritionMap['salt_g'] != null) {
+      sodiumPer100 = (nutritionMap['salt_g'] as num).toDouble() * 400.0;
+    }
+    final sodiumPerServing = (sodiumPer100 * (servingSize / 100.0)).roundToDouble();
+
+    // Parse package net weight for dynamic whole pack calculations
+    final packWeight = (raw['pack_weight_g'] as num?)?.toDouble() ??
+        (raw['net_weight_g'] as num?)?.toDouble() ??
+        (servingSize * 3.0);
+
     // Parse additives
     List<Map<String, dynamic>> additivesList = [];
     if (raw['additives_json'] is String) {
@@ -243,6 +275,11 @@ class ProductScannerService {
       sugarGPer100g: sugarPer100,
       sugarGPerServing: sugarPerServing,
       caloriesPerServing: caloriesPerServing,
+      satFatGPer100g: satFatPer100,
+      satFatGPerServing: satFatPerServing,
+      sodiumMgPer100g: sodiumPer100,
+      sodiumMgPerServing: sodiumPerServing,
+      packWeightG: packWeight,
       healthScore: score,
       verdictTag: verdictTag,
       novaGrade: (raw['nova_grade'] as num?)?.toInt() ?? 3,
@@ -268,6 +305,7 @@ class ProductScannerService {
         'brand_name': 'Britannia',
         'category': 'Biscuits & Cookies',
         'serving_size_g': 25.0,
+        'pack_weight_g': 75.0,
         'piece_weight_g': 7.5,
         'health_score': 48,
         'nova_grade': 4,
@@ -295,6 +333,7 @@ class ProductScannerService {
         'brand_name': 'Maggi',
         'category': 'Instant Noodles',
         'serving_size_g': 70.0,
+        'pack_weight_g': 70.0,
         'piece_weight_g': null,
         'health_score': 32,
         'nova_grade': 4,
@@ -321,6 +360,7 @@ class ProductScannerService {
         'brand_name': 'Quaker',
         'category': 'Breakfast Cereals',
         'serving_size_g': 40.0,
+        'pack_weight_g': 400.0,
         'piece_weight_g': null,
         'health_score': 88,
         'nova_grade': 1,
@@ -344,6 +384,7 @@ class ProductScannerService {
         'brand_name': 'Lay\'s',
         'category': 'Chips & Crisps',
         'serving_size_g': 30.0,
+        'pack_weight_g': 50.0,
         'piece_weight_g': null,
         'health_score': 54,
         'nova_grade': 3,
@@ -373,6 +414,7 @@ class ProductScannerService {
       'brand_name': 'Packaged Foods',
       'category': 'Packaged Food',
       'serving_size_g': 35.0,
+      'pack_weight_g': 70.0,
       'piece_weight_g': null,
       'health_score': 62,
       'nova_grade': 3,

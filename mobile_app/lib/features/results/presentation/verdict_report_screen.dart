@@ -41,18 +41,39 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
   }
 
-  double get _multiplier => _isWholePack ? 3.0 : 1.0;
-  double get _currentServingGrams => widget.product.servingSizeG * _multiplier;
+  double get _packWeight => widget.product.packWeightG > 0
+      ? widget.product.packWeightG
+      : widget.product.servingSizeG * 3.0;
+
+  double get _multiplier {
+    if (!_isWholePack) return 1.0;
+    if (widget.product.servingSizeG <= 0) return 1.0;
+    return (_packWeight / widget.product.servingSizeG).clamp(1.0, 25.0);
+  }
+
+  double get _currentServingGrams => _isWholePack ? _packWeight : widget.product.servingSizeG;
   double get _currentSugarGrams => widget.product.sugarGPerServing * _multiplier;
   int get _currentCalories => (widget.product.caloriesPerServing * _multiplier).round();
 
-  // Approximate saturated fat & sodium per serving based on product category & nutrition
+  // Real saturated fat & sodium per serving from database/scan, scaled with multiplier
   double get _currentSatFatGrams {
+    if (widget.product.satFatGPerServing > 0) {
+      return double.parse((widget.product.satFatGPerServing * _multiplier).toStringAsFixed(1));
+    }
+    if (widget.product.satFatGPer100g > 0) {
+      return double.parse((widget.product.satFatGPer100g * (_currentServingGrams / 100.0)).toStringAsFixed(1));
+    }
     final base = (widget.product.sugarGPerServing * 0.4).clamp(0.5, 12.0);
     return double.parse((base * _multiplier).toStringAsFixed(1));
   }
 
   int get _currentSodiumMg {
+    if (widget.product.sodiumMgPerServing > 0) {
+      return (widget.product.sodiumMgPerServing * _multiplier).round();
+    }
+    if (widget.product.sodiumMgPer100g > 0) {
+      return (widget.product.sodiumMgPer100g * (_currentServingGrams / 100.0)).round();
+    }
     final base = (widget.product.servingSizeG * 6.5).clamp(20.0, 950.0);
     return (base * _multiplier).round();
   }
@@ -126,6 +147,14 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               'sugars_100g': widget.product.sugarGPer100g,
               'sugar_per_serving_g': widget.product.sugarGPerServing,
               'calories': widget.product.caloriesPerServing,
+              'sat_fat_100g': widget.product.satFatGPer100g,
+              'sat_fat_per_serving_g': widget.product.satFatGPerServing > 0
+                  ? widget.product.satFatGPerServing
+                  : _currentSatFatGrams,
+              'sodium_100g': widget.product.sodiumMgPer100g,
+              'sodium_per_serving_mg': widget.product.sodiumMgPerServing > 0
+                  ? widget.product.sodiumMgPerServing
+                  : _currentSodiumMg.toDouble(),
             },
           ),
         ),
@@ -414,7 +443,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  'Whole Pack (${(_currentServingGrams).toStringAsFixed(0)}g)',
+                  'Whole Pack (${_packWeight.toStringAsFixed(0)}g)',
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w800,

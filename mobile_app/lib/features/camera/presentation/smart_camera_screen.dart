@@ -136,7 +136,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
 
       if (!mounted) return;
-      _showScanResultReport(resolvedProduct, activeProfile);
+      await _showScanResultReport(resolvedProduct, activeProfile);
     } catch (e) {
       debugPrint('Error resolving barcode $rawBarcode: $e');
       if (mounted) {
@@ -154,25 +154,36 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
   }
 
-  void _showScanResultReport(ScannedProductResult product, UserProfileModel profile) {
-    Navigator.of(context).push(
+  Future<void> _showScanResultReport(ScannedProductResult product, UserProfileModel profile) async {
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    if (!mounted) return;
+    final dynamic result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => VerdictReportScreen(
           product: product,
           userProfile: profile,
         ),
       ),
-    ).then((result) {
-      if (widget.onProductResolved != null) {
-        widget.onProductResolved!({
-          'source': 'barcode',
-          'product_name': product.productName,
-          'health_score': product.healthScore,
-          'eaten': result == true,
-        });
-      }
-      ref.read(cameraScanNotifierProvider.notifier).reset();
-    });
+    );
+
+    if (widget.onProductResolved != null) {
+      widget.onProductResolved!({
+        'source': 'barcode',
+        'product_name': product.productName,
+        'health_score': product.healthScore,
+        'eaten': result == true,
+      });
+    }
+    ref.read(cameraScanNotifierProvider.notifier).reset();
+
+    if (mounted) {
+      try {
+        await _scannerController.start();
+      } catch (_) {}
+    }
   }
 
   void _showScanResultSheet(ScannedProductResult product) {
