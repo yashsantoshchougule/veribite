@@ -182,4 +182,33 @@ void main() {
     expect(find.textContaining('WHO strongly recommends limiting free sugar intake'), findsOneWidget);
     expect(find.text('Offline Scientific Engine'), findsOneWidget);
   });
+
+  testWidgets('AdvisorChatScreen renders voice speaker Listen button and auto-voice top toggle', (tester) async {
+    final fakeService = FakeAdvisorService((msg, {productContext, userProfile}) async {
+      return ChatMessage.advisor(text: 'Safe portion is 25 grams');
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AdvisorChatScreen(
+          userProfile: testProfile,
+          advisorService: fakeService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Listen button is present on the welcome message
+    expect(find.text('Listen'), findsOneWidget);
+    expect(find.byIcon(Icons.volume_up_rounded), findsOneWidget);
+
+    // Verify Auto-voice button in top bar
+    expect(find.byIcon(Icons.voice_over_off_rounded), findsOneWidget);
+
+    // Tap Auto-voice toggle
+    await tester.tap(find.byIcon(Icons.voice_over_off_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.record_voice_over_rounded), findsOneWidget);
+  });
 }

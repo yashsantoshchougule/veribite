@@ -11,7 +11,7 @@ void main() {
     test('askAdvisor queries direct Google Gemini REST endpoint with RAG context', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.host, 'generativelanguage.googleapis.com');
-        expect(request.url.path, contains('gemini-3.5-flash-lite'));
+        expect(request.url.path, contains('gemini-3.1-flash-lite'));
 
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         final promptText = body['contents'][0]['parts'][0]['text'] as String;
@@ -47,6 +47,44 @@ void main() {
       expect(reply.text, contains('WHO guidelines'));
       expect(reply.citations, contains('WHO Free Sugars (2015)'));
       expect(reply.citations, contains('EFSA Additive Opinion'));
+    });
+
+    test('askAdvisor retries with fallback model when primary model returns 503 spike', () async {
+      int attempt = 0;
+      final mockClient = MockClient((request) async {
+        attempt++;
+        if (attempt == 1) {
+          expect(request.url.path, contains('gemini-3.1-flash-lite'));
+          return http.Response('{"error": {"code": 503, "message": "High demand"}}', 503);
+        }
+        expect(request.url.path, contains('gemini-flash-lite-latest'));
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text': 'WHO recommends limiting salt and processed additives.'
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+
+      final service = AdvisorService(client: mockClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'Is this high in sodium?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(attempt, 2);
+      expect(reply.text, contains('WHO recommends limiting salt'));
     });
 
     test('askAdvisor parses 200 OK backend proxy response with citations', () async {

@@ -8,10 +8,14 @@ import '../../domain/advisor_chat_model.dart';
 /// with VeriBite's Warm Luxury Alabaster & Midnight Obsidian palette.
 class AdvisorMessageBubble extends StatelessWidget {
   final ChatMessage message;
+  final VoidCallback? onToggleSpeak;
+  final bool isSpeaking;
 
   const AdvisorMessageBubble({
     super.key,
     required this.message,
+    this.onToggleSpeak,
+    this.isSpeaking = false,
   });
 
   @override
@@ -59,7 +63,7 @@ class AdvisorMessageBubble extends StatelessWidget {
   }
 
   Widget _buildAdvisorBubble(BuildContext context) {
-    final isGemini = message.source == 'gemini_3.5_flash' || message.source == 'gemini_2.5_flash';
+    final isGemini = message.source.startsWith('gemini');
     final isOffline = message.source == 'local_offline';
 
     final badgeLabel = isGemini
@@ -149,6 +153,42 @@ class AdvisorMessageBubble extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onToggleSpeak != null) ...[
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: onToggleSpeak,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isSpeaking ? AppColors.safetyMint : AppColors.stepPillBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSpeaking ? AppColors.safetyMintBorder : AppColors.stepPillBorder,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isSpeaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                            size: 12,
+                            color: isSpeaking ? Colors.white : AppColors.textObsidian,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            isSpeaking ? 'Stop' : 'Listen',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: isSpeaking ? Colors.white : AppColors.textObsidian,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 12),

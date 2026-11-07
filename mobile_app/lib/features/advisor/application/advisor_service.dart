@@ -110,7 +110,6 @@ class AdvisorService {
     promptBuffer.writeln('');
     promptBuffer.writeln('USER QUESTION: $userMessage');
 
-    final uri = Uri.parse('${GeminiConfig.baseUrl}/${GeminiConfig.model}:generateContent?key=${GeminiConfig.apiKey}');
     final requestBody = {
       'contents': [
         {
@@ -125,36 +124,49 @@ class AdvisorService {
       }
     };
 
-    final response = await _client
-        .post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(requestBody),
-        )
-        .timeout(const Duration(seconds: 10));
+    final modelsToTry = [GeminiConfig.model, ...GeminiConfig.fallbackModels];
+    Exception? lastError;
 
-    if (response.statusCode == 200) {
-      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final candidates = json['candidates'] as List<dynamic>?;
-      if (candidates != null && candidates.isNotEmpty) {
-        final parts = candidates[0]['content']?['parts'] as List<dynamic>?;
-        if (parts != null && parts.isNotEmpty) {
-          final replyText = parts[0]['text'] as String? ?? '';
-          final citations = _extractCitations(replyText, additives);
-          final safePortion = _calculateSafePortion(nutrition, isChild, activeWeight);
+    for (final model in modelsToTry) {
+      try {
+        final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
+        final response = await _client
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(requestBody),
+            )
+            .timeout(const Duration(seconds: 10));
 
-          return ChatMessage.advisor(
-            text: replyText.trim(),
-            source: 'gemini_3.5_flash',
-            citations: citations,
-            safePortionGrams: safePortion.grams,
-            frequencySchedule: safePortion.schedule,
-          );
+        if (response.statusCode == 200) {
+          final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+          final candidates = json['candidates'] as List<dynamic>?;
+          if (candidates != null && candidates.isNotEmpty) {
+            final parts = candidates[0]['content']?['parts'] as List<dynamic>?;
+            if (parts != null && parts.isNotEmpty) {
+              final replyText = parts[0]['text'] as String? ?? '';
+              final citations = _extractCitations(replyText, additives);
+              final safePortion = _calculateSafePortion(nutrition, isChild, activeWeight);
+
+              return ChatMessage.advisor(
+                text: replyText.trim(),
+                source: 'gemini_3.5_flash',
+                citations: citations,
+                safePortionGrams: safePortion.grams,
+                frequencySchedule: safePortion.schedule,
+              );
+            }
+          }
+        } else {
+          lastError = Exception('Gemini model $model returned status ${response.statusCode}: ${response.body}');
         }
+      } catch (e) {
+        lastError = Exception('Gemini model $model request failed: $e');
       }
     }
 
-    throw Exception('Gemini API returned status ${response.statusCode}: ${response.body}');
+    if (lastError != null) throw lastError;
+    throw Exception('Gemini API call failed: no models responded');
   }
 
   /// Backend proxy implementation when running alongside local FastAPI server

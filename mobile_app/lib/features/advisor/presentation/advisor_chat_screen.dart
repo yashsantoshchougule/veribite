@@ -3,6 +3,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../application/advisor_service.dart';
+import '../application/tts_voice_service.dart';
 import '../domain/advisor_chat_model.dart';
 import 'widgets/advisor_message_bubble.dart';
 import 'widgets/quick_prompt_carousel.dart';
@@ -15,12 +16,14 @@ class AdvisorChatScreen extends StatefulWidget {
   final ProductAdvisorContext? initialProductContext;
   final UserProfileModel? userProfile;
   final AdvisorService? advisorService;
+  final TtsVoiceService? ttsService;
 
   const AdvisorChatScreen({
     super.key,
     this.initialProductContext,
     this.userProfile,
     this.advisorService,
+    this.ttsService,
   });
 
   @override
@@ -29,6 +32,7 @@ class AdvisorChatScreen extends StatefulWidget {
 
 class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
   late final AdvisorService _service;
+  late final TtsVoiceService _ttsService;
   late final TextEditingController _textController;
   late final ScrollController _scrollController;
   final List<ChatMessage> _messages = [];
@@ -39,6 +43,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
   void initState() {
     super.initState();
     _service = widget.advisorService ?? AdvisorService();
+    _ttsService = widget.ttsService ?? TtsVoiceService();
     _textController = TextEditingController();
     _scrollController = ScrollController();
     _activeProductContext = widget.initialProductContext;
@@ -71,6 +76,10 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
 
   @override
   void dispose() {
+    _ttsService.stop();
+    if (widget.ttsService == null) {
+      _ttsService.dispose();
+    }
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -102,6 +111,10 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
         _isLoading = false;
       });
       _scrollToBottom();
+
+      if (_ttsService.autoSpeakEnabledNotifier.value) {
+        await _ttsService.speak(reply.text, messageId: reply.id);
+      }
     }
   }
 
@@ -147,15 +160,27 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
 
               // 3. Scrollable Chat Message List
               Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.only(top: 8, bottom: 12),
-                  itemCount: _messages.length + (_isLoading ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == _messages.length && _isLoading) {
-                      return _buildLoadingBubble();
-                    }
-                    return AdvisorMessageBubble(message: _messages[index]);
+                child: ValueListenableBuilder<String?>(
+                  valueListenable: _ttsService.currentlySpeakingIdNotifier,
+                  builder: (context, speakingId, _) {
+                    return ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.only(top: 8, bottom: 12),
+                      itemCount: _messages.length + (_isLoading ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == _messages.length && _isLoading) {
+                          return _buildLoadingBubble();
+                        }
+                        final msg = _messages[index];
+                        return AdvisorMessageBubble(
+                          message: msg,
+                          isSpeaking: speakingId == msg.id,
+                          onToggleSpeak: msg.isUser
+                              ? null
+                              : () => _ttsService.toggleSpeak(msg.text, messageId: msg.id),
+                        );
+                      },
+                    );
                   },
                 ),
               ),
@@ -230,6 +255,26 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
               ],
             ),
           ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _ttsService.autoSpeakEnabledNotifier,
+            builder: (context, autoSpeak, _) {
+              return CircleAvatar(
+                backgroundColor: autoSpeak ? AppColors.safetyMintBg : AppColors.backButtonBg,
+                radius: 18,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    autoSpeak ? Icons.record_voice_over_rounded : Icons.voice_over_off_rounded,
+                    color: autoSpeak ? AppColors.safetyMint : AppColors.textObsidian,
+                    size: 19,
+                  ),
+                  tooltip: autoSpeak ? 'Auto-Voice: Enabled' : 'Auto-Voice: Disabled',
+                  onPressed: () => _ttsService.toggleAutoSpeak(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
           CircleAvatar(
             backgroundColor: AppColors.backButtonBg,
             radius: 18,
@@ -238,6 +283,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
               icon: const Icon(Icons.restart_alt_rounded, color: AppColors.accentBronze, size: 19),
               tooltip: 'Reset Conversation',
               onPressed: () {
+                _ttsService.stop();
                 setState(() {
                   _messages.clear();
                   _seedWelcomeMessage();

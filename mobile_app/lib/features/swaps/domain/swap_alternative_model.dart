@@ -35,3 +35,4 @@ enum QuickCommercePlatform {
   instamart,
   bigbasket,
 }
+

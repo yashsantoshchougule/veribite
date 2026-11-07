@@ -9,13 +9,17 @@ class GeminiConfig {
     if (_envKey.isNotEmpty) return _envKey;
     try {
       // Obfuscated default credentials
-      return utf8.decode(base64Decode('QVEuQWI4Uk42TFl1a2ZNT3MybVNBRTQzY2d6SE1DVDEyRDVsTXc1SE1OUjRwUnRic3RXWHc='));
+      return utf8.decode(base64Decode('QVEuQWI4Uk42TFo5b0I5VExXU3d4cmtaQURHWEJVcU9fbVQ3QUQteTI2SWNNSTFlZ0lRemc='));
     } catch (_) {
       return '';
     }
   }
 
-  static const String model = 'gemini-3.5-flash-lite';
+  static const String model = 'gemini-3.1-flash-lite';
+  static const List<String> fallbackModels = [
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
+  ];
   static const String baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
 
   static bool get isConfigured => apiKey.isNotEmpty;
