@@ -198,3 +198,4 @@ class AdvisorRules {
         '• **Adjust Limits:** Visit **Profile** to update your body weight and health guardrails.';
   }
 }
+

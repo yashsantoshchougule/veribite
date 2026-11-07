@@ -145,14 +145,17 @@ class AdvisorService {
             if (parts != null && parts.isNotEmpty) {
               final replyText = parts[0]['text'] as String? ?? '';
               final citations = _extractCitations(replyText, additives);
-              final safePortion = _calculateSafePortion(nutrition, isChild, activeWeight);
+              final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
+              final safePortion = isPortionQuestion
+                  ? _calculateSafePortion(nutrition, isChild, activeWeight)
+                  : null;
 
               return ChatMessage.advisor(
                 text: replyText.trim(),
                 source: 'gemini_3.5_flash',
                 citations: citations,
-                safePortionGrams: safePortion.grams,
-                frequencySchedule: safePortion.schedule,
+                safePortionGrams: safePortion?.grams,
+                frequencySchedule: safePortion?.schedule,
               );
             }
           }
@@ -234,11 +237,39 @@ class AdvisorService {
       citations.add('ICMR-NIN Guidelines');
     }
 
-    if (citations.isEmpty) {
-      citations.addAll(['WHO Guidelines (2023)', 'FSSAI Regulations']);
+    // Only return citations that were actually cited in the AI response
+    return citations;
+  }
+
+  /// Determines if prescribed safe portion grams and schedule are relevant to the user's question
+  bool _isPortionRelevant(String query, ProductAdvisorContext? productContext) {
+    final lower = query.toLowerCase();
+
+    // App troubleshooting and identity queries never have prescribed food portions
+    if (AdvisorRules.isAppHelpQuery(query) || AdvisorRules.isIdentityQuery(query)) {
+      return false;
     }
 
-    return citations;
+    final explicitPortionKeywords = [
+      'portion', 'how much', 'serving', 'dose', 'dosage', 'grams', 'how many',
+      'safe to eat', 'can i eat', 'should i eat', 'limit', 'intake', 'quantity',
+      'allowed', 'safe limit', 'how often', 'daily limit', 'how much sugar'
+    ];
+
+    if (explicitPortionKeywords.any((k) => lower.contains(k))) {
+      return true;
+    }
+
+    // If a scanned product is loaded and user asks about safety, kids, or diabetes
+    if (productContext != null) {
+      final productSafetyKeywords = [
+        'safe', 'good for', 'bad for', 'healthy', 'child', 'kid', 'diabet',
+        'sugar', 'sodium', 'salt', 'fat', 'eat this', 'snack'
+      ];
+      return productSafetyKeywords.any((k) => lower.contains(k));
+    }
+
+    return false;
   }
 
   /// Safe portion calculation based on WHO sugar guidance and body weight
@@ -301,10 +332,11 @@ class AdvisorService {
     final nutrition = productContext?.nutrition ?? {};
     final productName = productContext?.productName ?? 'this product';
 
-    // Calculate WHO 20% safe single-snack sugar allowance
-    final portionData = _calculateSafePortion(nutrition, isChild, weightKg);
-    final roundedPortion = portionData.grams;
-    final schedule = portionData.schedule;
+    // Calculate WHO 20% safe single-snack sugar allowance if portion is relevant
+    final isPortionQuestion = _isPortionRelevant(userQuery, productContext);
+    final portionData = isPortionQuestion ? _calculateSafePortion(nutrition, isChild, weightKg) : null;
+    final roundedPortion = portionData?.grams;
+    final schedule = portionData?.schedule;
     final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 20.0;
 
     final citations = <String>[];
@@ -366,13 +398,20 @@ class AdvisorService {
       citations.add('WHO-Healthy-Diet-FactSheet-394');
       citations.add('Codex-Alimentarius-General-Standard');
 
-      buffer.writeln('### Nutrition & Toxicology Summary for $productName\n');
-      buffer.writeln(
-        'Based on your calibrated body weight (${weightKg.toStringAsFixed(0)} kg):\n'
-        '• **Prescribed Portion:** **${roundedPortion}g** per single snack sitting.\n'
-        '• **Safe Schedule:** $schedule.\n'
-        '• **Recommendation:** Check full ingredient labels for disguised split sweeteners and artificial stabilizers.',
-      );
+      buffer.writeln('### Nutrition & Food Safety Guidance for $productName\n');
+      if (isPortionQuestion) {
+        buffer.writeln(
+          'Based on your calibrated body weight (${weightKg.toStringAsFixed(0)} kg):\n'
+          '• **Prescribed Portion:** **${roundedPortion}g** per single snack sitting.\n'
+          '• **Safe Schedule:** $schedule.\n'
+          '• **Recommendation:** Check full ingredient labels for disguised split sweeteners and artificial stabilizers.',
+        );
+      } else {
+        buffer.writeln(
+          '• **Guidance:** Review full ingredient labels for disguised split sugars and artificial chemical additives.\n'
+          '• **Safe Habit:** Prioritize whole, minimally processed foods, and limit ultra-processed snacks with Red-tier additives.',
+        );
+      }
     }
 
     return ChatMessage.advisor(

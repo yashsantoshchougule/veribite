@@ -78,6 +78,10 @@ def advisor_chat(request: AdvisorChatRequest) -> Dict[str, Any]:
         is_child=bool(guardrails.get("is_child", False)),
     )
 
+    has_product = bool(product.get("product_name") and product.get("product_name") != "General Food Toxicology" and product.get("nutrition"))
+    portion_keywords = ["portion", "how much", "serving", "dose", "dosage", "grams", "can i eat", "safe to eat", "limit", "intake", "how many", "limit"]
+    is_portion_relevant = any(k in lower_msg for k in portion_keywords) or (has_product and any(k in lower_msg for k in ["safe", "kid", "child", "diabet", "sugar", "eat"]))
+
     try:
         prompt = build_advisor_rag_context(product, guardrails, citations)
         llm_reply = call_gemini_advisor(prompt, user_msg)
@@ -85,8 +89,8 @@ def advisor_chat(request: AdvisorChatRequest) -> Dict[str, Any]:
             "source": "gemini_2.5_flash",
             "response": llm_reply,
             "citations": [c["citation_id"] for c in citations],
-            "safe_portion_grams": dosage["safe_portion_grams"],
-            "frequency_schedule": dosage["frequency_schedule"],
+            "safe_portion_grams": dosage["safe_portion_grams"] if is_portion_relevant else None,
+            "frequency_schedule": dosage["frequency_schedule"] if is_portion_relevant else None,
         }
     except Exception:
         synth = synthesize_rule_based_advice(product, guardrails, citations)
@@ -94,6 +98,6 @@ def advisor_chat(request: AdvisorChatRequest) -> Dict[str, Any]:
             "source": "rule_based_fallback",
             "response": synth["advice_text"],
             "citations": synth["citations"],
-            "safe_portion_grams": synth["safe_portion_grams"],
-            "frequency_schedule": synth["frequency_schedule"],
+            "safe_portion_grams": synth["safe_portion_grams"] if is_portion_relevant else None,
+            "frequency_schedule": synth["frequency_schedule"] if is_portion_relevant else None,
         }

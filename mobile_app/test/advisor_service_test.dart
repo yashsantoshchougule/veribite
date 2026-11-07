@@ -224,5 +224,36 @@ void main() {
       expect(reply.text, contains('How to Scan with VeriBite'));
       expect(reply.text, contains('320px central reticle'));
     });
+
+    test('askAdvisor does not attach safePortionGrams when query is general and has no product context', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text': 'VeriBite analyzes packaged food ingredients and flags harmful additives.'
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+
+      final service = AdvisorService(client: mockClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'What are your primary functions?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.safePortionGrams, isNull);
+      expect(reply.frequencySchedule, isNull);
+    });
   });
 }
