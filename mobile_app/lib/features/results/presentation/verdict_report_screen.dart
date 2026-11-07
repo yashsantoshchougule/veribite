@@ -7,6 +7,7 @@ import '../../camera/application/product_scanner_service.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
+import '../../swaps/presentation/healthier_swaps_screen.dart';
 import 'ingredient_breakdown_screen.dart';
 import 'widgets/circular_score_gauge.dart';
 
@@ -162,6 +163,18 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     );
   }
 
+  void _openHealthierSwaps() {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HealthierSwapsScreen(
+          currentProduct: widget.product,
+          userProfile: widget.userProfile,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
@@ -215,12 +228,17 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
                           const SizedBox(height: 12),
 
-                          // 6. Navigation CTA: Ask AI About This Product
+                          // 6. Navigation CTA: Smart Healthier Clean Swaps
+                          _buildHealthierSwapsCTA(),
+
+                          const SizedBox(height: 12),
+
+                          // 7. Navigation CTA: Ask AI About This Product
                           _buildAskAIAdvisorCTA(),
 
                           const SizedBox(height: 14),
 
-                          // 7. Navigation CTA: View Full Ingredients Breakdown
+                          // 8. Navigation CTA: View Full Ingredients Breakdown
                           _buildIngredientsCTA(),
 
                           const SizedBox(height: 18),
@@ -642,6 +660,51 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHealthierSwapsCTA() {
+    return InkWell(
+      onTap: _openHealthierSwaps,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFBF4E8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE89A3E).withValues(alpha: 0.45), width: 1.2),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.swap_horiz_rounded, color: Color(0xFFC05621), size: 24),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Smart Healthier Clean Swaps',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                  Text(
+                    'Up to +48 higher health score • 1-tap quick delivery',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMutedMocha,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_rounded, color: Color(0xFFC05621), size: 20),
+          ],
+        ),
       ),
     );
   }

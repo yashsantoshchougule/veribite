@@ -1,4 +1,5 @@
 /// Barcode validation, normalization, and GS1 Digital Link resolver for Dart/Flutter.
+library;
 
 int calculateEan13CheckDigit(String digits12) {
   int s = 0;

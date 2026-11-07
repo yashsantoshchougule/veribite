@@ -1,4 +1,5 @@
 /// Precision safe consumption dosage and body-weight JECFA ADI scaling engine for Dart/Flutter.
+library;
 
 import 'dart:math' as math;
 

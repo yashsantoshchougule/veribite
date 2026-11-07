@@ -1,4 +1,5 @@
 /// Coordinator for the 3-Tier Self-Scaling Hybrid Capture Pipeline.
+library;
 
 import 'barcode_scanner_service.dart';
 

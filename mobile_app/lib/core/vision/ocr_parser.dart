@@ -1,4 +1,5 @@
 /// On-device OCR text parsing and specular glare detection for Dart/Flutter.
+library;
 
 Map<String, double?> parseOcrNutritionTable(String text) {
   final result = <String, double?>{

@@ -7,6 +7,7 @@ import 'package:mobile_app/features/results/presentation/ingredient_breakdown_sc
 import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
 import 'package:mobile_app/features/results/presentation/widgets/circular_score_gauge.dart';
 import 'package:mobile_app/features/results/presentation/widgets/ingredient_deep_dive_sheet.dart';
+import 'package:mobile_app/features/swaps/presentation/healthier_swaps_screen.dart';
 
 void main() {
   final testProfile = UserProfileModel.defaults('test_user_1');
@@ -280,5 +281,25 @@ void main() {
 
     expect(find.byType(AdvisorChatScreen), findsOneWidget);
     expect(find.textContaining('100% Whole Grain Rolled Oats'), findsAtLeastNWidgets(1));
+  });
+
+  testWidgets('VerdictReportScreen tapping Smart Healthier Clean Swaps navigates to HealthierSwapsScreen', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testRedCappedProduct,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final swapsCTAFinder = find.text('Smart Healthier Clean Swaps');
+    await tester.ensureVisible(swapsCTAFinder);
+    await tester.tap(swapsCTAFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HealthierSwapsScreen), findsOneWidget);
+    expect(find.textContaining('Instant Noodles • Verified Alternatives'), findsOneWidget);
   });
 }

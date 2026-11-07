@@ -1,4 +1,5 @@
 /// Deterministic Nutri-Score (0-100), NOVA, and 39/100 Hard Red Cap scoring engine.
+library;
 
 int _getPoints(double value, List<double> thresholds) {
   for (int i = 0; i < thresholds.length; i++) {

@@ -8,6 +8,7 @@ import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../results/presentation/verdict_report_screen.dart';
+import '../../swaps/presentation/healthier_swaps_screen.dart';
 import '../application/home_dashboard_service.dart';
 import '../domain/home_dashboard_data.dart';
 
@@ -838,11 +839,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 title: 'Blinkit Swaps',
                 subtitle: '1-tap healthy swaps',
                 onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Healthy Swaps enabled for quick-commerce delivery.'),
-                      backgroundColor: AppColors.primaryObsidian,
-                      duration: Duration(seconds: 2),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => HealthierSwapsScreen(
+                        category: 'Healthy Snacks',
+                        userProfile: _profile,
+                      ),
                     ),
                   );
                 },

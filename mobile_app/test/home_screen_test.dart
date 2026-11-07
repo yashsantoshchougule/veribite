@@ -10,6 +10,7 @@ import 'package:mobile_app/features/home/presentation/home_screen.dart';
 import 'package:mobile_app/features/profile/application/user_profile_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
+import 'package:mobile_app/features/swaps/presentation/healthier_swaps_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MockHomeDashboardService extends HomeDashboardService {
@@ -264,6 +265,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ProfileScreen), findsOneWidget);
+    });
+
+    testWidgets('tapping Blinkit Swaps action tile navigates to HealthierSwapsScreen', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      final swapsTile = find.text('Blinkit Swaps');
+      await tester.ensureVisible(swapsTile);
+      await tester.tap(swapsTile);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HealthierSwapsScreen), findsOneWidget);
+      expect(find.text('Smart Healthier Swaps'), findsOneWidget);
     });
   });
 

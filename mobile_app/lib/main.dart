@@ -21,6 +21,7 @@ Future<void> main() async {
     try {
       await Supabase.initialize(
         url: SupabaseConfig.supabaseUrl,
+        // ignore: deprecated_member_use
         anonKey: SupabaseConfig.supabaseAnonKey,
       );
 
@@ -28,7 +29,7 @@ Future<void> main() async {
       Supabase.instance.client.auth.onAuthStateChange.listen((data) {
         if (data.event == AuthChangeEvent.signedIn) {
           final navContext = rootNavigatorKey.currentContext;
-          if (navContext != null) {
+          if (navContext != null && navContext.mounted) {
             ScannerApp._navigatePostAuth(navContext, userId: data.session?.user.id);
           }
         }
