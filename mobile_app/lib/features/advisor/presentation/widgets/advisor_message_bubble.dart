@@ -65,28 +65,34 @@ class AdvisorMessageBubble extends StatelessWidget {
   Widget _buildAdvisorBubble(BuildContext context) {
     final isGemini = message.source.startsWith('gemini');
     final isOffline = message.source == 'local_offline';
+    final isGuardrail = message.source == 'veribite_guardrail';
+    final isAppGuide = message.source == 'veribite_app_guide';
 
     final badgeLabel = isGemini
         ? 'Gemini 3.5 Flash • Live AI'
         : isOffline
             ? 'Offline Scientific Engine'
-            : 'Rule-Based Evidence Fallback';
+            : isGuardrail
+                ? 'VeriBite Guardrail'
+                : isAppGuide
+                    ? 'VeriBite App Guide'
+                    : 'Rule-Based Evidence Fallback';
 
-    final badgeColor = isGemini
+    final badgeColor = isGemini || isAppGuide
         ? AppColors.safetyMint
-        : isOffline
+        : isGuardrail || isOffline
             ? AppColors.accentBronze
             : AppColors.textObsidian;
 
-    final badgeBg = isGemini
+    final badgeBg = isGemini || isAppGuide
         ? AppColors.safetyMintBg
-        : isOffline
+        : isGuardrail || isOffline
             ? AppColors.ceilingCardBg
             : AppColors.stepPillBg;
 
-    final badgeBorder = isGemini
+    final badgeBorder = isGemini || isAppGuide
         ? AppColors.safetyMintBorder
-        : isOffline
+        : isGuardrail || isOffline
             ? AppColors.ceilingCardBorder
             : AppColors.stepPillBorder;
 

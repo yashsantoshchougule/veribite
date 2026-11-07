@@ -5,10 +5,11 @@ import 'package:http/http.dart' as http;
 import '../../../core/config/gemini_config.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/advisor_chat_model.dart';
+import '../domain/advisor_rules.dart';
 
-/// Application service connecting VeriBite to Google Gemini 3.5 Flash Live AI
-/// with Citation RAG grounding, backend FastAPI proxy support, and automatic
-/// offline factual fallback when no network connection is available.
+/// Application service connecting VeriBite to Google Gemini Live AI
+/// with Citation RAG grounding, strict domain & identity guardrails,
+/// backend FastAPI proxy support, and automatic offline factual fallback.
 class AdvisorService {
   final http.Client _client;
   final String? customBaseUrl;
@@ -19,14 +20,30 @@ class AdvisorService {
   }) : _client = client ?? http.Client();
 
   /// Primary query method:
-  /// 1. Tries direct Google Gemini Live REST API if configured (works seamlessly on real physical devices).
+  /// 1. Enforces early domain boundary & identity guardrails.
   /// 2. If a custom backend is configured, queries the backend endpoint.
-  /// 3. Seamlessly falls back to local offline factual synthesis if airplane mode or network timeout occurs.
+  /// 3. Tries direct Google Gemini Live REST API with multi-model failover.
+  /// 4. Seamlessly falls back to local offline factual regulatory engine.
   Future<ChatMessage> askAdvisor({
     required String userMessage,
     ProductAdvisorContext? productContext,
     UserProfileModel? userProfile,
   }) async {
+    // 0. Early Guardrail Checks: Out-of-scope refusal & AI identity protection
+    if (AdvisorRules.isOutOfScope(userMessage)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.outOfScopeRefusal,
+        source: 'veribite_guardrail',
+      );
+    }
+
+    if (AdvisorRules.isIdentityQuery(userMessage)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.identityResponse,
+        source: 'veribite_guardrail',
+      );
+    }
+
     // 1. If custom backend is specified, attempt custom backend first
     if (customBaseUrl != null) {
       try {
@@ -41,7 +58,7 @@ class AdvisorService {
       }
     }
 
-    // 2. Direct Google Gemini 3.5 Flash Live API Call
+    // 2. Direct Google Gemini Live API Call
     if (GeminiConfig.isConfigured) {
       try {
         final liveAiRes = await _askGeminiDirect(
@@ -59,7 +76,7 @@ class AdvisorService {
     return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
   }
 
-  /// Direct query to Google Gemini 3.5 Flash REST endpoint with Citation RAG prompt assembly
+  /// Direct query to Google Gemini REST endpoint with strict System Rules & Citation RAG assembly
   Future<ChatMessage> _askGeminiDirect({
     required String userMessage,
     ProductAdvisorContext? productContext,
@@ -73,48 +90,30 @@ class AdvisorService {
     final additives = productContext?.additives ?? [];
     final nutrition = productContext?.nutrition ?? {};
 
-    // Assemble Citation-Grounded RAG Prompt
-    final promptBuffer = StringBuffer();
-    promptBuffer.writeln('You are the Personal Food Safety & Nutrition Advisor powering VeriBite.');
-    promptBuffer.writeln('Answer the user query strictly grounded in scientific food toxicology and official regulatory monographs (WHO, EFSA, FSSAI, JECFA).');
-    promptBuffer.writeln('');
-    promptBuffer.writeln('USER HEALTH PROFILE & BIOMETRIC GUARDRAILS:');
-    promptBuffer.writeln('- Calibrated Body Weight: ${activeWeight.toStringAsFixed(1)} kg');
-    promptBuffer.writeln('- Life Stage: ${isChild ? "Child (<12 years old)" : "Adult"}');
-    promptBuffer.writeln('- Diabetic Guardrail: ${hasDiabetes ? "ACTIVE (Elevated Glycemic Sensitivity)" : "Inactive"}');
-    promptBuffer.writeln('- Hypertension Guardrail: ${hasHypertension ? "ACTIVE (Strict Sodium Ceiling)" : "Inactive"}');
+    // Assemble Citation-Grounded RAG Prompt with Strict Domain & Identity Regulations
+    final systemPrompt = AdvisorRules.buildSystemPrompt(
+      weightKg: activeWeight,
+      isChild: isChild,
+      isDiabetic: hasDiabetes,
+      isHypertensive: hasHypertension,
+      productName: productName,
+      healthScore: productContext?.healthScore,
+      nutrition: nutrition,
+      additives: additives,
+    );
 
-    if (productContext != null) {
-      promptBuffer.writeln('');
-      promptBuffer.writeln('ACTIVE SCANNED PRODUCT CONTEXT:');
-      promptBuffer.writeln('- Product Name: $productName');
-      promptBuffer.writeln('- Health Score: ${productContext.healthScore}/100');
-      promptBuffer.writeln('- Sugars (per 100g): ${nutrition["sugars_100g"] ?? "N/A"}');
-      promptBuffer.writeln('- Sodium (per 100g): ${nutrition["sodium_100g"] ?? "N/A"}');
-      if (additives.isNotEmpty) {
-        promptBuffer.writeln('- Detected Additives:');
-        for (final a in additives) {
-          final ins = a['ins_code'] ?? '';
-          final name = a['name'] ?? a['primary_name'] ?? '';
-          final tier = a['risk_tier'] ?? 'Caution';
-          promptBuffer.writeln('  * INS $ins ($name) — Risk Tier: $tier');
-        }
-      }
-    }
-
-    promptBuffer.writeln('');
-    promptBuffer.writeln('ZERO-HALLUCINATION RULES:');
-    promptBuffer.writeln('1. Cite verified regulatory bodies (WHO, EFSA, FSSAI, JECFA) for every factual claim.');
-    promptBuffer.writeln('2. Give exact, practical portion guidance tailored to the user body weight and conditions.');
-    promptBuffer.writeln('3. If mentioning food colorants or additives, clarify any behavioral or hyperactivity concerns for children.');
-    promptBuffer.writeln('');
-    promptBuffer.writeln('USER QUESTION: $userMessage');
+    final fullPrompt = '$systemPrompt\n\n'
+        'USER QUESTION: $userMessage\n\n'
+        'MANDATORY INSTRUCTIONS:\n'
+        '1. If the question is NOT related to food products, nutrition, or using the VeriBite app, politely refuse as instructed.\n'
+        '2. NEVER state what model you are or who created you. You are solely the VeriBite AI Advisor.\n'
+        '3. Give ONLY the specific details requested. Keep your response brief, clear, and under 150 words.';
 
     final requestBody = {
       'contents': [
         {
           'parts': [
-            {'text': promptBuffer.toString()}
+            {'text': fullPrompt}
           ]
         }
       ],
@@ -268,6 +267,31 @@ class AdvisorService {
     ProductAdvisorContext? productContext,
     UserProfileModel? userProfile,
   ) {
+    // 1. Guardrail: Out of Scope Refusal
+    if (AdvisorRules.isOutOfScope(userQuery)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.outOfScopeRefusal,
+        source: 'veribite_guardrail',
+      );
+    }
+
+    // 2. Guardrail: Identity Protection
+    if (AdvisorRules.isIdentityQuery(userQuery)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.identityResponse,
+        source: 'veribite_guardrail',
+      );
+    }
+
+    // 3. In-App Navigation & Troubleshooting Help
+    if (AdvisorRules.isAppHelpQuery(userQuery)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.buildAppHelpResponse(userQuery),
+        source: 'veribite_app_guide',
+        citations: ['VeriBite User Guide', 'FSSAI Consumer Guidelines'],
+      );
+    }
+
     final queryLower = userQuery.toLowerCase();
     final weightKg = userProfile?.weightKg ?? 65.0;
     final isChild = userProfile?.isChild ?? false;

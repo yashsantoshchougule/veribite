@@ -169,5 +169,60 @@ void main() {
       expect(reply.text, contains('Sunset Yellow'));
       expect(reply.citations, contains('EFSA-Southampton-Study-2008'));
     });
+
+    test('askAdvisor intercepts and refuses out-of-scope query without hitting network', () async {
+      bool networkCalled = false;
+      final mockClient = MockClient((request) async {
+        networkCalled = true;
+        return http.Response('{}', 200);
+      });
+
+      final service = AdvisorService(client: mockClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'who is pm of india',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(networkCalled, isFalse);
+      expect(reply.source, 'veribite_guardrail');
+      expect(reply.text, contains('VeriBite Food Safety & App Advisor'));
+      expect(reply.text, contains('Please ask a question related to food products or this application'));
+    });
+
+    test('askAdvisor intercepts identity query protecting model and creator anonymity', () async {
+      bool networkCalled = false;
+      final mockClient = MockClient((request) async {
+        networkCalled = true;
+        return http.Response('{}', 200);
+      });
+
+      final service = AdvisorService(client: mockClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'Which model are you and who created you?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(networkCalled, isFalse);
+      expect(reply.source, 'veribite_guardrail');
+      expect(reply.text, contains('I am the VeriBite AI Advisor'));
+      expect(reply.text, isNot(contains('Gemini')));
+      expect(reply.text, isNot(contains('Google')));
+    });
+
+    test('askAdvisor offline fallback answers in-app feature guidance queries', () async {
+      final failingClient = MockClient((request) async {
+        throw http.ClientException('Offline');
+      });
+
+      final service = AdvisorService(client: failingClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'how do I scan a product barcode?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'veribite_app_guide');
+      expect(reply.text, contains('How to Scan with VeriBite'));
+      expect(reply.text, contains('320px central reticle'));
+    });
   });
 }

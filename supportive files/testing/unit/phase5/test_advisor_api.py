@@ -77,3 +77,33 @@ def test_advisor_chat_gemini_success_with_citation_guardrail():
 
         assert data["source"] == "gemini_2.5_flash"
         assert "[JECFA-INS110]" in data["response"]
+
+
+def test_advisor_chat_out_of_scope_guardrail():
+    payload = {
+        "product_data": {"product_name": "Test Snack"},
+        "user_guardrails": {},
+        "user_message": "who is pm of india",
+    }
+    response = client.post("/api/v1/advisor/chat", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source"] == "veribite_guardrail"
+    assert "VeriBite Food Safety & App Advisor" in data["response"]
+    assert "Please ask a question related to food products or this application" in data["response"]
+
+
+def test_advisor_chat_identity_anonymity_guardrail():
+    payload = {
+        "product_data": {"product_name": "Test Snack"},
+        "user_guardrails": {},
+        "user_message": "which model are you and who created you?",
+    }
+    response = client.post("/api/v1/advisor/chat", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source"] == "veribite_guardrail"
+    assert "I am the VeriBite AI Advisor" in data["response"]
+    assert "Gemini" not in data["response"]
+    assert "Google" not in data["response"]
+

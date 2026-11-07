@@ -43,6 +43,29 @@ def advisor_chat(request: AdvisorChatRequest) -> Dict[str, Any]:
     product = request.product_data
     guardrails = request.user_guardrails
     user_msg = request.user_message
+    lower_msg = user_msg.lower().strip()
+
+    # Guardrail 1: Out-of-scope query refusal
+    out_of_scope_keywords = ["pm of", "prime minister", "president", "weather in", "cricket", "who won", "write code", "python code", "tell me a joke"]
+    if any(k in lower_msg for k in out_of_scope_keywords):
+        return {
+            "source": "veribite_guardrail",
+            "response": "I am the VeriBite Food Safety & App Advisor. I can only assist with questions about packaged food ingredients, nutrition, chemical additives (INS), safe portions, or using the VeriBite app. Please ask a question related to food products or this application!",
+            "citations": [],
+            "safe_portion_grams": None,
+            "frequency_schedule": None,
+        }
+
+    # Guardrail 2: Model & creator identity anonymity
+    identity_keywords = ["which model", "what model", "who created you", "who made you", "are you gemini", "are you chatgpt", "what ai are you"]
+    if any(k in lower_msg for k in identity_keywords):
+        return {
+            "source": "veribite_guardrail",
+            "response": "I am the VeriBite AI Advisor, built into the VeriBite application to help you evaluate packaged food ingredients, chemical toxicology, safe consumption dosage, and in-app features. How can I help you evaluate your food or navigate the app today?",
+            "citations": [],
+            "safe_portion_grams": None,
+            "frequency_schedule": None,
+        }
 
     additives = product.get("additives", [])
     ins_codes = [str(a.get("ins_code")) for a in additives if a.get("ins_code")]
