@@ -29,7 +29,7 @@ def call_gemini_advisor(prompt: str, user_message: str) -> str:
 
     from google import genai
     client = genai.Client(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     response = client.models.generate_content(
         model=model_name,
         contents=f"{prompt}\n\nUser Question: {user_message}",

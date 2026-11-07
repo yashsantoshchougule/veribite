@@ -60,7 +60,7 @@ void main() {
 
     // Verify top header
     expect(find.text('VeriBite AI Advisor'), findsAtLeastNWidgets(1));
-    expect(find.text('Gemini 2.5 Flash • Citation RAG'), findsAtLeastNWidgets(1));
+    expect(find.text('Gemini 3.5 Flash • Live AI'), findsAtLeastNWidgets(1));
 
     // Verify initial welcome message from advisor
     expect(find.textContaining('Hello! I am your VeriBite Personal AI Advisor'), findsOneWidget);
@@ -138,7 +138,7 @@ void main() {
 
     // Verify AI response bubble rendered
     expect(find.textContaining('Tartrazine (INS 102) has been linked to hyperactivity'), findsOneWidget);
-    expect(find.text('Gemini 2.5 Flash • Citation RAG'), findsAtLeastNWidgets(1));
+    expect(find.text('Gemini 3.5 Flash • Live AI'), findsAtLeastNWidgets(1));
 
     // Verify safe portion card in bubble
     expect(find.textContaining('Prescribed Safe Portion: 10g'), findsOneWidget);

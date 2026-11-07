@@ -34,7 +34,7 @@ class ChatMessage {
 
   factory ChatMessage.advisor({
     required String text,
-    String source = 'gemini_2.5_flash',
+    String source = 'gemini_3.5_flash',
     List<String> citations = const [],
     double? safePortionGrams,
     String? frequencySchedule,
@@ -59,7 +59,7 @@ class ChatMessage {
       timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
           : DateTime.now(),
-      source: json['source'] as String? ?? 'gemini_2.5_flash',
+      source: json['source'] as String? ?? 'gemini_3.5_flash',
       citations: (json['citations'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??

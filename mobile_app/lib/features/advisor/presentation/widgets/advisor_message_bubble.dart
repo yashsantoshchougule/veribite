@@ -59,11 +59,11 @@ class AdvisorMessageBubble extends StatelessWidget {
   }
 
   Widget _buildAdvisorBubble(BuildContext context) {
-    final isGemini = message.source == 'gemini_2.5_flash';
+    final isGemini = message.source == 'gemini_3.5_flash' || message.source == 'gemini_2.5_flash';
     final isOffline = message.source == 'local_offline';
 
     final badgeLabel = isGemini
-        ? 'Gemini 2.5 Flash • Citation RAG'
+        ? 'Gemini 3.5 Flash • Live AI'
         : isOffline
             ? 'Offline Scientific Engine'
             : 'Rule-Based Evidence Fallback';

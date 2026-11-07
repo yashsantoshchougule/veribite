@@ -8,7 +8,48 @@ import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 
 void main() {
   group('AdvisorService Tests', () {
-    test('askAdvisor parses 200 OK cloud response with citations', () async {
+    test('askAdvisor queries direct Google Gemini REST endpoint with RAG context', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.host, 'generativelanguage.googleapis.com');
+        expect(request.url.path, contains('gemini-3.5-flash-lite'));
+
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final promptText = body['contents'][0]['parts'][0]['text'] as String;
+        expect(promptText, contains('USER HEALTH PROFILE'));
+        expect(promptText, contains('WHO, EFSA, FSSAI, JECFA'));
+
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text': 'According to WHO guidelines, daily free sugar intake should be restricted to under 25g. EFSA and FSSAI guidelines corroborate this ceiling.'
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+
+      final service = AdvisorService(client: mockClient);
+      final reply = await service.askAdvisor(
+        userMessage: 'What is the safe sugar limit for an adult?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'gemini_3.5_flash');
+      expect(reply.text, contains('WHO guidelines'));
+      expect(reply.citations, contains('WHO Free Sugars (2015)'));
+      expect(reply.citations, contains('EFSA Additive Opinion'));
+    });
+
+    test('askAdvisor parses 200 OK backend proxy response with citations', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/advisor/chat');
         final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -16,7 +57,7 @@ void main() {
 
         return http.Response(
           jsonEncode({
-            'source': 'gemini_2.5_flash',
+            'source': 'gemini_3.5_flash',
             'response': 'Tartrazine (INS 102) is flagged under Southampton studies for pediatric hyperactivity.',
             'citations': ['EFSA-ANS-2009-102', 'WHO-TRS-983'],
             'safe_portion_grams': 22.0,
@@ -33,7 +74,7 @@ void main() {
         userProfile: UserProfileModel.defaults('test_user'),
       );
 
-      expect(reply.source, 'gemini_2.5_flash');
+      expect(reply.source, 'gemini_3.5_flash');
       expect(reply.text, contains('Tartrazine (INS 102)'));
       expect(reply.citations, contains('EFSA-ANS-2009-102'));
       expect(reply.safePortionGrams, 22.0);
@@ -92,4 +133,3 @@ void main() {
     });
   });
 }
-

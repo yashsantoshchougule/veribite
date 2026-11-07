@@ -50,10 +50,10 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
     if (_activeProductContext != null) {
       _messages.add(
         ChatMessage.advisor(
-          text: 'Hello! I am your VeriBite Personal AI Advisor, powered by Gemini 2.5 Flash and Citation RAG.\n\n'
+          text: 'Hello! I am your VeriBite Personal AI Advisor, powered by Gemini 3.5 Flash and Citation RAG.\n\n'
               'I have loaded **${_activeProductContext!.productName}** (Health Score: ${_activeProductContext!.healthScore}/100) into our context. '
               'Ask me anything about its safe portions for your body weight, split sugars, or chemical additives.',
-          source: 'gemini_2.5_flash',
+          source: 'gemini_3.5_flash',
           citations: ['WHO-Healthy-Diet-2023', 'FSSAI-Labelling-Regs-2020'],
         ),
       );
@@ -62,7 +62,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
         ChatMessage.advisor(
           text: 'Hello! I am your VeriBite Personal AI Advisor, grounded in WHO, EFSA, and FSSAI verified citations.\n\n'
               'Ask me anything about packaged food toxicology, chemical INS codes, hidden sugar splitting, or safe consumption ceilings for your family.',
-          source: 'gemini_2.5_flash',
+          source: 'gemini_3.5_flash',
           citations: ['WHO-Free-Sugars-2015', 'EFSA-Compendium-2021'],
         ),
       );
@@ -219,7 +219,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
                     border: Border.all(color: AppColors.safetyMintBorder),
                   ),
                   child: const Text(
-                    'Gemini 2.5 Flash • Citation RAG',
+                    'Gemini 3.5 Flash • Live AI',
                     style: TextStyle(
                       color: AppColors.safetyMint,
                       fontSize: 10,

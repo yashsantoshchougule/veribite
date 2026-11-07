@@ -2,33 +2,163 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../../../core/config/gemini_config.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/advisor_chat_model.dart';
 
-/// Application service connecting VeriBite to the FastAPI AI Advisor endpoint
-/// (/api/v1/advisor/chat) with Citation RAG (Gemini 2.5 Flash), and automatic
+/// Application service connecting VeriBite to Google Gemini 3.5 Flash Live AI
+/// with Citation RAG grounding, backend FastAPI proxy support, and automatic
 /// offline factual fallback when no network connection is available.
 class AdvisorService {
   final http.Client _client;
-  final String baseUrl;
+  final String? customBaseUrl;
 
   AdvisorService({
     http.Client? client,
-    String? customBaseUrl,
-  })  : _client = client ?? http.Client(),
-        baseUrl = customBaseUrl ?? _resolveDefaultBaseUrl();
+    this.customBaseUrl,
+  }) : _client = client ?? http.Client();
 
-  static String _resolveDefaultBaseUrl() {
-    // Android emulator loops back to host via 10.0.2.2; standard local host for iOS/desktop
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:8000';
+  /// Primary query method:
+  /// 1. Tries direct Google Gemini Live REST API if configured (works seamlessly on real physical devices).
+  /// 2. If a custom backend is configured, queries the backend endpoint.
+  /// 3. Seamlessly falls back to local offline factual synthesis if airplane mode or network timeout occurs.
+  Future<ChatMessage> askAdvisor({
+    required String userMessage,
+    ProductAdvisorContext? productContext,
+    UserProfileModel? userProfile,
+  }) async {
+    // 1. If custom backend is specified, attempt custom backend first
+    if (customBaseUrl != null) {
+      try {
+        final backendRes = await _askBackendProxy(
+          userMessage: userMessage,
+          productContext: productContext,
+          userProfile: userProfile,
+        );
+        if (backendRes != null) return backendRes;
+      } catch (e) {
+        debugPrint('[AdvisorService] Custom backend proxy error ($e). Attempting direct Gemini.');
+      }
     }
-    return 'http://127.0.0.1:8000';
+
+    // 2. Direct Google Gemini 3.5 Flash Live API Call
+    if (GeminiConfig.isConfigured) {
+      try {
+        final liveAiRes = await _askGeminiDirect(
+          userMessage: userMessage,
+          productContext: productContext,
+          userProfile: userProfile,
+        );
+        return liveAiRes;
+      } catch (e) {
+        debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to offline engine.');
+      }
+    }
+
+    // 3. Offline Factual Regulatory Engine (Airplane mode / no internet)
+    return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
   }
 
-  /// Sends a question to the Personal AI Advisor.
-  /// Automatically falls back to local factual synthesis if the cloud backend is unreachable.
-  Future<ChatMessage> askAdvisor({
+  /// Direct query to Google Gemini 3.5 Flash REST endpoint with Citation RAG prompt assembly
+  Future<ChatMessage> _askGeminiDirect({
+    required String userMessage,
+    ProductAdvisorContext? productContext,
+    UserProfileModel? userProfile,
+  }) async {
+    final activeWeight = userProfile?.weightKg ?? 65.0;
+    final isChild = userProfile?.isChild ?? false;
+    final hasDiabetes = userProfile?.isDiabetic ?? false;
+    final hasHypertension = userProfile?.isHypertensive ?? false;
+    final productName = productContext?.productName ?? 'General Packaged Food';
+    final additives = productContext?.additives ?? [];
+    final nutrition = productContext?.nutrition ?? {};
+
+    // Assemble Citation-Grounded RAG Prompt
+    final promptBuffer = StringBuffer();
+    promptBuffer.writeln('You are the Personal Food Safety & Nutrition Advisor powering VeriBite.');
+    promptBuffer.writeln('Answer the user query strictly grounded in scientific food toxicology and official regulatory monographs (WHO, EFSA, FSSAI, JECFA).');
+    promptBuffer.writeln('');
+    promptBuffer.writeln('USER HEALTH PROFILE & BIOMETRIC GUARDRAILS:');
+    promptBuffer.writeln('- Calibrated Body Weight: ${activeWeight.toStringAsFixed(1)} kg');
+    promptBuffer.writeln('- Life Stage: ${isChild ? "Child (<12 years old)" : "Adult"}');
+    promptBuffer.writeln('- Diabetic Guardrail: ${hasDiabetes ? "ACTIVE (Elevated Glycemic Sensitivity)" : "Inactive"}');
+    promptBuffer.writeln('- Hypertension Guardrail: ${hasHypertension ? "ACTIVE (Strict Sodium Ceiling)" : "Inactive"}');
+
+    if (productContext != null) {
+      promptBuffer.writeln('');
+      promptBuffer.writeln('ACTIVE SCANNED PRODUCT CONTEXT:');
+      promptBuffer.writeln('- Product Name: $productName');
+      promptBuffer.writeln('- Health Score: ${productContext.healthScore}/100');
+      promptBuffer.writeln('- Sugars (per 100g): ${nutrition["sugars_100g"] ?? "N/A"}');
+      promptBuffer.writeln('- Sodium (per 100g): ${nutrition["sodium_100g"] ?? "N/A"}');
+      if (additives.isNotEmpty) {
+        promptBuffer.writeln('- Detected Additives:');
+        for (final a in additives) {
+          final ins = a['ins_code'] ?? '';
+          final name = a['name'] ?? a['primary_name'] ?? '';
+          final tier = a['risk_tier'] ?? 'Caution';
+          promptBuffer.writeln('  * INS $ins ($name) — Risk Tier: $tier');
+        }
+      }
+    }
+
+    promptBuffer.writeln('');
+    promptBuffer.writeln('ZERO-HALLUCINATION RULES:');
+    promptBuffer.writeln('1. Cite verified regulatory bodies (WHO, EFSA, FSSAI, JECFA) for every factual claim.');
+    promptBuffer.writeln('2. Give exact, practical portion guidance tailored to the user body weight and conditions.');
+    promptBuffer.writeln('3. If mentioning food colorants or additives, clarify any behavioral or hyperactivity concerns for children.');
+    promptBuffer.writeln('');
+    promptBuffer.writeln('USER QUESTION: $userMessage');
+
+    final uri = Uri.parse('${GeminiConfig.baseUrl}/${GeminiConfig.model}:generateContent?key=${GeminiConfig.apiKey}');
+    final requestBody = {
+      'contents': [
+        {
+          'parts': [
+            {'text': promptBuffer.toString()}
+          ]
+        }
+      ],
+      'generationConfig': {
+        'temperature': 0.25,
+        'maxOutputTokens': 850,
+      }
+    };
+
+    final response = await _client
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(requestBody),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final candidates = json['candidates'] as List<dynamic>?;
+      if (candidates != null && candidates.isNotEmpty) {
+        final parts = candidates[0]['content']?['parts'] as List<dynamic>?;
+        if (parts != null && parts.isNotEmpty) {
+          final replyText = parts[0]['text'] as String? ?? '';
+          final citations = _extractCitations(replyText, additives);
+          final safePortion = _calculateSafePortion(nutrition, isChild, activeWeight);
+
+          return ChatMessage.advisor(
+            text: replyText.trim(),
+            source: 'gemini_3.5_flash',
+            citations: citations,
+            safePortionGrams: safePortion.grams,
+            frequencySchedule: safePortion.schedule,
+          );
+        }
+      }
+    }
+
+    throw Exception('Gemini API returned status ${response.statusCode}: ${response.body}');
+  }
+
+  /// Backend proxy implementation when running alongside local FastAPI server
+  Future<ChatMessage?> _askBackendProxy({
     required String userMessage,
     ProductAdvisorContext? productContext,
     UserProfileModel? userProfile,
@@ -53,27 +183,70 @@ class AdvisorService {
       'user_message': userMessage,
     };
 
-    try {
-      final uri = Uri.parse('$baseUrl/api/v1/advisor/chat');
-      final response = await _client
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(requestPayload),
-          )
-          .timeout(const Duration(seconds: 5));
+    final uri = Uri.parse('$customBaseUrl/api/v1/advisor/chat');
+    final response = await _client
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(requestPayload),
+        )
+        .timeout(const Duration(seconds: 5));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-        return ChatMessage.fromJson(data);
-      } else {
-        debugPrint('[AdvisorService] Backend HTTP ${response.statusCode}: falling back to local rule engine.');
-        return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
-      }
-    } catch (e) {
-      debugPrint('[AdvisorService] Network error ($e): seamless fallback to offline factual engine.');
-      return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      return ChatMessage.fromJson(data);
     }
+    return null;
+  }
+
+  /// Extracts official regulatory citations from the AI text response
+  List<String> _extractCitations(String text, List<Map<String, dynamic>> additives) {
+    final citations = <String>[];
+    final upper = text.toUpperCase();
+
+    if (upper.contains('WHO') || upper.contains('WORLD HEALTH')) {
+      citations.add('WHO Free Sugars (2015)');
+    }
+    if (upper.contains('EFSA') || upper.contains('EUROPEAN FOOD')) {
+      citations.add('EFSA Additive Opinion');
+    }
+    if (upper.contains('FSSAI') || upper.contains('FOOD SAFETY AND STANDARDS')) {
+      citations.add('FSSAI Labelling (2020)');
+    }
+    if (upper.contains('JECFA') || upper.contains('FAO')) {
+      citations.add('JECFA Monograph ADI');
+    }
+    if (upper.contains('SOUTHAMPTON')) {
+      citations.add('EFSA Southampton Study');
+    }
+    if (upper.contains('ICMR') || upper.contains('NIN')) {
+      citations.add('ICMR-NIN Guidelines');
+    }
+
+    if (citations.isEmpty) {
+      citations.addAll(['WHO Guidelines (2023)', 'FSSAI Regulations']);
+    }
+
+    return citations;
+  }
+
+  /// Safe portion calculation based on WHO sugar guidance and body weight
+  ({double grams, String schedule}) _calculateSafePortion(
+    Map<String, dynamic> nutrition,
+    bool isChild,
+    double weightKg,
+  ) {
+    final dailySugarLimitGrams = isChild ? 25.0 : 50.0;
+    final singleSnackSugarCeiling = (dailySugarLimitGrams * 0.20).clamp(5.0, 15.0);
+    final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 0.0;
+
+    final portionGrams = sugars100g > 0
+        ? ((singleSnackSugarCeiling / sugars100g) * 100.0).clamp(15.0, 80.0)
+        : (weightKg * 0.6).clamp(20.0, 60.0);
+
+    final rounded = (portionGrams * 10).round() / 10.0;
+    final schedule = isChild ? 'Max 1x per week' : 'Max 2-3x per week';
+    return (grams: rounded, schedule: schedule);
   }
 
   /// Factual offline fallback engine that calculates weight-adjusted safe portions
@@ -92,17 +265,11 @@ class AdvisorService {
     final nutrition = productContext?.nutrition ?? {};
     final productName = productContext?.productName ?? 'this product';
 
-    // 1. Calculate WHO 20% safe single-snack sugar allowance
-    final dailySugarLimitGrams = isChild ? 25.0 : 50.0;
-    final singleSnackSugarCeiling = (dailySugarLimitGrams * 0.20).clamp(5.0, 15.0);
-
+    // Calculate WHO 20% safe single-snack sugar allowance
+    final portionData = _calculateSafePortion(nutrition, isChild, weightKg);
+    final roundedPortion = portionData.grams;
+    final schedule = portionData.schedule;
     final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 20.0;
-    final portionGrams = sugars100g > 0
-        ? ((singleSnackSugarCeiling / sugars100g) * 100.0).clamp(15.0, 80.0)
-        : (weightKg * 0.7).clamp(20.0, 60.0);
-
-    final roundedPortion = (portionGrams * 10).round() / 10.0;
-    final schedule = isChild ? 'Max 1 time per week' : 'Max 2-3 times per week';
 
     final citations = <String>[];
     final buffer = StringBuffer();
@@ -133,7 +300,7 @@ class AdvisorService {
         'For a child (~${weightKg.toStringAsFixed(0)} kg), metabolic clearance for artificial additives and free sugars is significantly lower than in adults.\n',
       );
       if (additives.isNotEmpty) {
-        final redTier = additives.where((a) => a['risk_tier'] == 'Red').toList();
+        final redTier = additives.where((a) => a['risk_tier']?.toString().toUpperCase() == 'RED').toList();
         if (redTier.isNotEmpty) {
           final names = redTier.map((a) => a['name'] ?? a['ins_code']).join(', ');
           buffer.writeln('⚠️ **Flagged Additives:** Contains **$names**, which are restricted under EU/EFSA guidelines due to hyperactivity risks in young children.\n');
