@@ -5,6 +5,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('TtsVoiceService Tests', () {
+    test('naturalFemaleVoice defaults to studio-grade en-US-AriaNeural', () {
+      expect(TtsVoiceService.naturalFemaleVoice, 'en-US-AriaNeural');
+    });
+
     test('cleanMarkdownForSpeech removes markdown symbols and formats for speech', () {
       const rawMarkdown = '''
 ### Diabetes & Sugar Warning
@@ -47,6 +51,25 @@ void main() {
 
       service.dispose();
     });
+
+    test('stop clears speaking state immediately', () async {
+      final service = TtsVoiceService();
+      service.currentlySpeakingIdNotifier.value = 'msg_test';
+      expect(service.isSpeaking('msg_test'), isTrue);
+
+      await service.stop();
+      expect(service.currentlySpeakingIdNotifier.value, isNull);
+      expect(service.isSpeaking('msg_test'), isFalse);
+
+      service.dispose();
+    });
+
+    test('speak with empty text does not initiate playback', () async {
+      final service = TtsVoiceService();
+      await service.speak('   ', messageId: 'empty_msg');
+      expect(service.currentlySpeakingIdNotifier.value, isNull);
+
+      service.dispose();
+    });
   });
 }
-

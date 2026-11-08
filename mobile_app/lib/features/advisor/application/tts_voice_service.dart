@@ -1,23 +1,75 @@
+import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:edge_tts/edge_tts.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 /// Text-to-Speech Voice Service powering the conversational AI advisor.
-/// Allows VeriBite AI to talk aloud to users, reading out nutrition guidance,
-/// safety warnings, and portion advice in natural spoken voice.
+/// Features a hyper-realistic, emotionally expressive human female voice
+/// (Microsoft Edge Neural TTS: en-US-AriaNeural) with automatic seamless
+/// fallback to on-device neural female voices.
 class TtsVoiceService {
   final FlutterTts _flutterTts;
+  AudioPlayer? _audioPlayer;
+  StreamSubscription<void>? _playerCompleteSubscription;
+
   final ValueNotifier<String?> currentlySpeakingIdNotifier = ValueNotifier<String?>(null);
   final ValueNotifier<bool> autoSpeakEnabledNotifier = ValueNotifier<bool>(false);
 
-  TtsVoiceService({FlutterTts? tts}) : _flutterTts = tts ?? FlutterTts() {
+  /// Top-tier natural, conversational female neural voice
+  static const String naturalFemaleVoice = 'en-US-AriaNeural';
+
+  TtsVoiceService({FlutterTts? tts, AudioPlayer? audioPlayer})
+      : _flutterTts = tts ?? FlutterTts(),
+        _audioPlayer = audioPlayer {
+    _initAudioPlayer();
     _initTts();
+  }
+
+  void _initAudioPlayer() {
+    try {
+      _audioPlayer ??= AudioPlayer();
+      _playerCompleteSubscription = _audioPlayer?.onPlayerComplete.listen((_) {
+        currentlySpeakingIdNotifier.value = null;
+      });
+    } catch (e) {
+      debugPrint('[TtsVoiceService] AudioPlayer initialization notice: $e');
+    }
   }
 
   Future<void> _initTts() async {
     try {
-      await _flutterTts.setSpeechRate(0.48).catchError((_) => null);
+      // Natural conversational cadence and pitch for female voice
+      await _flutterTts.setSpeechRate(0.46).catchError((_) => null);
       await _flutterTts.setVolume(1.0).catchError((_) => null);
-      await _flutterTts.setPitch(1.0).catchError((_) => null);
+      await _flutterTts.setPitch(1.08).catchError((_) => null); // Warm, friendly female pitch
+      await _flutterTts.setLanguage('en-US').catchError((_) => null);
+
+      // Attempt to select high quality female voice if available on device
+      try {
+        final dynamic voices = await _flutterTts.getVoices;
+        if (voices is List && voices.isNotEmpty) {
+          for (final voice in voices) {
+            if (voice is Map) {
+              final name = (voice['name'] ?? '').toString().toLowerCase();
+              final locale = (voice['locale'] ?? '').toString().toLowerCase();
+              if (locale.contains('en')) {
+                if (name.contains('female') ||
+                    name.contains('samantha') ||
+                    name.contains('ava') ||
+                    name.contains('karen') ||
+                    name.contains('serena') ||
+                    name.contains('victoria') ||
+                    name.contains('sfg') ||
+                    name.contains('tpf')) {
+                  await _flutterTts.setVoice(Map<String, String>.from(voice));
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
 
       _flutterTts.setCompletionHandler(() {
         currentlySpeakingIdNotifier.value = null;
@@ -49,7 +101,7 @@ class TtsVoiceService {
     text = text.replaceAll(RegExp(r'^\s*\*\s*', multiLine: true), '');
     // Remove emojis or warning symbols
     text = text.replaceAll(RegExp(r'[⚠️🚨🔊⏹️•\\]'), '');
-    // Condense extra newlines
+    // Condense extra newlines into distinct conversational pauses
     text = text.replaceAll(RegExp(r'\n+'), '. ');
     return text.trim();
   }
@@ -63,15 +115,53 @@ class TtsVoiceService {
     }
   }
 
-  /// Speaks text aloud
+  /// Internal helper to stop all audio outputs without clearing speaking id
+  Future<void> _stopAudioOutputs() async {
+    try {
+      if (_audioPlayer != null) {
+        await _audioPlayer!.stop().catchError((_) => null);
+      }
+      await _flutterTts.stop().catchError((_) => null);
+    } catch (e) {
+      debugPrint('[TtsVoiceService] Stop audio notice: $e');
+    }
+  }
+
+  /// Speaks text aloud using hyper-realistic female neural voice (en-US-AriaNeural)
+  /// with automatic fallback to high-quality on-device neural voice.
   Future<void> speak(String text, {required String messageId}) async {
     final cleanText = cleanMarkdownForSpeech(text);
     if (cleanText.isEmpty) return;
 
     try {
+      await _stopAudioOutputs();
       currentlySpeakingIdNotifier.value = messageId;
-      await _flutterTts.stop().catchError((_) => null);
-      await _flutterTts.speak(cleanText).catchError((_) => null);
+
+      bool playedWithNeural = false;
+
+      // Tier 1: Microsoft Edge Neural TTS (en-US-AriaNeural)
+      // Highly regarded in the AI community for realistic emotional warmth and human prosody.
+      try {
+        final communicate = Communicate(
+          text: cleanText,
+          voice: naturalFemaleVoice,
+          rate: '+0%',
+          pitch: '+0Hz',
+          volume: '+0%',
+        );
+        final bytes = await communicate.toBytes().timeout(const Duration(seconds: 5));
+        if (bytes.isNotEmpty && _audioPlayer != null) {
+          await _audioPlayer!.play(BytesSource(bytes, mimeType: 'audio/mpeg'));
+          playedWithNeural = true;
+        }
+      } catch (neuralErr) {
+        debugPrint('[TtsVoiceService] Neural audio streaming notice: $neuralErr. Using on-device fallback.');
+      }
+
+      // Tier 2: Seamless zero-latency fallback to on-device female neural voice
+      if (!playedWithNeural) {
+        await _flutterTts.speak(cleanText).catchError((_) => null);
+      }
     } catch (e) {
       debugPrint('[TtsVoiceService] Speak notice: $e');
       currentlySpeakingIdNotifier.value = null;
@@ -80,13 +170,8 @@ class TtsVoiceService {
 
   /// Stops current speech output
   Future<void> stop() async {
-    try {
-      await _flutterTts.stop().catchError((_) => null);
-    } catch (e) {
-      debugPrint('[TtsVoiceService] Stop notice: $e');
-    } finally {
-      currentlySpeakingIdNotifier.value = null;
-    }
+    await _stopAudioOutputs();
+    currentlySpeakingIdNotifier.value = null;
   }
 
   /// Toggles automatic voice readout for incoming AI responses
@@ -100,6 +185,9 @@ class TtsVoiceService {
 
   void dispose() {
     try {
+      _playerCompleteSubscription?.cancel();
+      _audioPlayer?.stop().catchError((_) => null);
+      _audioPlayer?.dispose().catchError((_) => null);
       _flutterTts.stop().catchError((_) => null);
     } catch (_) {}
     currentlySpeakingIdNotifier.dispose();
