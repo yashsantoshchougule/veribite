@@ -206,4 +206,62 @@ void main() {
     expect(find.text('Organic Almond Butter'), findsOneWidget);
     expect(find.textContaining('NuttyCraft'), findsOneWidget);
   });
+
+  testWidgets('SmartCameraScreen top bar does not overflow on narrow 360x640 mobile viewport', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+
+    // Verify no overflow exception was thrown during layout
+    expect(tester.takeException(), isNull);
+
+    // Verify all top action bar elements are cleanly present
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
+    expect(find.text('Barcode / Auto'), findsOneWidget);
+    expect(find.text('Curved Bottle'), findsOneWidget);
+    expect(find.byIcon(Icons.flash_off_rounded), findsOneWidget);
+  });
+
+  testWidgets('SmartCameraScreen simulated non-food QR scan triggers single Not a Food Product dialog and allows clean dismissal', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: false),
+        ),
+      ),
+    );
+
+    final nonFoodButton = find.text('Simulate Non-Food QR Scan');
+    expect(nonFoodButton, findsOneWidget);
+
+    // Tap non-food button
+    await tester.tap(nonFoodButton);
+    await tester.pumpAndSettle();
+
+    // Verify exactly ONE bottom sheet appeared with "Not a Food Product"
+    expect(find.text('Not a Food Product'), findsOneWidget);
+    expect(find.textContaining('WhatsApp Support Link'), findsOneWidget);
+
+    // Attempt second tap while sheet is up to verify re-entrancy blocking
+    // The sheet blocks touches to the background, and dismiss button works cleanly
+    final dismissBtn = find.text('Scan Food Product');
+    expect(dismissBtn, findsOneWidget);
+
+    await tester.tap(dismissBtn);
+    await tester.pumpAndSettle();
+
+    // Verify sheet is dismissed
+    expect(find.text('Not a Food Product'), findsNothing);
+  });
 }

@@ -45,6 +45,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   UserProfileModel? _profile;
   bool _isProcessingScan = false;
   late bool _isLiveScanMode;
+  bool _isSheetOpen = false;
+  String? _lastDismissedPayload;
+  DateTime? _lastDismissedTime;
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
@@ -103,12 +106,20 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   void _handleBarcodeCapture(BarcodeCapture capture) {
-    if (_isProcessingScan) return;
+    if (_isProcessingScan || _isSheetOpen) return;
 
     for (final barcode in capture.barcodes) {
       final rawVal = barcode.rawValue;
       if (rawVal != null && rawVal.trim().isNotEmpty) {
-        _onBarcodeDetected(rawVal.trim());
+        final trimmed = rawVal.trim();
+        // Debounce: prevent re-triggering the same payload within 2.5s of dismissal
+        if (_lastDismissedPayload != null &&
+            _lastDismissedTime != null &&
+            trimmed == _lastDismissedPayload &&
+            DateTime.now().difference(_lastDismissedTime!) < const Duration(milliseconds: 2500)) {
+          return;
+        }
+        _onBarcodeDetected(trimmed);
         break;
       }
     }
@@ -121,7 +132,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       return;
     }
 
-    if (_isProcessingScan) return;
+    if (_isProcessingScan || _isSheetOpen) return;
     setState(() => _isProcessingScan = true);
 
     final notifier = ref.read(cameraScanNotifierProvider.notifier);
@@ -140,10 +151,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       await _showScanResultReport(resolvedProduct, activeProfile);
     } on NonFoodScanException catch (e) {
       if (!mounted) return;
-      _showNonFoodDialog(e.message);
+      await _showNonFoodDialog(e.message, rawBarcode);
     } on ProductNotFoundException catch (e) {
       if (!mounted) return;
-      _showProductNotFoundDialog(e.barcode);
+      await _showProductNotFoundDialog(e.barcode);
     } catch (e, st) {
       debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
@@ -162,273 +173,356 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   Future<void> _showScanResultReport(ScannedProductResult product, UserProfileModel profile) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
     try {
       await _scannerController.stop();
     } catch (_) {}
 
-    if (!mounted) return;
-    final dynamic result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => VerdictReportScreen(
-          product: product,
-          userProfile: profile,
+    try {
+      if (!mounted) return;
+      final dynamic result = await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VerdictReportScreen(
+            product: product,
+            userProfile: profile,
+          ),
         ),
-      ),
-    );
+      );
 
-    if (widget.onProductResolved != null) {
-      widget.onProductResolved!({
-        'source': 'barcode',
-        'product_name': product.productName,
-        'health_score': product.healthScore,
-        'eaten': result == true,
-      });
-    }
-    ref.read(cameraScanNotifierProvider.notifier).reset();
-
-    if (mounted) {
-      try {
-        await _scannerController.start();
-      } catch (_) {}
-    }
-  }
-
-  void _showNonFoodDialog(String message) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.cardSurface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
-        ),
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.black12,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.safetyRedBg,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.safetyRedBorder),
-              ),
-              child: const Icon(Icons.devices_other_rounded, color: AppColors.safetyRed, size: 32),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Not a Food Product',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textObsidian,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13.5,
-                color: AppColors.textMutedMocha,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 22),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryObsidian,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: const Text('Scan Food Product', style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showProductNotFoundDialog(String barcode) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.cardSurface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
-        ),
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.black12,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.sugarPeachBg,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.sugarPeachBorder),
-              ),
-              child: const Icon(Icons.search_off_rounded, color: AppColors.sugarPeachText, size: 32),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Product Not Found in Registry',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textObsidian,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Barcode "$barcode" was not found in our global food databases. If this is a real packaged food item, you can enter its nutritional values manually.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13.5,
-                color: AppColors.textMutedMocha,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      _openMacroSliderSheet();
-                    },
-                    icon: const Icon(Icons.tune_rounded, size: 18),
-                    label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textObsidian,
-                      side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryObsidian,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: const Text('Try Again', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showScanResultSheet(ScannedProductResult product) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ScanResultSheet(
-        product: product,
-        onLogConsumed: () async {
-          Navigator.of(ctx).pop();
-
-          // Record scan in Supabase / Local History
-          if (widget.userId != null) {
-            await HomeDashboardService().recordScan(
-              userId: widget.userId!,
-              barcode: product.barcode,
-            );
-          }
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Added ${product.productName} to today\'s consumption budget!'),
-                backgroundColor: AppColors.primaryObsidian,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
-
-          if (widget.onProductResolved != null) {
-            widget.onProductResolved!({
-              'source': 'barcode',
-              'product_name': product.productName,
-              'health_score': product.healthScore,
-              'eaten': true,
-            });
-          }
-
-          ref.read(cameraScanNotifierProvider.notifier).reset();
-        },
-        onDismissWithoutLog: () {
-          Navigator.of(ctx).pop();
-          if (widget.onProductResolved != null) {
-            widget.onProductResolved!({
-              'source': 'barcode',
-              'product_name': product.productName,
-              'health_score': product.healthScore,
-              'eaten': false,
-            });
-          }
-          ref.read(cameraScanNotifierProvider.notifier).reset();
-        },
-      ),
-    ).then((_) {
+      if (widget.onProductResolved != null) {
+        widget.onProductResolved!({
+          'source': 'barcode',
+          'product_name': product.productName,
+          'health_score': product.healthScore,
+          'eaten': result == true,
+        });
+      }
       ref.read(cameraScanNotifierProvider.notifier).reset();
-    });
+    } finally {
+      _lastDismissedPayload = product.barcode;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
   }
 
-  void _openMacroSliderSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => QuickMacroSliderSheet(
-        onSubmit: (macros) {
-          Navigator.of(context).pop();
-          final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
-          final resolved = _productService.resolveManualNutrition(
-            macros: macros,
-            userProfile: activeProfile,
-          );
-          _showScanResultSheet(resolved);
-        },
-      ),
-    );
+  Future<void> _showNonFoodDialog(String message, String rawPayload) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.safetyRedBg,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.safetyRedBorder),
+                ),
+                child: const Icon(Icons.devices_other_rounded, color: AppColors.safetyRed, size: 32),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Not a Food Product',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textObsidian,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  color: AppColors.textMutedMocha,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryObsidian,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Scan Food Product', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = rawPayload;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _showProductNotFoundDialog(String barcode) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.sugarPeachBg,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.sugarPeachBorder),
+                ),
+                child: const Icon(Icons.search_off_rounded, color: AppColors.sugarPeachText, size: 32),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Product Not Found in Registry',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textObsidian,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Barcode "$barcode" was not found in our global food databases. If this is a real packaged food item, you can enter its nutritional values manually.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  color: AppColors.textMutedMocha,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _openMacroSliderSheet();
+                      },
+                      icon: const Icon(Icons.tune_rounded, size: 18),
+                      label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textObsidian,
+                        side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryObsidian,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: const Text('Try Again', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = barcode;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _showScanResultSheet(ScannedProductResult product) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => ScanResultSheet(
+          product: product,
+          onLogConsumed: () async {
+            Navigator.of(ctx).pop();
+
+            // Record scan in Supabase / Local History
+            if (widget.userId != null) {
+              await HomeDashboardService().recordScan(
+                userId: widget.userId!,
+                barcode: product.barcode,
+              );
+            }
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Added ${product.productName} to today\'s consumption budget!'),
+                  backgroundColor: AppColors.primaryObsidian,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+
+            if (widget.onProductResolved != null) {
+              widget.onProductResolved!({
+                'source': 'barcode',
+                'product_name': product.productName,
+                'health_score': product.healthScore,
+                'eaten': true,
+              });
+            }
+
+            ref.read(cameraScanNotifierProvider.notifier).reset();
+          },
+          onDismissWithoutLog: () {
+            Navigator.of(ctx).pop();
+            if (widget.onProductResolved != null) {
+              widget.onProductResolved!({
+                'source': 'barcode',
+                'product_name': product.productName,
+                'health_score': product.healthScore,
+                'eaten': false,
+              });
+            }
+            ref.read(cameraScanNotifierProvider.notifier).reset();
+          },
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = product.barcode;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _openMacroSliderSheet() async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => QuickMacroSliderSheet(
+          onSubmit: (macros) {
+            Navigator.of(context).pop();
+            final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+            final resolved = _productService.resolveManualNutrition(
+              macros: macros,
+              userProfile: activeProfile,
+            );
+            _showScanResultSheet(resolved);
+          },
+        ),
+      );
+    } finally {
+      _isSheetOpen = false;
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
   }
 
   void _toggleTorch(CameraScanNotifier notifier) {
@@ -632,95 +726,123 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
           _buildPinchZoomIndicator(),
 
           // 6. Top Action Bar
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: Colors.black45,
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      tooltip: 'Back',
-                    ),
-                  ),
-                  const Spacer(),
-                  // Mode Selector Chips
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    padding: const EdgeInsets.all(4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Barcode / Auto', style: TextStyle(fontSize: 12)),
-                          selected: !state.isMultiAngleMode,
-                          selectedColor: const Color(0xFF0F9D58),
-                          labelStyle: TextStyle(
-                            color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
-                          ),
-                          onSelected: (val) {
-                            if (val) notifier.setMultiAngleMode(false);
-                          },
-                        ),
-                        const SizedBox(width: 4),
-                        ChoiceChip(
-                          label: const Text('Curved Bottle', style: TextStyle(fontSize: 12)),
-                          selected: state.isMultiAngleMode,
-                          selectedColor: const Color(0xFF4285F4),
-                          labelStyle: TextStyle(
-                            color: state.isMultiAngleMode ? Colors.white : Colors.white70,
-                          ),
-                          onSelected: (val) {
-                            if (val) notifier.setMultiAngleMode(true);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  // Scan Mode Toggle (Live Scan vs Lens Testing Mode)
-                  CircleAvatar(
-                    backgroundColor: Colors.black45,
-                    child: IconButton(
-                      icon: Icon(
-                        _isLiveScanMode ? Icons.qr_code_scanner_rounded : Icons.camera_alt_outlined,
-                        color: _isLiveScanMode ? const Color(0xFF0F9D58) : Colors.white70,
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.black45,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        tooltip: 'Back',
                       ),
-                      onPressed: () {
-                        setState(() => _isLiveScanMode = !_isLiveScanMode);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              _isLiveScanMode
-                                  ? 'Live Scan Active: Barcodes open Master Verdict'
-                                  : 'Lens Test Mode: Scan reports suppressed for camera testing',
+                    ),
+                    const SizedBox(width: 8),
+                    // Mode Selector Chips
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.center,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
+                                selected: !state.isMultiAngleMode,
+                                selectedColor: const Color(0xFF0F9D58),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                labelStyle: TextStyle(
+                                  color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                ),
+                                onSelected: (val) {
+                                  if (val) notifier.setMultiAngleMode(false);
+                                },
+                              ),
+                              const SizedBox(width: 4),
+                              ChoiceChip(
+                                label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
+                                selected: state.isMultiAngleMode,
+                                selectedColor: const Color(0xFF4285F4),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                labelStyle: TextStyle(
+                                  color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                ),
+                                onSelected: (val) {
+                                  if (val) notifier.setMultiAngleMode(true);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Scan Mode Toggle (Live Scan vs Lens Testing Mode)
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.black45,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          _isLiveScanMode ? Icons.qr_code_scanner_rounded : Icons.camera_alt_outlined,
+                          color: _isLiveScanMode ? const Color(0xFF0F9D58) : Colors.white70,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setState(() => _isLiveScanMode = !_isLiveScanMode);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _isLiveScanMode
+                                    ? 'Live Scan Active: Barcodes open Master Verdict'
+                                    : 'Lens Test Mode: Scan reports suppressed for camera testing',
+                              ),
+                              duration: const Duration(seconds: 1),
                             ),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                      tooltip: _isLiveScanMode ? 'Live Scan Active' : 'Lens Test Mode',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Torch Toggle Button
-                  CircleAvatar(
-                    backgroundColor: Colors.black45,
-                    child: IconButton(
-                      icon: Icon(
-                        state.isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
-                        color: state.isTorchOn ? const Color(0xFFF4B400) : Colors.white,
+                          );
+                        },
+                        tooltip: _isLiveScanMode ? 'Live Scan Active' : 'Lens Test Mode',
                       ),
-                      onPressed: () => _toggleTorch(notifier),
-                      tooltip: 'Torch',
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    // Torch Toggle Button
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.black45,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          state.isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                          color: state.isTorchOn ? const Color(0xFFF4B400) : Colors.white,
+                          size: 20,
+                        ),
+                        onPressed: () => _toggleTorch(notifier),
+                        tooltip: 'Torch',
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -951,6 +1073,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               label: const Text(
                 'Simulate Product QR Scan',
                 style: TextStyle(color: AppColors.safetyGreen, fontSize: 12.5),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _onBarcodeDetected('https://wa.me/912261014560'),
+              icon: const Icon(Icons.devices_other_rounded, size: 16, color: AppColors.safetyRed),
+              label: const Text(
+                'Simulate Non-Food QR Scan',
+                style: TextStyle(color: AppColors.safetyRed, fontSize: 12.5),
               ),
             ),
           ],
