@@ -3,6 +3,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:edge_tts/edge_tts.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import '../../camera/application/product_scanner_service.dart';
+import '../../profile/domain/user_profile_model.dart';
 
 /// Text-to-Speech Voice Service powering the conversational AI advisor.
 /// Features a hyper-realistic, emotionally expressive human female voice
@@ -104,6 +106,54 @@ class TtsVoiceService {
     // Condense extra newlines into distinct conversational pauses
     text = text.replaceAll(RegExp(r'\n+'), '. ');
     return text.trim();
+  }
+
+  /// Formats an evidence-based clinical speech summary for a scanned product verdict
+  static String buildVerdictSpeechSummary({
+    required ScannedProductResult product,
+    required UserProfileModel userProfile,
+  }) {
+    final buffer = StringBuffer();
+
+    // 1. Product Name & Health Score
+    final cleanVerdict = product.verdictTag
+        .replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}]', unicode: true), '')
+        .trim();
+    buffer.write('Here is the safety verdict for ${product.productName}. ');
+    buffer.write('Overall health score is ${product.healthScore} out of 100, classified as $cleanVerdict. ');
+
+    // 2. Toxic Red-Cap Override Status
+    if (product.redCapTriggered) {
+      final redAdditives = product.additives
+          .where((a) => a['risk_tier'] == 'RED' || a['triggers_red_cap'] == 1)
+          .map((a) => a['primary_name'] ?? 'INS ${a["ins_code"]}')
+          .take(3)
+          .join(', ');
+      buffer.write('Warning: A strict red-cap toxic override is triggered. ');
+      if (redAdditives.isNotEmpty) {
+        buffer.write('This product contains hazardous additives: $redAdditives. ');
+      }
+      buffer.write('Health score is restricted to 39 or below. ');
+    } else {
+      buffer.write('No toxic red-cap chemical additives were detected. ');
+    }
+
+    // 3. Sugar Splitting Cluster Alert
+    if (product.splitSugars.isNotEmpty) {
+      buffer.write(
+        'Be aware: Hidden sugar splitting was detected across ${product.splitSugars.length} sweetener aliases, including ${product.splitSugars.take(2).join(" and ")}. ',
+      );
+    }
+
+    // 4. Prescribed Safe Portion & Ceilings
+    buffer.write('Your prescribed safe consumption limit is ${product.safePortionGrams} grams');
+    if (product.safePieces != null) {
+      buffer.write(', or about ${product.safePieces} pieces');
+    }
+    buffer.write('. Recommended frequency: ${product.frequencySchedule}. ');
+    buffer.write('Limiting constraint: ${product.limitingFactor}.');
+
+    return buffer.toString();
   }
 
   /// Speaks the provided text aloud. If the same message is already playing, stops it.

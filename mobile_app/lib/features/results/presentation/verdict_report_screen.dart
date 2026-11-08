@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../advisor/application/tts_voice_service.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
@@ -22,6 +23,7 @@ class VerdictReportScreen extends StatefulWidget {
   final UserProfileModel userProfile;
   final HomeDashboardService? dashboardService;
   final MedicalReportPdfService? pdfService;
+  final TtsVoiceService? ttsService;
 
   const VerdictReportScreen({
     super.key,
@@ -29,6 +31,7 @@ class VerdictReportScreen extends StatefulWidget {
     required this.userProfile,
     this.dashboardService,
     this.pdfService,
+    this.ttsService,
   });
 
   @override
@@ -37,14 +40,42 @@ class VerdictReportScreen extends StatefulWidget {
 
 class _VerdictReportScreenState extends State<VerdictReportScreen> {
   late final HomeDashboardService _dashboardService;
+  late final TtsVoiceService _ttsService;
+  bool _ownsTtsService = false;
   bool _isWholePack = false;
   bool _isSubmitting = false;
   bool _isExportingPdf = false;
+
+  String get _speakingMessageId => 'verdict_${widget.product.barcode}';
 
   @override
   void initState() {
     super.initState();
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
+    if (widget.ttsService != null) {
+      _ttsService = widget.ttsService!;
+    } else {
+      _ttsService = TtsVoiceService();
+      _ownsTtsService = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ttsService.stop();
+    if (_ownsTtsService) {
+      _ttsService.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _toggleListenVerdict() async {
+    unawaited(HapticFeedback.lightImpact());
+    final summary = TtsVoiceService.buildVerdictSpeechSummary(
+      product: widget.product,
+      userProfile: widget.userProfile,
+    );
+    await _ttsService.toggleSpeak(summary, messageId: _speakingMessageId);
   }
 
   double get _packWeight => widget.product.packWeightG > 0
@@ -336,6 +367,26 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ),
           ),
           const SizedBox(width: 8),
+          // Listen to Verdict Spoken Audio Button
+          ValueListenableBuilder<String?>(
+            valueListenable: _ttsService.currentlySpeakingIdNotifier,
+            builder: (context, speakingId, _) {
+              final isSpeaking = speakingId == _speakingMessageId;
+              return CircleAvatar(
+                backgroundColor: isSpeaking ? AppColors.sugarPeachBg : AppColors.cardSurface,
+                child: IconButton(
+                  icon: Icon(
+                    isSpeaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                    color: isSpeaking ? AppColors.safetyRed : AppColors.accentBronze,
+                    size: 20,
+                  ),
+                  onPressed: _toggleListenVerdict,
+                  tooltip: isSpeaking ? 'Stop Audio Summary' : 'Listen to Spoken Verdict',
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
           CircleAvatar(
             backgroundColor: AppColors.cardSurface,
             child: IconButton(
@@ -392,7 +443,61 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 14),
+          ValueListenableBuilder<String?>(
+            valueListenable: _ttsService.currentlySpeakingIdNotifier,
+            builder: (context, speakingId, _) {
+              final isSpeaking = speakingId == _speakingMessageId;
+              return _buildListenVerdictPill(isSpeaking);
+            },
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildListenVerdictPill(bool isSpeaking) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleListenVerdict,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: isSpeaking
+                ? AppColors.safetyRed.withValues(alpha: 0.12)
+                : AppColors.accentBronze.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isSpeaking
+                  ? AppColors.safetyRed.withValues(alpha: 0.4)
+                  : AppColors.accentBronze.withValues(alpha: 0.35),
+              width: 1.2,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isSpeaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                color: isSpeaking ? AppColors.safetyRed : AppColors.accentBronze,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isSpeaking ? 'Stop Audio' : 'Listen to Verdict',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: isSpeaking ? AppColors.safetyRed : AppColors.accentBronze,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

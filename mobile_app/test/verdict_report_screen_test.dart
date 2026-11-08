@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_app/features/advisor/application/tts_voice_service.dart';
 import 'package:mobile_app/features/advisor/presentation/advisor_chat_screen.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
@@ -8,6 +9,18 @@ import 'package:mobile_app/features/results/presentation/verdict_report_screen.d
 import 'package:mobile_app/features/results/presentation/widgets/circular_score_gauge.dart';
 import 'package:mobile_app/features/results/presentation/widgets/ingredient_deep_dive_sheet.dart';
 import 'package:mobile_app/features/swaps/presentation/healthier_swaps_screen.dart';
+
+class FakeTtsVoiceService extends TtsVoiceService {
+  @override
+  Future<void> speak(String text, {required String messageId}) async {
+    currentlySpeakingIdNotifier.value = messageId;
+  }
+
+  @override
+  Future<void> stop() async {
+    currentlySpeakingIdNotifier.value = null;
+  }
+}
 
 void main() {
   final testProfile = UserProfileModel.defaults('test_user_1');
@@ -332,5 +345,91 @@ void main() {
     expect(find.text('Clinical Health Report (PDF)'), findsOneWidget);
     expect(find.text('Share PDF'), findsOneWidget);
     expect(find.text('Print / Save'), findsOneWidget);
+  });
+
+  testWidgets('VerdictReportScreen renders audio summary button in top bar and hero Listen to Verdict pill', (tester) async {
+    final ttsService = FakeTtsVoiceService();
+    addTearDown(ttsService.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testSafeProduct,
+          userProfile: testProfile,
+          ttsService: ttsService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify top bar audio button
+    expect(find.byTooltip('Listen to Spoken Verdict'), findsOneWidget);
+    expect(find.byIcon(Icons.volume_up_rounded), findsWidgets);
+
+    // Verify hero "Listen to Verdict" pill
+    expect(find.text('Listen to Verdict'), findsOneWidget);
+  });
+
+  testWidgets('VerdictReportScreen tapping Listen to Verdict toggles speech and updates UI state', (tester) async {
+    final ttsService = FakeTtsVoiceService();
+    addTearDown(ttsService.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testSafeProduct,
+          userProfile: testProfile,
+          ttsService: ttsService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Tap Listen to Verdict pill
+    await tester.tap(find.text('Listen to Verdict'));
+    await tester.pump();
+
+    // State should now reflect speaking
+    expect(find.text('Stop Audio'), findsOneWidget);
+    expect(find.byTooltip('Stop Audio Summary'), findsOneWidget);
+    expect(find.byIcon(Icons.stop_circle_rounded), findsWidgets);
+
+    // Tap Stop Audio pill
+    await tester.tap(find.text('Stop Audio'));
+    await tester.pump();
+
+    // Should return to idle
+    expect(find.text('Listen to Verdict'), findsOneWidget);
+    expect(find.byTooltip('Listen to Spoken Verdict'), findsOneWidget);
+  });
+
+  testWidgets('VerdictReportScreen tapping top bar speaker icon toggles audio summary', (tester) async {
+    final ttsService = FakeTtsVoiceService();
+    addTearDown(ttsService.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testSafeProduct,
+          userProfile: testProfile,
+          ttsService: ttsService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Tap top bar icon
+    await tester.tap(find.byTooltip('Listen to Spoken Verdict'));
+    await tester.pump();
+
+    expect(find.byTooltip('Stop Audio Summary'), findsOneWidget);
+    expect(find.text('Stop Audio'), findsOneWidget);
+
+    // Tap again to stop
+    await tester.tap(find.byTooltip('Stop Audio Summary'));
+    await tester.pump();
+
+    expect(find.byTooltip('Listen to Spoken Verdict'), findsOneWidget);
+    expect(find.text('Listen to Verdict'), findsOneWidget);
   });
 }
