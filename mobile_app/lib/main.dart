@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/supabase_config.dart';
 import 'core/theme/app_colors.dart';
+import 'features/auth/application/google_auth_service.dart';
 import 'features/auth/application/supabase_auth_service.dart';
 import 'features/auth/presentation/login_screen.dart';
+import 'features/auth/presentation/widgets/keystore_diagnostic_sheet.dart';
 import 'features/home/presentation/home_screen.dart';
 import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
 import 'features/profile/application/user_profile_service.dart';
@@ -288,8 +290,34 @@ class AppStartupGate extends StatelessWidget {
               await ScannerApp._navigatePostAuth(context);
             }
           }
-        } catch (e) {
+        } on GoogleKeystoreMismatchException catch (e) {
           if (context.mounted) {
+            await KeystoreDiagnosticSheet.show(
+              context,
+              rawError: e.rawError,
+              onContinueWithLocalProfile: () => ScannerApp._navigatePostAuth(context, userId: 'local_google_user'),
+              onRetryBrowserOAuth: () async {
+                try {
+                  await SupabaseAuthService().signInWithBrowserOAuth();
+                } catch (_) {}
+              },
+            );
+          }
+        } catch (e) {
+          if (GoogleAuthService.isKeystoreMismatchError(e)) {
+            if (context.mounted) {
+              await KeystoreDiagnosticSheet.show(
+                context,
+                rawError: e.toString(),
+                onContinueWithLocalProfile: () => ScannerApp._navigatePostAuth(context, userId: 'local_google_user'),
+                onRetryBrowserOAuth: () async {
+                  try {
+                    await SupabaseAuthService().signInWithBrowserOAuth();
+                  } catch (_) {}
+                },
+              );
+            }
+          } else if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Google Sign-In notice: $e'),

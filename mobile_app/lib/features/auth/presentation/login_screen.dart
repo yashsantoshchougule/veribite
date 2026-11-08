@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../legal/presentation/legal_policy_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../application/google_auth_service.dart';
 import '../application/supabase_auth_service.dart';
 import 'widgets/google_logo_icon.dart';
+import 'widgets/keystore_diagnostic_sheet.dart';
 import 'widgets/login_feature_chip.dart';
 
 /// Production-ready VeriBite Authentication Screen supporting dual sliding
@@ -370,8 +372,42 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           }
         }
       }
-    } catch (e) {
+    } on GoogleKeystoreMismatchException catch (keystoreErr) {
       if (mounted) {
+        await KeystoreDiagnosticSheet.show(
+          context,
+          rawError: keystoreErr.rawError,
+          onContinueWithLocalProfile: () {
+            if (widget.onContinueWithCredential != null) {
+              widget.onContinueWithCredential!('local_google_user');
+            }
+          },
+          onRetryBrowserOAuth: () async {
+            try {
+              await SupabaseAuthService().signInWithBrowserOAuth();
+            } catch (_) {}
+          },
+        );
+      }
+    } catch (e) {
+      if (GoogleAuthService.isKeystoreMismatchError(e)) {
+        if (mounted) {
+          await KeystoreDiagnosticSheet.show(
+            context,
+            rawError: e.toString(),
+            onContinueWithLocalProfile: () {
+              if (widget.onContinueWithCredential != null) {
+                widget.onContinueWithCredential!('local_google_user');
+              }
+            },
+            onRetryBrowserOAuth: () async {
+              try {
+                await SupabaseAuthService().signInWithBrowserOAuth();
+              } catch (_) {}
+            },
+          );
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Google Sign-In notice: $e'),

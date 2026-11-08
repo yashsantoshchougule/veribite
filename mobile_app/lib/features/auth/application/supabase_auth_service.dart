@@ -1,5 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/config/oauth_config.dart';
+import 'google_auth_service.dart';
+
+export 'google_auth_service.dart' show GoogleKeystoreMismatchException;
 
 /// Service managing Supabase Cloud Authentication for VeriBite.
 class SupabaseAuthService {
@@ -103,8 +107,31 @@ class SupabaseAuthService {
     }
   }
 
-  /// Sign in with Google OAuth
-  Future<bool> signInWithGoogle() async {
+  /// Sign in with Google with 2-tier fallback (Native -> Browser PKCE OAuth)
+  Future<bool> signInWithGoogle({void Function(String message)? onStatusUpdate}) async {
+    final client = _client;
+    final googleAuth = GoogleAuthService(supabaseClient: client);
+
+    try {
+      final res = await googleAuth.signInWithGoogle(onStatusUpdate: onStatusUpdate);
+      return res != null || isAuthenticated;
+    } on GoogleKeystoreMismatchException {
+      rethrow;
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      if (GoogleAuthService.isKeystoreMismatchError(e)) {
+        throw GoogleKeystoreMismatchException(
+          message: 'Google Sign-In blocked by keystore fingerprint.',
+          rawError: e.toString(),
+        );
+      }
+      throw AuthException(e.toString());
+    }
+  }
+
+  /// Explicit Tier 1 Browser OAuth PKCE flow (Chrome Custom Tabs)
+  Future<bool> signInWithBrowserOAuth() async {
     final client = _client;
     if (client == null) {
       throw const AuthException('Supabase client is not initialized');
@@ -113,7 +140,7 @@ class SupabaseAuthService {
     try {
       final success = await client.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: kIsWeb ? null : 'io.supabase.veribite://login-callback/',
+        redirectTo: kIsWeb ? null : OAuthConfig.supabaseSchemeRedirectUri,
         authScreenLaunchMode: LaunchMode.externalApplication,
       );
       return success;

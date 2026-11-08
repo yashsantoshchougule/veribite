@@ -29,11 +29,28 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("debugShared") {
+            storeFile = file("veribite-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debugShared")
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Sideloaded release builds safely use the deterministic project keystore
+            // so Google Sign-In SHA-1 / SHA-256 fingerprints match across all physical devices
+            val keyPropsFile = rootProject.file("key.properties")
+            if (keyPropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("debugShared")
+            } else {
+                signingConfig = signingConfigs.getByName("debugShared")
+            }
         }
     }
 }

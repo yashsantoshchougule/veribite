@@ -160,15 +160,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     // If only a QR code is detected:
     if (qrBarcode != null) {
       final trimmed = qrBarcode.rawValue!.trim();
+      final lower = trimmed.toLowerCase();
 
       // Immediately reject non-web QR payloads (e.g. upi://, WIFI:, tel:, mailto:, vCard) without debounce
-      if (trimmed.startsWith('upi:') ||
-          trimmed.startsWith('wifi:') ||
-          trimmed.startsWith('WIFI:') ||
-          trimmed.startsWith('tel:') ||
-          trimmed.startsWith('mailto:') ||
-          trimmed.startsWith('begin:vcard') ||
-          trimmed.startsWith('BEGIN:VCARD')) {
+      if (lower.startsWith('upi:') ||
+          lower.startsWith('wifi:') ||
+          lower.startsWith('tel:') ||
+          lower.startsWith('mailto:') ||
+          lower.startsWith('begin:vcard')) {
         _qrDebounceTimer?.cancel();
         _qrDebounceTimer = null;
         _pendingQrPayload = null;
@@ -851,7 +850,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
           await _scannerController.start();
         } catch (_) {}
         if (action == 'macros') {
-          _openMacroSliderSheet();
+          unawaited(_openMacroSliderSheet());
         }
       }
     }

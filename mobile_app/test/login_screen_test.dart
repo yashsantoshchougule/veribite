@@ -345,5 +345,27 @@ void main() {
       expect(find.text('Join 1 million+ smart consumers'), findsOneWidget);
       expect(find.text('Continue with Google'), findsOneWidget);
     });
+
+    testWidgets('tapping Continue with Google invokes onGoogleSignIn callback', (tester) async {
+      bool googleTapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            onGoogleSignIn: () {
+              googleTapped = true;
+            },
+          ),
+        ),
+      );
+
+      final googleBtn = find.text('Continue with Google');
+      await tester.ensureVisible(googleBtn);
+      await tester.pumpAndSettle();
+
+      await tester.tap(googleBtn);
+      await tester.pumpAndSettle();
+
+      expect(googleTapped, isTrue);
+    });
   });
 }
