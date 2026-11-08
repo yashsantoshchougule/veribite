@@ -43,10 +43,37 @@ def test_additive_corpus_and_red_cap_triggers():
     assert fts_row is not None
     assert "Sunset Yellow" in fts_row[0]
 
-    # 5. Verify total pre-loaded core additive count >= 50
+    # 5. Verify total pre-loaded comprehensive additive count >= 600
     cursor.execute("SELECT count(*) FROM additives_master;")
     total_additives = cursor.fetchone()[0]
-    assert total_additives >= 50, f"Expected >= 50 core additives, found {total_additives}"
+    assert total_additives >= 600, f"Expected >= 600 additives, found {total_additives}"
+
+    # 6. Verify newly expanded additives
+    # INS 476: Polyglycerol polyricinoleate (Emulsifier in chocolates) -> CAUTION
+    cursor.execute("SELECT risk_tier, triggers_red_cap, functional_class FROM additives_master WHERE ins_code='476';")
+    row_476 = cursor.fetchone()
+    assert row_476 is not None
+    assert row_476[0] == "CAUTION"
+    assert row_476[1] == 0
+
+    # INS 171: Titanium dioxide (Genotoxic / Banned in EU) -> RED with red cap
+    cursor.execute("SELECT risk_tier, triggers_red_cap FROM additives_master WHERE ins_code='171';")
+    row_171 = cursor.fetchone()
+    assert row_171 is not None
+    assert row_171[0] == "RED"
+    assert row_171[1] == 1
+
+    # INS 220: Sulfur dioxide (Sulfite allergen / Preservative) -> CAUTION
+    cursor.execute("SELECT risk_tier FROM additives_master WHERE ins_code='220';")
+    row_220 = cursor.fetchone()
+    assert row_220 is not None
+    assert row_220[0] == "CAUTION"
+
+    # 7. Verify FTS5 trigram search on newly expanded additives
+    cursor.execute("SELECT primary_name FROM additives_fts WHERE additives_fts MATCH '476';")
+    fts_476 = cursor.fetchone()
+    assert fts_476 is not None
+    assert "polyricinoleate" in fts_476[0].lower() or "476" in fts_476[0].lower()
     
     conn.close()
     if db_path.exists():

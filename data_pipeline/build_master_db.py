@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 from data_pipeline.taxonomy_data import SUGAR_ALIASES, REGULATORY_CITATIONS, ADDITIVES_CORPUS
@@ -32,8 +33,15 @@ def seed_taxonomy_and_citations(conn: sqlite3.Connection):
             VALUES (?, ?, ?, ?, ?);
         """, (cit["citation_id"], cit["authority"], cit["doc_title"], cit["verified_passage"], cit["source_url"]))
         
-    # 3. Seed Additives Corpus
-    for item in ADDITIVES_CORPUS:
+    # 3. Seed Additives Corpus (Prefer comprehensive 700+ canonical additives if available)
+    json_path = Path(__file__).parent / "full_additives_corpus.json"
+    if json_path.exists():
+        with open(json_path, "r", encoding="utf-8") as f:
+            additives_to_seed = json.load(f)
+    else:
+        additives_to_seed = ADDITIVES_CORPUS
+
+    for item in additives_to_seed:
         cursor.execute("""
             INSERT OR REPLACE INTO additives_master (
                 ins_code, e_code, primary_name, synonyms_csv, functional_class,
@@ -47,6 +55,9 @@ def seed_taxonomy_and_citations(conn: sqlite3.Connection):
             item["child_hyperactivity_flag"], item["banned_jurisdictions"], item["citation_id"]
         ))
         
+    # 4. Rebuild FTS5 Trigram Index for perfect rowid alignment
+    cursor.execute("INSERT INTO additives_fts(additives_fts) VALUES('rebuild');")
+
     conn.commit()
 
 def build_database(db_path: Path):
