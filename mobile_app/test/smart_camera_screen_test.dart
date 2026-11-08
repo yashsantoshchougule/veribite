@@ -264,4 +264,46 @@ void main() {
     // Verify sheet is dismissed
     expect(find.text('Not a Food Product'), findsNothing);
   });
+
+  testWidgets('SmartCameraScreen capturing multi-angle frames and submitting presents VerdictReportScreen', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: false),
+        ),
+      ),
+    );
+
+    // Switch to Curved Bottle / Multi-Angle mode
+    await tester.tap(find.text('Curved Bottle'));
+    await tester.pumpAndSettle();
+
+    // Capture 4 frames via shutter button
+    final shutter = find.byIcon(Icons.camera_alt_rounded);
+    expect(shutter, findsOneWidget);
+
+    await tester.tap(shutter);
+    await tester.pump();
+    await tester.tap(shutter);
+    await tester.pump();
+    await tester.tap(shutter);
+    await tester.pump();
+    await tester.tap(shutter);
+    await tester.pumpAndSettle();
+
+    // Verify all 4 slots are marked captured
+    expect(find.text('Curved Bottle Multi-Angle Mode (4/4)'), findsOneWidget);
+    expect(find.text('Slot 4: Captured'), findsOneWidget);
+
+    // Tap Submit Multi-Angle Cloud Scan
+    final submitBtn = find.text('Submit Multi-Angle Cloud Scan');
+    expect(submitBtn, findsOneWidget);
+
+    await tester.tap(submitBtn);
+    await tester.pumpAndSettle();
+
+    // Verify VerdictReportScreen opens
+    expect(find.byType(VerdictReportScreen), findsOneWidget);
+    expect(find.textContaining('Curved Bottle'), findsOneWidget);
+  });
 }

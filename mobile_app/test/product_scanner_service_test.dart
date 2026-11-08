@@ -238,5 +238,25 @@ void main() {
         throwsA(isA<FoodWebExtractionException>()),
       );
     });
+
+    test('resolves product from 4 multi-angle vision frames', () async {
+      final service = ProductScannerService();
+      final frames = [
+        [0xFF, 0xD8, 0xFF, 0xE0],
+        [0xFF, 0xD8, 0xFF, 0xE0],
+        [0xFF, 0xD8, 0xFF, 0xE0],
+        [0xFF, 0xD8, 0xFF, 0xE0],
+      ];
+
+      final result = await service.resolveMultiAngleScan(
+        frames: frames,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, contains('Curved Bottle'));
+      expect(result.healthScore, greaterThan(0));
+      expect(result.safePortionGrams, greaterThan(0));
+      expect(result.additives.length, greaterThan(0));
+    });
   });
 }

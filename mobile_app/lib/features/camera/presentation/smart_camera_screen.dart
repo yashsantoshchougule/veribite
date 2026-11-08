@@ -175,6 +175,41 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
   }
 
+  Future<void> _handleMultiAngleSubmit(List<List<int>> frames) async {
+    if (_isProcessingScan || _isSheetOpen || frames.isEmpty) return;
+
+    setState(() => _isProcessingScan = true);
+    final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+
+    try {
+      unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
+
+      final resolvedProduct = await _productService.resolveMultiAngleScan(
+        frames: frames,
+        userProfile: activeProfile,
+      );
+
+      if (!mounted) return;
+      await _showScanResultReport(resolvedProduct, activeProfile);
+
+      ref.read(cameraScanNotifierProvider.notifier).clearMultiAngleFrames();
+    } catch (e, st) {
+      debugPrint('Error resolving multi-angle scan: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not complete multi-angle scan. Please retry or enter macros.'),
+            backgroundColor: AppColors.safetyRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingScan = false);
+      }
+    }
+  }
+
   Future<void> _showScanResultReport(ScannedProductResult product, UserProfileModel profile) async {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
@@ -974,14 +1009,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                     MultiAngleCaptureStrip(
                       capturedFramesCount: state.capturedFrames.length,
                       maxFrames: 4,
-                      onSubmit: () {
-                        if (widget.onProductResolved != null) {
-                          widget.onProductResolved!({
-                            'source': 'multi_angle_vision',
-                            'frames_count': state.capturedFrames.length,
-                          });
-                        }
-                      },
+                      isSubmitting: _isProcessingScan,
+                      onSubmit: () => _handleMultiAngleSubmit(state.capturedFrames),
                       onClear: notifier.clearMultiAngleFrames,
                     )
                   else
@@ -1019,7 +1048,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                           heroTag: 'shutter_btn',
                           backgroundColor: Colors.white,
                           foregroundColor: Colors.black,
-                          onPressed: () => notifier.addMultiAngleFrame([0xFF, 0xD8]),
+                          onPressed: () {
+                            HapticFeedback.lightImpact().catchError((_) => null);
+                            notifier.addMultiAngleFrame([0xFF, 0xD8]);
+                          },
                           child: const Icon(Icons.camera_alt_rounded, size: 28),
                         ),
                       ],

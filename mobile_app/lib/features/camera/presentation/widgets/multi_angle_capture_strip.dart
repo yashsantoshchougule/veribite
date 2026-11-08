@@ -5,6 +5,7 @@ class MultiAngleCaptureStrip extends StatelessWidget {
   final int maxFrames;
   final VoidCallback onSubmit;
   final VoidCallback onClear;
+  final bool isSubmitting;
 
   const MultiAngleCaptureStrip({
     super.key,
@@ -12,6 +13,7 @@ class MultiAngleCaptureStrip extends StatelessWidget {
     this.maxFrames = 4,
     required this.onSubmit,
     required this.onClear,
+    this.isSubmitting = false,
   });
 
   @override
@@ -77,14 +79,28 @@ class MultiAngleCaptureStrip extends StatelessWidget {
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
+            height: 44,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: capturedFramesCount > 0 ? const Color(0xFF4285F4) : Colors.grey,
+                backgroundColor: capturedFramesCount > 0 && !isSubmitting ? const Color(0xFF4285F4) : Colors.grey,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              onPressed: capturedFramesCount > 0 ? onSubmit : null,
-              child: const Text('Submit Multi-Angle Cloud Scan', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: capturedFramesCount > 0 && !isSubmitting ? onSubmit : null,
+              child: isSubmitting
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        ),
+                        SizedBox(width: 10),
+                        Text('Analyzing Multi-Angle Frames...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ],
+                    )
+                  : const Text('Submit Multi-Angle Cloud Scan', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
         ],
