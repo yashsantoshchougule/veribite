@@ -1,6 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/camera_reticle_painter.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/quick_macro_slider_sheet.dart';
@@ -265,11 +269,50 @@ void main() {
     expect(find.text('Not a Food Product'), findsNothing);
   });
 
-  testWidgets('SmartCameraScreen capturing multi-angle frames and submitting presents VerdictReportScreen', (tester) async {
+  testWidgets('SmartCameraScreen capturing multi-angle frames and submitting presents VerdictReportScreen with real product (MTR Badam Drink Mix)', (tester) async {
+    final mockGeminiResponse = {
+      'candidates': [
+        {
+          'content': {
+            'parts': [
+              {
+                'text': jsonEncode({
+                  'product_name': 'MTR Badam Drink Mix',
+                  'brand_name': 'MTR',
+                  'category': 'Beverages & Juices',
+                  'serving_size_g': 25.0,
+                  'pack_weight_g': 200.0,
+                  'nutrition': {
+                    'energy_kj': 1715.0,
+                    'sugar_g_per_100g': 58.0,
+                    'sat_fat_g_per_100g': 2.5,
+                    'sodium_mg_per_100g': 120.0,
+                    'protein_g': 7.5,
+                    'fiber_g': 3.0,
+                  },
+                  'ingredients': ['Sugar', 'Almond (Badam 8.5%)', 'Milk Solids', 'Cardamom', 'Saffron'],
+                  'additives': [],
+                })
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    final mockClient = MockClient((request) async {
+      return http.Response(jsonEncode(mockGeminiResponse), 200, headers: {'content-type': 'application/json'});
+    });
+    final customProductService = ProductScannerService(httpClient: mockClient);
+
     await tester.pumpWidget(
-      const ProviderScope(
+      ProviderScope(
         child: MaterialApp(
-          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: false),
+          home: SmartCameraScreen(
+            useSimulatedFeed: true,
+            disableResultSheet: false,
+            productService: customProductService,
+          ),
         ),
       ),
     );
@@ -302,8 +345,9 @@ void main() {
     await tester.tap(submitBtn);
     await tester.pumpAndSettle();
 
-    // Verify VerdictReportScreen opens
+    // Verify VerdictReportScreen opens with actual MTR Badam Drink Mix details
     expect(find.byType(VerdictReportScreen), findsOneWidget);
-    expect(find.textContaining('Curved Bottle'), findsOneWidget);
+    expect(find.textContaining('MTR Badam Drink Mix'), findsOneWidget);
+    expect(find.textContaining('MTR'), findsWidgets);
   });
 }

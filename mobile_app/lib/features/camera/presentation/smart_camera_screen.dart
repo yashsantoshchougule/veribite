@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../home/application/home_dashboard_service.dart';
@@ -25,6 +26,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
   final ValueChanged<Map<String, dynamic>>? onProductResolved;
   final bool useSimulatedFeed;
   final bool disableResultSheet;
+  final ProductScannerService? productService;
 
   const SmartCameraScreen({
     super.key,
@@ -33,6 +35,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
     this.onProductResolved,
     this.useSimulatedFeed = false,
     this.disableResultSheet = false, // Live scan active by default, toggleable on screen
+    this.productService,
   });
 
   @override
@@ -67,7 +70,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   void initState() {
     super.initState();
     _isLiveScanMode = !widget.disableResultSheet;
-    _productService = ProductScannerService();
+    _productService = widget.productService ?? ProductScannerService();
     _profile = widget.userProfile;
 
     _scannerController = MobileScannerController(
@@ -158,6 +161,22 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     } on FoodWebExtractionException catch (e) {
       if (!mounted) return;
       await _showWebExtractionFailedDialog(e.url);
+    } on VisionExtractionException catch (e) {
+      debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.safetyRed,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Sliders',
+              textColor: Colors.white,
+              onPressed: _openMacroSliderSheet,
+            ),
+          ),
+        );
+      }
     } catch (e, st) {
       debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
@@ -193,6 +212,22 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       await _showScanResultReport(resolvedProduct, activeProfile);
 
       ref.read(cameraScanNotifierProvider.notifier).clearMultiAngleFrames();
+    } on VisionExtractionException catch (e) {
+      debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.safetyRed,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Sliders',
+              textColor: Colors.white,
+              onPressed: _openMacroSliderSheet,
+            ),
+          ),
+        );
+      }
     } catch (e, st) {
       debugPrint('Error resolving multi-angle scan: $e\n$st');
       if (mounted) {
@@ -674,6 +709,78 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
   }
 
+  Future<void> _captureMultiAngleFrame() async {
+    unawaited(HapticFeedback.lightImpact().catchError((_) => null));
+    if (widget.useSimulatedFeed) {
+      ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(
+        List<int>.generate(200, (i) => (i * 7) % 256),
+      );
+      return;
+    }
+
+    try {
+      final picker = ImagePicker();
+      final photo = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (photo != null) {
+        final bytes = await photo.readAsBytes();
+        if (bytes.isNotEmpty) {
+          ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(bytes);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Captured photo (${bytes.length ~/ 1024} KB). Tap Submit or add another angle.'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error capturing photo via camera: $e');
+    }
+  }
+
+  Future<void> _pickPhotoFromGallery() async {
+    unawaited(HapticFeedback.lightImpact().catchError((_) => null));
+    if (widget.useSimulatedFeed) {
+      ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(
+        List<int>.generate(200, (i) => (i * 7) % 256),
+      );
+      return;
+    }
+
+    try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (image != null) {
+        final bytes = await image.readAsBytes();
+        if (bytes.isNotEmpty) {
+          ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(bytes);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Selected photo (${bytes.length ~/ 1024} KB). Tap Submit or add another angle.'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error picking photo from gallery: $e');
+    }
+  }
+
   void _toggleTorch(CameraScanNotifier notifier) {
     notifier.toggleTorch();
     if (!widget.useSimulatedFeed) {
@@ -1048,11 +1155,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                           heroTag: 'shutter_btn',
                           backgroundColor: Colors.white,
                           foregroundColor: Colors.black,
-                          onPressed: () {
-                            HapticFeedback.lightImpact().catchError((_) => null);
-                            notifier.addMultiAngleFrame([0xFF, 0xD8]);
-                          },
+                          onPressed: _captureMultiAngleFrame,
+                          tooltip: 'Capture Photo Angle',
                           child: const Icon(Icons.camera_alt_rounded, size: 28),
+                        ),
+                        const SizedBox(width: 24),
+                        // Gallery photo picker button
+                        FloatingActionButton.small(
+                          heroTag: 'gallery_pick_btn',
+                          backgroundColor: Colors.white24,
+                          foregroundColor: Colors.white,
+                          onPressed: _pickPhotoFromGallery,
+                          tooltip: 'Pick Photo from Gallery',
+                          child: const Icon(Icons.photo_library_rounded),
                         ),
                       ],
                     ],

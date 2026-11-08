@@ -239,13 +239,45 @@ void main() {
       );
     });
 
-    test('resolves product from 4 multi-angle vision frames', () async {
-      final service = ProductScannerService();
+    test('resolves real product (MTR Badam Drink Mix) from multi-angle vision frames via Gemini Vision', () async {
+      final mockGeminiResponse = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'product_name': 'MTR Badam Drink Mix',
+                    'brand_name': 'MTR',
+                    'category': 'Beverages & Juices',
+                    'serving_size_g': 25.0,
+                    'pack_weight_g': 200.0,
+                    'nutrition': {
+                      'energy_kj': 1715.0,
+                      'sugar_g_per_100g': 58.0,
+                      'sat_fat_g_per_100g': 2.5,
+                      'sodium_mg_per_100g': 120.0,
+                      'protein_g': 7.5,
+                      'fiber_g': 3.0,
+                    },
+                    'ingredients': ['Sugar', 'Almond (Badam 8.5%)', 'Milk Solids', 'Cardamom', 'Saffron'],
+                    'additives': [],
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        return http.Response(jsonEncode(mockGeminiResponse), 200, headers: {'content-type': 'application/json'});
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
       final frames = [
-        [0xFF, 0xD8, 0xFF, 0xE0],
-        [0xFF, 0xD8, 0xFF, 0xE0],
-        [0xFF, 0xD8, 0xFF, 0xE0],
-        [0xFF, 0xD8, 0xFF, 0xE0],
+        List<int>.generate(200, (i) => i % 255),
+        List<int>.generate(200, (i) => (i + 10) % 255),
       ];
 
       final result = await service.resolveMultiAngleScan(
@@ -253,10 +285,31 @@ void main() {
         userProfile: defaultUser,
       );
 
-      expect(result.productName, contains('Curved Bottle'));
+      expect(result.productName, 'MTR Badam Drink Mix');
+      expect(result.brandName, 'MTR');
+      expect(result.category, 'Beverages & Juices');
+      expect(result.sugarGPer100g, 58.0);
       expect(result.healthScore, greaterThan(0));
       expect(result.safePortionGrams, greaterThan(0));
-      expect(result.additives.length, greaterThan(0));
+    });
+
+    test('throws VisionExtractionException if captured frames cannot be parsed by Vision AI', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response('Server Error', 500);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      final frames = [
+        List<int>.generate(100, (i) => i % 255),
+      ];
+
+      expect(
+        () => service.resolveMultiAngleScan(
+          frames: frames,
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<VisionExtractionException>()),
+      );
     });
   });
 }

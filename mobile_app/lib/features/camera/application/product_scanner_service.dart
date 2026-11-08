@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/scoring/dosage_engine.dart';
 import '../../../core/vision/barcode_scanner_service.dart';
 import '../../../core/vision/food_web_extractor.dart';
+import '../../../core/vision/gemini_vision_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 
 /// Thrown when a scanned QR code belongs to electronics, laptop support, or non-food services
@@ -34,6 +35,16 @@ class FoodWebExtractionException implements Exception {
   final String message;
 
   FoodWebExtractionException(this.url, {this.message = 'Could not extract nutrition facts from this web link.'});
+
+  @override
+  String toString() => message;
+}
+
+/// Thrown when captured photos or nutrition label cannot be read or analyzed
+class VisionExtractionException implements Exception {
+  final String message;
+
+  VisionExtractionException([this.message = 'Could not detect readable nutrition facts or packaging text in the photo. Please retake with clearer lighting or enter macros manually.']);
 
   @override
   String toString() => message;
@@ -101,10 +112,15 @@ class ScannedProductResult {
 class ProductScannerService {
   final SupabaseClient? _injectedClient;
   final http.Client? _injectedHttpClient;
+  final GeminiVisionService? _injectedVisionService;
 
-  ProductScannerService({SupabaseClient? client, http.Client? httpClient})
-      : _injectedClient = client,
-        _injectedHttpClient = httpClient;
+  ProductScannerService({
+    SupabaseClient? client,
+    http.Client? httpClient,
+    GeminiVisionService? visionService,
+  })  : _injectedClient = client,
+        _injectedHttpClient = httpClient,
+        _injectedVisionService = visionService;
 
   SupabaseClient? get _client {
     if (_injectedClient != null) return _injectedClient;
@@ -117,6 +133,8 @@ class ProductScannerService {
 
   http.Client get _httpClient => _injectedHttpClient ?? http.Client();
   late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
+  late final GeminiVisionService _visionService =
+      _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
 
   /// Resolve product by any scanned QR code payload, GS1 link, food web URL, or barcode string
   Future<ScannedProductResult> resolveScanInput({
@@ -201,8 +219,8 @@ class ProductScannerService {
     } catch (_) {}
   }
 
-  /// Resolves product using 1-4 multi-angle camera frames (for curved bottles or complex packaging).
-  /// Submits to cloud vision API or uses smart deterministic synthesis when offline.
+  /// Resolves product using 1-4 multi-angle camera frames (for curved bottles, complex packaging, or nutrition labels).
+  /// Submits to Google Gemini Multimodal Vision AI or cloud vision backend.
   Future<ScannedProductResult> resolveMultiAngleScan({
     required List<List<int>> frames,
     required UserProfileModel userProfile,
@@ -217,8 +235,18 @@ class ProductScannerService {
       } catch (_) {}
     }
 
-    // 2. Try Backend Cloud Vision proxy /api/v1/scan/vision
-    if (frames.isNotEmpty) {
+    // 2. Direct Gemini Multimodal Vision AI analysis
+    try {
+      productData = await _visionService.analyzeProductPhoto(
+        frames: frames,
+        hintBarcode: detectedBarcode,
+      );
+    } catch (e) {
+      debugPrint('[ProductScannerService] Direct Gemini vision analysis notice: $e');
+    }
+
+    // 3. Try Backend Cloud Vision proxy /api/v1/scan/vision as secondary fallback
+    if (productData == null && frames.isNotEmpty) {
       try {
         final uri = Uri.parse('http://10.0.2.2:8000/api/v1/scan/vision');
         final request = http.MultipartRequest('POST', uri);
@@ -240,35 +268,18 @@ class ProductScannerService {
       }
     }
 
-    // 3. Fallback: Synthesize curved bottle / multi-angle food product data
-    productData ??= {
-      'barcode': 'multi_angle_${DateTime.now().millisecondsSinceEpoch}',
-      'product_name': 'Curved Bottle / Multi-Angle Pack',
-      'brand_name': 'Brand Verified',
-      'category': 'Beverages & Juices',
-      'serving_size_g': 50.0,
-      'pack_weight_g': 200.0,
-      'piece_weight_g': null,
-      'health_score': 68,
-      'nova_grade': 3,
-      'red_cap_triggered': 0,
-      'nutrition_json': jsonEncode({
-        'energy_kj': 620.0,
-        'sugar_g_per_100g': 8.5,
-        'sat_fat_g_per_100g': 1.2,
-        'sodium_mg_per_100g': 140.0,
-        'fiber_g': 1.0,
-        'protein_g': 2.0,
-        'fruit_veg_nut_pct': 0.0,
-      }),
-      'additives_json': jsonEncode([
-        {'ins_code': '330', 'primary_name': 'Citric Acid', 'risk_tier': 'GREEN'},
-        {'ins_code': '415', 'primary_name': 'Xanthan Gum', 'risk_tier': 'GREEN'},
-      ]),
-      'ingredients_json': jsonEncode(['Water', 'Fruit Concentrate', 'Sugar', 'Citric Acid (INS 330)', 'Xanthan Gum (INS 415)']),
-    };
+    // 4. If neither Gemini Vision nor backend could identify the product from photos:
+    // Do NOT substitute fake food facts! Throw VisionExtractionException
+    if (productData == null) {
+      throw VisionExtractionException(
+        'Could not detect readable nutrition facts or packaging details. Please retake the photo with clearer lighting or enter macros via the quick sliders.',
+      );
+    }
 
-    final barcodeKey = productData['barcode']?.toString() ?? 'multi_angle_${DateTime.now().millisecondsSinceEpoch}';
+    // Cache the resolved product in Supabase catalog
+    _writeThroughCache(productData);
+
+    final barcodeKey = productData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
     return _evaluateProduct(productData, userProfile, barcodeKey);
   }
 
