@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -8,6 +9,7 @@ import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../swaps/presentation/healthier_swaps_screen.dart';
+import '../application/medical_report_pdf_service.dart';
 import 'ingredient_breakdown_screen.dart';
 import 'widgets/circular_score_gauge.dart';
 
@@ -19,12 +21,14 @@ class VerdictReportScreen extends StatefulWidget {
   final ScannedProductResult product;
   final UserProfileModel userProfile;
   final HomeDashboardService? dashboardService;
+  final MedicalReportPdfService? pdfService;
 
   const VerdictReportScreen({
     super.key,
     required this.product,
     required this.userProfile,
     this.dashboardService,
+    this.pdfService,
   });
 
   @override
@@ -35,6 +39,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   late final HomeDashboardService _dashboardService;
   bool _isWholePack = false;
   bool _isSubmitting = false;
+  bool _isExportingPdf = false;
 
   @override
   void initState() {
@@ -241,9 +246,14 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                           // 8. Navigation CTA: View Full Ingredients Breakdown
                           _buildIngredientsCTA(),
 
+                          const SizedBox(height: 14),
+
+                          // 9. 1-Tap Medical / Dietitian Health Report (PDF)
+                          _buildMedicalPdfExportCard(),
+
                           const SizedBox(height: 18),
 
-                          // 7. Dual Action Buttons: "I Ate This" vs "Just Checking"
+                          // 10. Dual Action Buttons: "I Ate This" vs "Just Checking"
                           _buildDualActionButtons(),
 
                           const SizedBox(height: 24),
@@ -323,6 +333,21 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                 fontWeight: FontWeight.w800,
                 color: widget.product.novaGrade >= 4 ? AppColors.safetyRed : AppColors.safetyGreen,
               ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          CircleAvatar(
+            backgroundColor: AppColors.cardSurface,
+            child: IconButton(
+              icon: _isExportingPdf
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accentBronze),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded, color: AppColors.accentBronze, size: 20),
+              onPressed: _isExportingPdf ? null : _exportMedicalReportPdf,
+              tooltip: 'Export Medical PDF Report',
             ),
           ),
         ],
@@ -795,6 +820,228 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               ),
             ),
             const Icon(Icons.arrow_forward_rounded, color: AppColors.accentBronze, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMedicalPdfExportCard() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _isExportingPdf ? null : _exportMedicalReportPdf,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.cardSurface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.accentBronze.withValues(alpha: 0.4), width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.sugarPeachBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.accentBronze.withValues(alpha: 0.3)),
+              ),
+              child: _isExportingPdf
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accentBronze),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded, color: AppColors.accentBronze, size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Doctor & Dietitian Health Report (PDF)',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    '1-Tap printable dossier with complete toxicology & safe limits',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textMutedMocha,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryObsidian,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Export',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportMedicalReportPdf() async {
+    unawaited(HapticFeedback.lightImpact());
+
+    final pdfService = widget.pdfService ?? MedicalReportPdfService();
+
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.canvasCream,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.cardBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                Icon(Icons.health_and_safety_rounded, color: AppColors.accentBronze, size: 24),
+                SizedBox(width: 10),
+                Text(
+                  'Clinical Health Report (PDF)',
+                  style: TextStyle(
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textObsidian,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Share or print this evidence-based clinical report with your consulting physician, endocrinologist, or registered dietitian.',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textMutedMocha, height: 1.4),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      setState(() => _isExportingPdf = true);
+                      try {
+                        await pdfService.shareReport(
+                          context: context,
+                          product: widget.product,
+                          userProfile: widget.userProfile,
+                          currentServingGrams: _currentServingGrams,
+                          currentSugarGrams: _currentSugarGrams,
+                          currentCalories: _currentCalories,
+                          currentSatFatGrams: _currentSatFatGrams,
+                          currentSodiumMg: _currentSodiumMg,
+                        );
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Could not share PDF: $e'),
+                              backgroundColor: AppColors.safetyRed,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) setState(() => _isExportingPdf = false);
+                      }
+                    },
+                    icon: const Icon(Icons.share_rounded, size: 18),
+                    label: const Text('Share PDF'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textObsidian,
+                      side: const BorderSide(color: AppColors.cardBorder, width: 1.2),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      setState(() => _isExportingPdf = true);
+                      try {
+                        await pdfService.printReport(
+                          context: context,
+                          product: widget.product,
+                          userProfile: widget.userProfile,
+                          currentServingGrams: _currentServingGrams,
+                          currentSugarGrams: _currentSugarGrams,
+                          currentCalories: _currentCalories,
+                          currentSatFatGrams: _currentSatFatGrams,
+                          currentSodiumMg: _currentSodiumMg,
+                        );
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Could not print PDF: $e'),
+                              backgroundColor: AppColors.safetyRed,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) setState(() => _isExportingPdf = false);
+                      }
+                    },
+                    icon: const Icon(Icons.print_rounded, size: 18),
+                    label: const Text('Print / Save'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryObsidian,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
           ],
         ),
       ),

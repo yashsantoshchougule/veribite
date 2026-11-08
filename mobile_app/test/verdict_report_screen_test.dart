@@ -302,4 +302,35 @@ void main() {
     expect(find.byType(HealthierSwapsScreen), findsOneWidget);
     expect(find.textContaining('Instant Noodles • Verified Alternatives'), findsOneWidget);
   });
+
+  testWidgets('VerdictReportScreen renders Doctor & Dietitian Health Report (PDF) card and top bar icon', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testRedCappedProduct,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Top Bar PDF button
+    final topBarPdfBtn = find.byTooltip('Export Medical PDF Report');
+    expect(topBarPdfBtn, findsOneWidget);
+
+    // Verify Medical PDF Export Card in body
+    final pdfCard = find.text('Doctor & Dietitian Health Report (PDF)');
+    expect(pdfCard, findsOneWidget);
+    await tester.ensureVisible(pdfCard);
+    expect(find.textContaining('1-Tap printable dossier with complete toxicology & safe limits'), findsOneWidget);
+    expect(find.text('Export'), findsOneWidget);
+
+    // Tap Export button to verify modal bottom sheet triggers
+    await tester.tap(find.text('Export'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clinical Health Report (PDF)'), findsOneWidget);
+    expect(find.text('Share PDF'), findsOneWidget);
+    expect(find.text('Print / Save'), findsOneWidget);
+  });
 }
