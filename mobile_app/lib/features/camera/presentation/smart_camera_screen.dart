@@ -548,36 +548,59 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              Row(
+              Column(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        _openMacroSliderSheet();
+                        ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
+                        _captureMultiAngleFrame();
                       },
-                      icon: const Icon(Icons.tune_rounded, size: 18),
-                      label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textObsidian,
-                        side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                      label: const Text('Snap Nutrition Label Photo', style: TextStyle(fontWeight: FontWeight.w700)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4285F4),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryObsidian,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(ctx).pop();
+                            _openMacroSliderSheet();
+                          },
+                          icon: const Icon(Icons.tune_rounded, size: 18),
+                          label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textObsidian,
+                            side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                        ),
                       ),
-                      child: const Text('Back to Scanner', style: TextStyle(fontWeight: FontWeight.w600)),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textMutedMocha,
+                            side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: const Text('Back to Scanner', style: TextStyle(fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

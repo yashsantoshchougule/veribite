@@ -436,6 +436,16 @@ class FoodWebExtractor {
   String? _detectBrandFromText(String text) {
     final lower = text.toLowerCase();
     const brands = [
+      'Everest',
+      'MDH',
+      'Catch',
+      'Badshah',
+      'Suhana',
+      'Eastern',
+      'Ramdev',
+      'Aachi',
+      'Sakthi',
+      'MTR',
       'Milky Mist',
       'Amul',
       'Britannia',
@@ -500,6 +510,9 @@ class FoodWebExtractor {
     }
     if (lower.contains('oats') || lower.contains('muesli') || lower.contains('cereal') || lower.contains('corn flakes') || lower.contains('granola')) {
       return 'Breakfast Cereals';
+    }
+    if (lower.contains('masala') || lower.contains('spice') || lower.contains('chole') || lower.contains('garam') || lower.contains('curry powder') || lower.contains('seasoning') || lower.contains('turmeric') || lower.contains('chilli powder')) {
+      return 'Spices & Masalas';
     }
 
     return 'Packaged Food';

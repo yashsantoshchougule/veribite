@@ -121,6 +121,25 @@ void main() {
       final res5 = parseQrOrBarcode(smartLabelUrl);
       expect(res5.type, QrScanType.foodWebUrl);
       expect(res5.isValid, isTrue);
+
+      // Everest Chole Masala QR codes
+      const everestUrl1 = 'https://everestspices.com/product/chole-masala';
+      final res6 = parseQrOrBarcode(everestUrl1);
+      expect(res6.type, QrScanType.foodWebUrl);
+      expect(res6.isNonFood, isFalse);
+      expect(res6.isValid, isTrue);
+
+      const everestUrl2 = 'https://www.everestspices.com/recipe/chole-masala';
+      final res7 = parseQrOrBarcode(everestUrl2);
+      expect(res7.type, QrScanType.foodWebUrl);
+      expect(res7.isNonFood, isFalse);
+      expect(res7.isValid, isTrue);
+
+      const everestQr = 'https://qr.everestspices.com/p/everest-chole-masala';
+      final res8 = parseQrOrBarcode(everestQr);
+      expect(res8.type, QrScanType.foodWebUrl);
+      expect(res8.isNonFood, isFalse);
+      expect(res8.isValid, isTrue);
     });
   });
 }

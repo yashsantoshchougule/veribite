@@ -191,6 +191,25 @@ bool isFoodWebUrl(String input) {
     'mondelezinternational.com',
     'kelloggs.com',
     'unilever.com',
+    'everestspices.com',
+    'everestfoods.com',
+    'everestmasala.com',
+    'mdhspices.com',
+    'catchfoods.com',
+    'badshahmasala.com',
+    'suhana.co.in',
+    'eastern.in',
+    'ramdevspices.com',
+    'aachi.net',
+    'sakthimasala.com',
+    'goldiee.com',
+    'cookme.in',
+    'swastikspices.com',
+    'keyafoods.com',
+    'snapin.com',
+    'mtrfoods.com',
+    'urbanplatter.in',
+    '24mantra.com',
   ];
 
   for (final domain in foodBrandDomains) {
@@ -221,8 +240,15 @@ bool isFoodWebUrl(String input) {
   const foodKeywords = [
     'food', 'snack', 'nutrition', 'grocery', 'biscuit', 'cookie',
     'cheese', 'dairy', 'milk', 'paneer', 'butter', 'chocolate',
-    'chips', 'cereal', 'beverage', 'drink', 'sauce', 'noodle', 'oil'
+    'chips', 'cereal', 'beverage', 'drink', 'sauce', 'noodle', 'oil',
+    'spice', 'spices', 'masala', 'chole', 'garam', 'curry', 'powder',
+    'seasoning', 'herb', 'herbs', 'condiment', 'flavor', 'recipe',
+    'cook', 'dal', 'atta', 'rice', 'flour', 'tea', 'coffee', 'everest'
   ];
+
+  if (foodKeywords.any((kw) => lower.contains(kw))) {
+    return true;
+  }
 
   final hasProductPath = lower.contains('/product/') ||
       lower.contains('/products/') ||
@@ -232,7 +258,7 @@ bool isFoodWebUrl(String input) {
       lower.contains('/item/') ||
       lower.contains('/goods/');
 
-  if (hasProductPath && foodKeywords.any((kw) => lower.contains(kw))) {
+  if (hasProductPath) {
     return true;
   }
 
@@ -343,12 +369,12 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
     );
   }
 
-  // If it's a web URL (http/https) that didn't match any food patterns, mark as non-food!
+  // Candidate web URL (http/https) scanned from product packaging (not matched by isKnownNonFood):
+  // treat as candidate food web URL so it can be extracted or offered photo fallback, never reject as electronic device
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     return QrScanResult(
-      type: QrScanType.nonFood,
+      type: QrScanType.foodWebUrl,
       rawInput: trimmed,
-      nonFoodReason: 'General Web Link',
     );
   }
 

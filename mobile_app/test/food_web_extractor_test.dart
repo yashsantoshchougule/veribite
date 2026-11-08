@@ -161,6 +161,50 @@ void main() {
       final resultInvalid = await extractor.extractProductFromUrl('');
       expect(resultInvalid, isNull);
     });
+
+    test('parses Everest Chole Masala brand page and extracts spice category and ingredients', () async {
+      const everestHtml = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Everest Chole Masala 100g - Authentic Blend of Spices</title>
+  <meta property="og:title" content="Everest Chole Masala 100g" />
+  <meta property="product:brand" content="Everest" />
+</head>
+<body>
+  <h1>Everest Chole Masala 100g</h1>
+  <div class="product-info">
+    <p>Ingredients: Coriander, Cumin, Chilli, Pomegranate Seeds, Dry Mango, Black Pepper, Cassia Leaf, Iodized Salt, Fenugreek</p>
+    <table>
+      <tr><td>Energy</td><td>350 kcal</td></tr>
+      <tr><td>Total Sugar</td><td>3.0 g</td></tr>
+      <tr><td>Saturated Fat</td><td>2.0 g</td></tr>
+      <tr><td>Sodium</td><td>1200 mg</td></tr>
+      <tr><td>Protein</td><td>10.0 g</td></tr>
+    </table>
+  </div>
+</body>
+</html>
+''';
+
+      final mockClient = MockClient((request) async => http.Response(everestHtml, 200));
+      final extractor = FoodWebExtractor(httpClient: mockClient);
+      final product = await extractor.extractProductFromUrl('https://everestspices.com/product/chole-masala-100g');
+
+      expect(product, isNotNull);
+      expect(product!['product_name'], contains('Everest Chole Masala'));
+      expect(product['brand_name'], 'Everest');
+      expect(product['category'], 'Spices & Masalas');
+      expect(product['pack_weight_g'], 100.0);
+
+      final nutrition = jsonDecode(product['nutrition_json'] as String);
+      expect(nutrition['sugar_g_per_100g'], 3.0);
+      expect(nutrition['protein_g'], 10.0);
+
+      final ingredients = jsonDecode(product['ingredients_json'] as String) as List;
+      expect(ingredients, contains('Coriander'));
+      expect(ingredients, contains('Cumin'));
+    });
   });
 }
 
