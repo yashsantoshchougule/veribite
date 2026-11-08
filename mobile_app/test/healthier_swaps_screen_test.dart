@@ -115,4 +115,95 @@ void main() {
     expect(find.text('Whole Oatmeal & Almond Cookies'), findsOneWidget);
     expect(find.text('Organic Multi-Grain Jaggery Cookies'), findsOneWidget);
   });
+
+  testWidgets('HealthierSwapsScreen renders clean cheese alternatives and brand tier badge for Milky Mist Cheese', (tester) async {
+    const milkyMistCheese = ScannedProductResult(
+      barcode: '8904083300123',
+      productName: 'Milky Mist Processed Cheese Slices',
+      brandName: 'Milky Mist',
+      category: 'Cheese',
+      servingSizeG: 20.0,
+      sugarGPer100g: 1.5,
+      sugarGPerServing: 0.3,
+      caloriesPerServing: 62.0,
+      healthScore: 46,
+      verdictTag: 'Caution 🟠',
+      novaGrade: 4,
+      redCapTriggered: false,
+      safePortionGrams: 20,
+      limitingFactor: 'Sodium',
+      frequencySchedule: 'Moderate',
+      additives: [],
+      splitSugars: [],
+      portionAdvice: 'Safe portion 20g',
+      isExceededBudget: false,
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HealthierSwapsScreen(
+          currentProduct: milkyMistCheese,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify top bar category shows Cheese & Dairy
+    expect(find.textContaining('Cheese & Dairy • Verified Alternatives'), findsOneWidget);
+
+    // Verify first clean dairy swap (Country Delight paneer) is visible
+    expect(find.text('Pure Natural Malai Paneer / Fresh Cottage Cheese'), findsOneWidget);
+    expect(find.textContaining('Country Delight'), findsOneWidget);
+
+    // Verify brand tier badge is present
+    expect(find.text('Clean Certified'), findsAtLeastNWidgets(1));
+
+    // Scroll down to build and reveal second alternative (Akshayakalpa cheddar)
+    await tester.drag(find.byType(ListView), const Offset(0, -350));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Organic Artisan Cheddar Cheese'), findsOneWidget);
+    expect(find.textContaining('Akshayakalpa'), findsOneWidget);
+
+    // Verify peanuts or snacks are NOT present
+    expect(find.textContaining('Peanut'), findsNothing);
+    expect(find.textContaining('Munch'), findsNothing);
+  });
+
+  testWidgets('HealthierSwapsScreen displays strict 1-to-1 category guarantee empty state for unmapped product', (tester) async {
+    const exoticProduct = ScannedProductResult(
+      barcode: '9999999999999',
+      productName: 'Exotic Sea Kelp Powder',
+      brandName: 'OceanHarvest',
+      category: 'Sea Vegetables',
+      servingSizeG: 5.0,
+      sugarGPer100g: 0.0,
+      sugarGPerServing: 0.0,
+      caloriesPerServing: 15.0,
+      healthScore: 70,
+      verdictTag: 'Nutri Safe 🟢',
+      novaGrade: 1,
+      redCapTriggered: false,
+      safePortionGrams: 5,
+      limitingFactor: 'None',
+      frequencySchedule: 'Daily',
+      additives: [],
+      splitSugars: [],
+      portionAdvice: 'Safe portion 5g',
+      isExceededBudget: false,
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HealthierSwapsScreen(
+          currentProduct: exoticProduct,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Strict 1-to-1 Category Guarantee'), findsOneWidget);
+    expect(find.textContaining('We strictly only recommend direct swaps in the exact same food category'), findsOneWidget);
+    expect(find.text('Ask AI Advisor for Clean Brands'), findsOneWidget);
+  });
 }

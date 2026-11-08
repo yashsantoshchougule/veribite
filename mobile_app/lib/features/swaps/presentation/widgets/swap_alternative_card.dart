@@ -94,13 +94,45 @@ class SwapAlternativeCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 3),
-                          Text(
-                            '${alternative.brandName} • ${alternative.category}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMutedMocha,
-                            ),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 6,
+                            runSpacing: 2,
+                            children: [
+                              Text(
+                                '${alternative.brandName} • ${alternative.category}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textMutedMocha,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: alternative.brandTier == 3
+                                      ? const Color(0xFFE6F4EA)
+                                      : const Color(0xFFE8F0FE),
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(
+                                    color: alternative.brandTier == 3
+                                        ? const Color(0xFF34A853)
+                                        : const Color(0xFF4285F4),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Text(
+                                  alternative.brandTier == 3 ? 'Clean Certified' : 'High Grade',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: alternative.brandTier == 3
+                                        ? const Color(0xFF137333)
+                                        : const Color(0xFF1967D2),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

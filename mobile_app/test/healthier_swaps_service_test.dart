@@ -76,6 +76,61 @@ void main() {
       expect(swaps.first.scoreDelta, greaterThan(0));
     });
 
+    test('getSwapsForProduct matches Milky Mist Cheese to Cheese & Dairy, returns only clean dairy and never peanuts', () {
+      const milkyMistCheese = ScannedProductResult(
+        barcode: '8904083300123',
+        productName: 'Milky Mist Processed Cheese Slices',
+        brandName: 'Milky Mist',
+        category: 'Dairy • Cheese',
+        servingSizeG: 20.0,
+        sugarGPer100g: 1.5,
+        sugarGPerServing: 0.3,
+        caloriesPerServing: 62.0,
+        healthScore: 46,
+        verdictTag: 'Caution 🟠',
+        novaGrade: 4,
+        redCapTriggered: false,
+        safePortionGrams: 20,
+        limitingFactor: 'Sodium',
+        frequencySchedule: 'Moderate',
+        additives: [
+          {'ins_code': '331', 'primary_name': 'Sodium Citrates', 'risk_tier': 'YELLOW'},
+          {'ins_code': '452', 'primary_name': 'Polyphosphates', 'risk_tier': 'YELLOW'},
+        ],
+        splitSugars: [],
+        portionAdvice: 'Safe portion 20g',
+        isExceededBudget: false,
+      );
+
+      final swaps = service.getSwapsForProduct(milkyMistCheese);
+
+      expect(swaps.isNotEmpty, isTrue);
+      // Must be pure dairy / cheese
+      for (final swap in swaps) {
+        expect(swap.category, 'Cheese & Dairy');
+        expect(swap.productName.toLowerCase(), isNot(contains('peanut')));
+        expect(swap.productName.toLowerCase(), isNot(contains('munch')));
+        expect(swap.productName.toLowerCase(), isNot(contains('noodle')));
+        // Must be equal or better brand tier than Milky Mist (Tier 2)
+        expect(swap.brandTier, greaterThanOrEqualTo(2));
+        // Health score must improve
+        expect(swap.healthScore, greaterThan(milkyMistCheese.healthScore));
+      }
+
+      // Check specific top clean brands
+      expect(swaps.any((s) => s.brandName == 'Akshayakalpa'), isTrue);
+      expect(swaps.any((s) => s.brandName == "D'lecta" || s.brandName == 'Country Delight'), isTrue);
+    });
+
+    test('brand tier hierarchy correctly classifies brand tiers', () {
+      expect(HealthierSwapsService.getScannedBrandTier('Milky Mist'), 2);
+      expect(HealthierSwapsService.getScannedBrandTier('Akshayakalpa'), 3);
+      expect(HealthierSwapsService.getScannedBrandTier('The Whole Truth'), 3);
+      expect(HealthierSwapsService.getScannedBrandTier('Amul'), 2);
+      expect(HealthierSwapsService.getScannedBrandTier('Nestle'), 1);
+      expect(HealthierSwapsService.getScannedBrandTier('Maggi'), 1);
+    });
+
     test('getQuickCommerceUrl correctly constructs search URLs for all 4 platforms', () {
       const query = 'Slurrp Farm Millet Noodles';
       const encoded = 'Slurrp%20Farm%20Millet%20Noodles';
@@ -91,12 +146,18 @@ void main() {
       expect(bigbasketUrl, 'https://www.bigbasket.com/ps/?q=$encoded');
     });
 
-    test('getSwapsForCategory returns fallback swaps when category is unmapped', () {
-      final swaps = service.getSwapsForCategory('Exotic Gourmet Dip');
+    test('getSwapsForCategory returns clean alternatives for cheese and dairy category', () {
+      final swaps = service.getSwapsForCategory('Cheese & Dairy');
 
       expect(swaps.isNotEmpty, isTrue);
-      expect(swaps.any((s) => s.brandName == 'The Whole Truth' || s.brandName == 'Open Secret'), isTrue);
+      expect(swaps.first.category, 'Cheese & Dairy');
+      expect(swaps.any((s) => s.brandName == 'Akshayakalpa'), isTrue);
+    });
+
+    test('getSwapsForCategory returns empty list when category has no catalogued clean swaps', () {
+      final swaps = service.getSwapsForCategory('Exotic Japanese Seaweed Extract');
+
+      expect(swaps.isEmpty, isTrue);
     });
   });
 }
-

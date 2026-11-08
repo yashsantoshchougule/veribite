@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../advisor/domain/advisor_chat_model.dart';
+import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
@@ -178,7 +180,10 @@ class _HealthierSwapsScreenState extends State<HealthierSwapsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final catName = widget.currentProduct?.category ?? widget.category ?? 'Healthy Foods';
+    final catName = HealthierSwapsService.detectCategory(
+      productName: widget.currentProduct?.productName ?? '',
+      rawCategory: widget.currentProduct?.category ?? widget.category ?? '',
+    );
 
     return Scaffold(
       backgroundColor: AppColors.canvasCream,
@@ -383,19 +388,75 @@ class _HealthierSwapsScreenState extends State<HealthierSwapsScreen> {
   }
 
   Widget _buildEmptySwaps() {
+    final catName = widget.currentProduct?.category ?? widget.category ?? 'this category';
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: AppColors.cardSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.cardBorder),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.cardBorder, width: 1.2),
       ),
-      child: const Center(
-        child: Text(
-          'No specific alternatives found for this food item.\nAlways look for zero added sugar and whole grain options.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMutedMocha, fontSize: 13),
-        ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: AppColors.stepPillBg,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.verified_outlined, color: AppColors.accentBronze, size: 30),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Strict 1-to-1 Category Guarantee',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textObsidian,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'We strictly only recommend direct swaps in the exact same food category and equal or better brands (we never suggest unrelated snacks like peanuts for dairy).\n\nNo verified 1-to-1 clean swap has been catalogued for "$catName" yet.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textMutedMocha, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AdvisorChatScreen(
+                      userProfile: widget.userProfile,
+                      initialProductContext: widget.currentProduct != null
+                          ? ProductAdvisorContext(
+                              productName: widget.currentProduct!.productName,
+                              barcode: widget.currentProduct!.barcode,
+                              healthScore: widget.currentProduct!.healthScore,
+                              additives: widget.currentProduct!.additives,
+                              nutrition: {
+                                'sugars_100g': widget.currentProduct!.sugarGPer100g,
+                                'calories': widget.currentProduct!.caloriesPerServing,
+                              },
+                            )
+                          : null,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: const Text('Ask AI Advisor for Clean Brands', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryObsidian,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
