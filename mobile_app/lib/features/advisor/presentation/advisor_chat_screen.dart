@@ -55,7 +55,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
     if (_activeProductContext != null) {
       _messages.add(
         ChatMessage.advisor(
-          text: 'Hello! I am your VeriBite Personal AI Advisor, powered by Gemini 3.5 Flash and Citation RAG.\n\n'
+          text: 'Hello! I am your VeriBite Personal AI Advisor, grounded in WHO, EFSA, and FSSAI scientific standards.\n\n'
               'I have loaded **${_activeProductContext!.productName}** (Health Score: ${_activeProductContext!.healthScore}/100) into our context. '
               'Ask me anything about its safe portions for your body weight, split sugars, or chemical additives.',
           source: 'gemini_3.5_flash',
@@ -221,38 +221,15 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'VeriBite AI Advisor',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textObsidian,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                  decoration: BoxDecoration(
-                    color: AppColors.safetyMintBg,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.safetyMintBorder),
-                  ),
-                  child: const Text(
-                    'Gemini 3.5 Flash • Live AI',
-                    style: TextStyle(
-                      color: AppColors.safetyMint,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
+          const Expanded(
+            child: Text(
+              'VeriBite AI Advisor',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textObsidian,
+                letterSpacing: -0.2,
+              ),
             ),
           ),
           ValueListenableBuilder<bool>(

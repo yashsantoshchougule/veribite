@@ -58,9 +58,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Verify top header
+    // Verify top header (clean title without model branding)
     expect(find.text('VeriBite AI Advisor'), findsAtLeastNWidgets(1));
-    expect(find.text('Gemini 3.5 Flash • Live AI'), findsAtLeastNWidgets(1));
+    expect(find.text('Gemini 3.5 Flash • Live AI'), findsNothing);
 
     // Verify initial welcome message from advisor
     expect(find.textContaining('Hello! I am your VeriBite Personal AI Advisor'), findsOneWidget);
@@ -136,9 +136,9 @@ void main() {
     // Verify user message bubble was inserted (appears in user bubble + carousel chip)
     expect(find.text('Is maltodextrin safe for daily consumption?'), findsNWidgets(2));
 
-    // Verify AI response bubble rendered
+    // Verify AI response bubble rendered without model name badge
     expect(find.textContaining('Tartrazine (INS 102) has been linked to hyperactivity'), findsOneWidget);
-    expect(find.text('Gemini 3.5 Flash • Live AI'), findsAtLeastNWidgets(1));
+    expect(find.text('Gemini 3.5 Flash • Live AI'), findsNothing);
 
     // Verify safe portion card in bubble
     expect(find.textContaining('Prescribed Safe Portion: 10g'), findsOneWidget);

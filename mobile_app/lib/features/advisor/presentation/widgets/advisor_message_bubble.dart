@@ -63,34 +63,31 @@ class AdvisorMessageBubble extends StatelessWidget {
   }
 
   Widget _buildAdvisorBubble(BuildContext context) {
-    final isGemini = message.source.startsWith('gemini');
     final isOffline = message.source == 'local_offline';
     final isGuardrail = message.source == 'veribite_guardrail';
     final isAppGuide = message.source == 'veribite_app_guide';
 
-    final badgeLabel = isGemini
-        ? 'Gemini 3.5 Flash • Live AI'
-        : isOffline
-            ? 'Offline Scientific Engine'
-            : isGuardrail
-                ? 'VeriBite Guardrail'
-                : isAppGuide
-                    ? 'VeriBite App Guide'
-                    : 'Rule-Based Evidence Fallback';
+    final String? badgeLabel = isOffline
+        ? 'Offline Scientific Engine'
+        : isGuardrail
+            ? 'VeriBite Guardrail'
+            : isAppGuide
+                ? 'VeriBite App Guide'
+                : null;
 
-    final badgeColor = isGemini || isAppGuide
+    final badgeColor = isAppGuide
         ? AppColors.safetyMint
         : isGuardrail || isOffline
             ? AppColors.accentBronze
             : AppColors.textObsidian;
 
-    final badgeBg = isGemini || isAppGuide
+    final badgeBg = isAppGuide
         ? AppColors.safetyMintBg
         : isGuardrail || isOffline
             ? AppColors.ceilingCardBg
             : AppColors.stepPillBg;
 
-    final badgeBorder = isGemini || isAppGuide
+    final badgeBorder = isAppGuide
         ? AppColors.safetyMintBorder
         : isGuardrail || isOffline
             ? AppColors.ceilingCardBorder
@@ -142,23 +139,25 @@ class AdvisorMessageBubble extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: badgeBg,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: badgeBorder),
-                  ),
-                  child: Text(
-                    badgeLabel,
-                    style: TextStyle(
-                      color: badgeColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                if (badgeLabel != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: badgeBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: badgeBorder),
+                    ),
+                    child: Text(
+                      badgeLabel,
+                      style: TextStyle(
+                        color: badgeColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
+                ],
                 if (onToggleSpeak != null) ...[
                   const SizedBox(width: 6),
                   InkWell(
