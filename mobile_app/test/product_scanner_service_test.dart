@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mobile_app/features/camera/application/offline_barcode_repository.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('ProductScannerService QR & Barcode Tests', () {
     final defaultUser = UserProfileModel.defaults('test_user_1');
     final childUser = UserProfileModel.defaults('child_user').copyWith(isChild: true, weightKg: 25.0);
@@ -502,6 +505,68 @@ void main() {
         ),
         throwsA(isA<VisionExtractionException>()),
       );
+    });
+
+    test('resolves Indian packaged product offline directly from Tier 1 seed database', () async {
+      final service = ProductScannerService();
+
+      // Parle-G 8901719101018 from Tier 1 seed
+      final result = await service.resolveBarcode(
+        barcode: '8901719101018',
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, contains('Parle-G'));
+      expect(result.brandName, 'Parle');
+      expect(result.category, 'Biscuits & Cookies');
+      expect(result.healthScore, greaterThan(0));
+    });
+
+    test('throws OfflineVariantMatchException with recognized brand and siblings for offline pack-size variant', () async {
+      final service = ProductScannerService();
+
+      // Unknown barcode with Nestle India prefix (8901058)
+      expect(
+        () => service.resolveBarcode(
+          barcode: '8901058999999',
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<OfflineVariantMatchException>().having(
+          (e) => e.brandName,
+          'brandName',
+          'Nestlé India',
+        )),
+      );
+    });
+
+    test('evaluates raw product data directly via evaluateProductData()', () {
+      final service = ProductScannerService();
+      final productData = {
+        'barcode': '8901234567890',
+        'product_name': 'Pure Almond Milk',
+        'brand_name': 'Raw Nature',
+        'category': 'Plant Milk',
+        'serving_size_g': 200.0,
+        'pack_weight_g': 1000.0,
+        'health_score': 85,
+        'nova_grade': 1,
+        'nutrition': {
+          'sugar_g_per_100g': 1.0,
+          'sat_fat_g_per_100g': 0.2,
+          'sodium_mg_per_100g': 30.0,
+          'energy_kj': 150.0,
+        },
+      };
+
+      final result = service.evaluateProductData(
+        productData: productData,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, 'Pure Almond Milk');
+      expect(result.brandName, 'Raw Nature');
+      expect(result.healthScore, 85);
+      expect(result.verdictTag, 'Nutri Safe 🟢');
     });
   });
 }

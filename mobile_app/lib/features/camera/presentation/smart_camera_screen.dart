@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,10 +10,12 @@ import '../../home/application/home_dashboard_service.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../application/camera_scan_notifier.dart';
+import '../application/offline_barcode_repository.dart';
 import '../application/product_scanner_service.dart';
 import 'widgets/camera_reticle_painter.dart';
 import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
+import 'widgets/offline_variant_match_sheet.dart';
 import 'widgets/quick_macro_slider_sheet.dart';
 import 'widgets/scan_result_sheet.dart';
 import '../../results/presentation/verdict_report_screen.dart';
@@ -55,6 +58,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   String? _pendingQrPayload;
   List<int>? _pendingQrFrame;
   String? _activeScanningStatus;
+  String? _pendingBindingBarcode;
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
@@ -237,6 +241,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
       if (!mounted) return;
       await _showScanResultReport(resolvedProduct, activeProfile);
+    } on OfflineVariantMatchException catch (e) {
+      if (!mounted) return;
+      await _showOfflineVariantMatchSheet(e);
     } on PromotionalQrContextException catch (e) {
       if (!mounted) return;
       await _showPromotionalQrContextSheet(e);
@@ -300,6 +307,36 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
 
       if (!mounted) return;
+
+      // Offline OCR Barcode Binding: bind newly analyzed product to pending barcode in Tier 2 cache
+      if (_pendingBindingBarcode != null) {
+        final boundBarcode = _pendingBindingBarcode!;
+        _pendingBindingBarcode = null;
+        unawaited(OfflineBarcodeRepository.instance.saveProduct(
+          barcode: boundBarcode,
+          productData: {
+            'barcode': boundBarcode,
+            'product_name': resolvedProduct.productName,
+            'brand_name': resolvedProduct.brandName,
+            'category': resolvedProduct.category,
+            'serving_size_g': resolvedProduct.servingSizeG,
+            'pack_weight_g': resolvedProduct.packWeightG,
+            'health_score': resolvedProduct.healthScore,
+            'nova_grade': resolvedProduct.novaGrade,
+            'red_cap_triggered': resolvedProduct.redCapTriggered ? 1 : 0,
+            'nutrition_json': jsonEncode({
+              'energy_kj': resolvedProduct.caloriesPerServing * 4.184,
+              'sugar_g_per_100g': resolvedProduct.sugarGPer100g,
+              'sat_fat_g_per_100g': resolvedProduct.satFatGPer100g,
+              'sodium_mg_per_100g': resolvedProduct.sodiumMgPer100g,
+            }),
+            'additives_json': jsonEncode(resolvedProduct.additives),
+            'ingredients_json': jsonEncode([]),
+          },
+          isUserLearned: true,
+        ));
+      }
+
       await _showScanResultReport(resolvedProduct, activeProfile);
 
       ref.read(cameraScanNotifierProvider.notifier).clearMultiAngleFrames();
@@ -534,10 +571,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        _openMacroSliderSheet();
+                        _startLabelOcrForBarcode(barcode);
                       },
-                      icon: const Icon(Icons.tune_rounded, size: 18),
-                      label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      icon: const Icon(Icons.document_scanner_rounded, size: 16),
+                      label: const Text('Scan Label (OCR)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textObsidian,
                         side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
@@ -546,18 +583,34 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryObsidian,
-                        foregroundColor: Colors.white,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _pendingBindingBarcode = barcode;
+                        _openMacroSliderSheet();
+                      },
+                      icon: const Icon(Icons.tune_rounded, size: 16),
+                      label: const Text('Enter Macros', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textObsidian,
+                        side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
                         padding: const EdgeInsets.symmetric(vertical: 13),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
-                      child: const Text('Try Again', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryObsidian,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('Retry', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
@@ -575,6 +628,80 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
           await _scannerController.start();
         } catch (_) {}
       }
+    }
+  }
+
+  /// Displays intelligent GS1 India Manufacturer Prefix & Pack-Size Sibling Match Sheet
+  Future<void> _showOfflineVariantMatchSheet(OfflineVariantMatchException exception) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => OfflineVariantMatchSheet(
+          barcode: exception.barcode,
+          brandName: exception.brandName,
+          siblingProducts: exception.siblingProducts,
+          onSelectProduct: (product) async {
+            Navigator.of(ctx).pop();
+            final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+            final evaluated = _productService.evaluateProductData(
+              productData: product,
+              userProfile: activeProfile,
+              barcode: exception.barcode,
+            );
+            // Self-learning: store this variant pack size bound to this product formula
+            unawaited(OfflineBarcodeRepository.instance.saveProduct(
+              barcode: exception.barcode,
+              productData: product,
+              isUserLearned: true,
+            ));
+            if (!mounted) return;
+            await _showScanResultReport(evaluated, activeProfile);
+          },
+          onScanOcr: () {
+            Navigator.of(ctx).pop();
+            _startLabelOcrForBarcode(exception.barcode);
+          },
+          onManualEntry: () {
+            Navigator.of(ctx).pop();
+            _pendingBindingBarcode = exception.barcode;
+            _openMacroSliderSheet();
+          },
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = exception.barcode;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
+  }
+
+  void _startLabelOcrForBarcode(String barcode) {
+    _pendingBindingBarcode = barcode;
+    ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Switched to Label Photo Capture for barcode $barcode. Tap shutter to capture ingredient panel.'),
+          backgroundColor: AppColors.primaryObsidian,
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -953,6 +1080,33 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               macros: macros,
               userProfile: activeProfile,
             );
+            if (_pendingBindingBarcode != null) {
+              final boundBarcode = _pendingBindingBarcode!;
+              _pendingBindingBarcode = null;
+              unawaited(OfflineBarcodeRepository.instance.saveProduct(
+                barcode: boundBarcode,
+                productData: {
+                  'barcode': boundBarcode,
+                  'product_name': 'Manual Custom Food',
+                  'brand_name': 'Custom Entry',
+                  'category': 'Custom Snack',
+                  'serving_size_g': 30.0,
+                  'pack_weight_g': 100.0,
+                  'health_score': resolved.healthScore,
+                  'nova_grade': resolved.novaGrade,
+                  'red_cap_triggered': resolved.redCapTriggered ? 1 : 0,
+                  'nutrition_json': jsonEncode({
+                    'energy_kj': 450.0,
+                    'sugar_g_per_100g': macros['sugar'] ?? 10.0,
+                    'sat_fat_g_per_100g': macros['sat_fat'] ?? 5.0,
+                    'sodium_mg_per_100g': macros['sodium'] ?? 200.0,
+                  }),
+                  'additives_json': '[]',
+                  'ingredients_json': jsonEncode(['Wheat Flour', 'Sugar', 'Vegetable Oil']),
+                },
+                isUserLearned: true,
+              ));
+            }
             _showScanResultSheet(resolved);
           },
         ),

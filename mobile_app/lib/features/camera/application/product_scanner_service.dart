@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -7,6 +8,7 @@ import '../../../core/vision/barcode_scanner_service.dart';
 import '../../../core/vision/food_web_extractor.dart';
 import '../../../core/vision/gemini_vision_service.dart';
 import '../../profile/domain/user_profile_model.dart';
+import 'offline_barcode_repository.dart';
 
 /// Thrown when a scanned QR code belongs to electronics, laptop support, or non-food services
 class NonFoodScanException implements Exception {
@@ -135,14 +137,17 @@ class ProductScannerService {
   final SupabaseClient? _injectedClient;
   final http.Client? _injectedHttpClient;
   final GeminiVisionService? _injectedVisionService;
+  final OfflineBarcodeRepository? _injectedOfflineRepo;
 
   ProductScannerService({
     SupabaseClient? client,
     http.Client? httpClient,
     GeminiVisionService? visionService,
+    OfflineBarcodeRepository? offlineBarcodeRepository,
   })  : _injectedClient = client,
         _injectedHttpClient = httpClient,
-        _injectedVisionService = visionService;
+        _injectedVisionService = visionService,
+        _injectedOfflineRepo = offlineBarcodeRepository;
 
   SupabaseClient? get _client {
     if (_injectedClient != null) return _injectedClient;
@@ -154,6 +159,8 @@ class ProductScannerService {
   }
 
   http.Client get _httpClient => _injectedHttpClient ?? http.Client();
+  OfflineBarcodeRepository get _offlineRepo =>
+      _injectedOfflineRepo ?? OfflineBarcodeRepository.instance;
   late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
   late final GeminiVisionService _visionService =
       _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
@@ -659,6 +666,10 @@ class ProductScannerService {
   }
 
   void _writeThroughCache(Map<String, dynamic> productData) {
+    final barcode = productData['barcode']?.toString();
+    if (barcode != null && barcode.isNotEmpty) {
+      unawaited(_offlineRepo.saveProduct(barcode: barcode, productData: productData));
+    }
     try {
       final client = _client;
       if (client != null) {
@@ -724,10 +735,11 @@ class ProductScannerService {
       );
     }
 
-    // Cache the resolved product in Supabase catalog
+    // Cache the resolved product in offline repository & Supabase catalog
+    final barcodeKey = productData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
+    productData['barcode'] = barcodeKey;
     _writeThroughCache(productData);
 
-    final barcodeKey = productData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
     return _evaluateProduct(productData, userProfile, barcodeKey);
   }
 
@@ -738,40 +750,69 @@ class ProductScannerService {
   }) async {
     Map<String, dynamic>? productData;
 
-    // 1. Try Supabase Cloud lookup
-    try {
-      final client = _client;
-      if (client != null) {
-        final res = await client
-            .from('products')
-            .select('*')
-            .eq('barcode', barcode)
-            .maybeSingle();
-        if (res != null) {
-          productData = res;
-        }
+    // 1. Check built-in verified catalog fallback (Instant 0ms resolution)
+    productData = _getCatalogProduct(barcode);
+
+    // 2. Check Offline Barcode Repository (Tier 2 local persistent cache, then Tier 1 pre-bundled seed - < 1ms)
+    if (productData == null) {
+      try {
+        productData = await _offlineRepo.lookupBarcode(barcode);
+      } catch (e) {
+        debugPrint('[ProductScannerService] Offline repository lookup notice: $e');
       }
-    } catch (e) {
-      debugPrint('ProductScannerService: Supabase query failed: $e');
     }
 
-    // 2. Check built-in verified catalog (Instant 0ms resolution for verified products)
-    productData ??= _getCatalogProduct(barcode);
+    // 3. Try Supabase Cloud lookup
+    if (productData == null) {
+      try {
+        final client = _client;
+        if (client != null) {
+          final res = await client
+              .from('products')
+              .select('*')
+              .eq('barcode', barcode)
+              .maybeSingle();
+          if (res != null) {
+            productData = res;
+            _writeThroughCache(res);
+          }
+        }
+      } catch (e) {
+        debugPrint('ProductScannerService: Supabase query failed: $e');
+      }
+    }
 
-    // 3. Try Open Food Facts Live Global API (v2) for uncatalogued products
+    // 4. Try Open Food Facts Live Global API (v2) for uncatalogued products
     if (productData == null) {
       try {
         final offData = await _fetchFromOpenFoodFacts(barcode);
         if (offData != null) {
           productData = offData;
+          _writeThroughCache(offData);
         }
       } catch (e) {
         debugPrint('ProductScannerService: Open Food Facts query notice: $e');
       }
     }
 
-    // If product is not registered in any food database, do NOT invent fake food facts!
+    // 5. If barcode is still not found, check GS1 India 890 manufacturer prefix & pack-size siblings!
     if (productData == null) {
+      try {
+        final siblings = await _offlineRepo.findSiblingProducts(barcode);
+        if (siblings.isNotEmpty) {
+          final brandName = _offlineRepo.getBrandOrManufacturerForBarcode(barcode) ??
+              (siblings.first['brand_name']?.toString() ?? 'Packaged Brand');
+          throw OfflineVariantMatchException(
+            barcode: barcode,
+            brandName: brandName,
+            siblingProducts: siblings,
+          );
+        }
+      } catch (e) {
+        if (e is OfflineVariantMatchException) rethrow;
+        debugPrint('[ProductScannerService] Sibling matcher notice: $e');
+      }
+
       throw ProductNotFoundException(barcode);
     }
 
@@ -889,6 +930,18 @@ class ProductScannerService {
     };
 
     return _evaluateProduct(mockData, userProfile, mockData['barcode'] as String);
+  }
+
+  /// Directly evaluate a raw or cached product map against user biometrics
+  ScannedProductResult evaluateProductData({
+    required Map<String, dynamic> productData,
+    required UserProfileModel userProfile,
+    String? barcode,
+  }) {
+    final code = barcode ??
+        productData['barcode']?.toString() ??
+        'product_${DateTime.now().millisecondsSinceEpoch}';
+    return _evaluateProduct(productData, userProfile, code);
   }
 
   /// Internal deterministic evaluation of product with scoring & dosage engines
