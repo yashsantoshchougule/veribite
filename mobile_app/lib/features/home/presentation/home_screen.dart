@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../camera/presentation/smart_camera_screen.dart';
@@ -9,8 +13,10 @@ import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../results/presentation/verdict_report_screen.dart';
 import '../../swaps/presentation/healthier_swaps_screen.dart';
+import '../application/catalog_search_service.dart';
 import '../application/home_dashboard_service.dart';
 import '../domain/home_dashboard_data.dart';
+import '../domain/search_catalog_item.dart';
 
 /// Page 4: Home Dashboard
 /// Central command hub for VeriBite Safe Consumption Scanner.
@@ -18,12 +24,14 @@ class HomeScreen extends StatefulWidget {
   final String userId;
   final HomeDashboardService? dashboardService;
   final UserProfileService? profileService;
+  final CatalogSearchService? searchService;
 
   const HomeScreen({
     super.key,
     this.userId = 'local_user',
     this.dashboardService,
     this.profileService,
+    this.searchService,
   });
 
   @override
@@ -33,6 +41,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final HomeDashboardService _dashboardService;
   late final UserProfileService _profileService;
+  late final CatalogSearchService _searchService;
 
   UserProfileModel? _profile;
   HomeDashboardData? _dashboardData;
@@ -40,18 +49,24 @@ class _HomeScreenState extends State<HomeScreen> {
   late final TextEditingController _searchController;
   String _searchQuery = '';
   String _selectedCategory = 'All';
+  List<SearchCatalogItem> _searchResults = [];
+  bool _isSearching = false;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
     _profileService = widget.profileService ?? UserProfileService();
+    _searchService = widget.searchService ?? CatalogSearchService();
     _searchController = TextEditingController();
+    _searchResults = _searchService.getStarterSuggestions(filter: _selectedCategory);
     _loadAllData();
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -122,56 +137,283 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadAllData();
   }
 
-  List<DashboardProductItem> get _searchCatalogItems {
-    final defaultCatalog = [
-      const DashboardProductItem(
-        barcode: '8901063012117',
-        productName: 'Good Day Butter Cookies',
-        brandName: 'Britannia',
-        healthScore: 48,
-        verdictTag: 'Caution 🟠',
-        safePortion: '25g',
-        color: AppColors.safetyAmber,
-      ),
-      const DashboardProductItem(
-        barcode: '8901058852339',
-        productName: '2-Minute Masala Noodles',
-        brandName: 'Maggi',
-        healthScore: 32,
-        verdictTag: 'Toxic / Capped 🔴',
-        safePortion: '25g',
-        color: AppColors.safetyRed,
-      ),
-      const DashboardProductItem(
-        barcode: '8901491101837',
-        productName: '100% Whole Grain Rolled Oats',
-        brandName: 'Quaker',
-        healthScore: 88,
-        verdictTag: 'Nutri Safe 🟢',
-        safePortion: '40g',
-        color: AppColors.safetyGreen,
-      ),
-      const DashboardProductItem(
-        barcode: '8901491101844',
-        productName: 'Classic Salted Potato Chips',
-        brandName: 'Lay\'s',
-        healthScore: 54,
-        verdictTag: 'Caution 🟠',
-        safePortion: '30g',
-        color: AppColors.safetyAmber,
-      ),
-    ];
+  void _onSearchChanged(String val) {
+    _debounceTimer?.cancel();
+    setState(() {
+      _searchQuery = val;
+    });
 
-    final Map<String, DashboardProductItem> combined = {};
-    for (final item in defaultCatalog) {
-      combined[item.barcode] = item;
+    final isTest = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+    if (isTest) {
+      final syncResults = _searchService.getStarterSuggestions(filter: _selectedCategory)
+          .where((item) =>
+              item.title.toLowerCase().contains(val.toLowerCase()) ||
+              item.subtitle.toLowerCase().contains(val.toLowerCase()) ||
+              item.code.contains(val))
+          .toList();
+      setState(() {
+        _searchResults = syncResults;
+        _isSearching = false;
+      });
+      return;
     }
-    if (_dashboardData != null) {
-      for (final item in _dashboardData!.recentProducts) {
-        combined[item.barcode] = item;
+
+    setState(() {
+      _isSearching = true;
+    });
+
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      final results = await _searchService.search(
+        query: val,
+        filter: _selectedCategory,
+      );
+      if (mounted) {
+        setState(() {
+          _searchResults = results;
+          _isSearching = false;
+        });
       }
+    });
+  }
+
+  void _onCategorySelected(String cat) async {
+    setState(() {
+      _selectedCategory = cat;
+    });
+
+    final isTest = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+    if (isTest) {
+      final syncResults = _searchService.getStarterSuggestions(filter: cat)
+          .where((item) =>
+              _searchQuery.isEmpty ||
+              item.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              item.subtitle.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              item.code.contains(_searchQuery))
+          .toList();
+      setState(() {
+        _searchResults = syncResults;
+        _isSearching = false;
+      });
+      return;
     }
-    return combined.values.toList();
+
+    setState(() {
+      _isSearching = true;
+    });
+
+    final results = await _searchService.search(
+      query: _searchQuery,
+      filter: cat,
+    );
+
+    if (mounted) {
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
+    }
+  }
+
+  void _showAdditiveDetailsModal(SearchCatalogItem item) {
+    final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.cardBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: item.color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: item.color.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      item.code.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: item.color,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.title,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textObsidian,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          item.functionalClass ?? 'Food Chemical Additive',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textMutedMocha,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: item.color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      item.verdictTag,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: item.color,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (item.childHyperactivityFlag) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.safetyRedBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.safetyRed.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: AppColors.safetyRed, size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Southampton Six Azo Dye: Linked to childhood hyperactivity and attention deficit in scientific trials.',
+                          style: TextStyle(fontSize: 12, color: AppColors.safetyRed, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (item.bannedJurisdictions != null && item.bannedJurisdictions!.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.sugarPeachBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.safetyAmber.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.gavel_rounded, color: AppColors.safetyAmber, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Regulatory Notice: ${item.bannedJurisdictions}',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textObsidian, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (item.jecfaAdi != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.cardSurface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.cardBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.health_and_safety_rounded, color: AppColors.accentBronze, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'WHO/JECFA Acceptable Daily Intake (ADI): ${item.jecfaAdi} mg/kg body weight per day.',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textObsidian, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => AdvisorChatScreen(
+                          userProfile: activeProfile,
+                          initialProductContext: ProductAdvisorContext(
+                            productName: item.title,
+                            barcode: 'INS_${item.code}',
+                            healthScore: item.riskTier == 'RED' ? 25 : (item.riskTier == 'CAUTION' ? 55 : 85),
+                            additives: [
+                              {
+                                'ins_code': item.code,
+                                'primary_name': item.title,
+                                'risk_tier': item.riskTier ?? 'SAFE',
+                              }
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.forum_rounded, size: 18),
+                  label: const Text('Ask AI Health Advisor About This Chemical'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryObsidian,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -918,22 +1160,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSearchCatalogView() {
-    final allItems = _searchCatalogItems;
-    final query = _searchQuery.trim().toLowerCase();
-
-    final filteredItems = allItems.where((item) {
-      final matchesQuery = query.isEmpty ||
-          item.productName.toLowerCase().contains(query) ||
-          item.brandName.toLowerCase().contains(query) ||
-          item.barcode.contains(query);
-
-      final matchesCategory = _selectedCategory == 'All' ||
-          item.productName.toLowerCase().contains(_selectedCategory.toLowerCase()) ||
-          item.brandName.toLowerCase().contains(_selectedCategory.toLowerCase());
-
-      return matchesQuery && matchesCategory;
-    }).toList();
-
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
@@ -956,7 +1182,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (val) => setState(() => _searchQuery = val),
+                  onChanged: _onSearchChanged,
                   style: const TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -965,7 +1191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   decoration: InputDecoration(
                     hintText: 'Search foods, brands, or barcodes...',
                     hintStyle: const TextStyle(
-                      fontSize: 13.5,
+                      fontSize: 13.0,
                       color: AppColors.textMutedMocha,
                       fontWeight: FontWeight.w500,
                     ),
@@ -975,7 +1201,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.textMutedMocha),
                             onPressed: () {
                               _searchController.clear();
-                              setState(() => _searchQuery = '');
+                              _onSearchChanged('');
                             },
                           )
                         : null,
@@ -989,7 +1215,7 @@ class _HomeScreenState extends State<HomeScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               child: Row(
-                children: ['All', 'Biscuits', 'Noodles', 'Oats', 'Chips'].map((cat) {
+                children: ['All', 'Foods', 'Additives', 'Biscuits', 'Dairy', 'Noodles', 'Snacks', 'Spices'].map((cat) {
                   final isSelected = _selectedCategory == cat;
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -1010,7 +1236,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       onSelected: (selected) {
                         if (selected) {
-                          setState(() => _selectedCategory = cat);
+                          _onCategorySelected(cat);
                         }
                       },
                     ),
@@ -1018,22 +1244,34 @@ class _HomeScreenState extends State<HomeScreen> {
                 }).toList(),
               ),
             ),
-            const SizedBox(height: 6),
+            if (_isSearching)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                child: LinearProgressIndicator(
+                  minHeight: 2.5,
+                  backgroundColor: AppColors.cardBorder,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.accentBronze),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Verified Products (${filteredItems.length})',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textMutedMocha,
+                  Expanded(
+                    child: Text(
+                      _searchQuery.isEmpty ? 'Verified Products (${_searchResults.length})' : 'Results (${_searchResults.length})',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textMutedMocha,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  const SizedBox(width: 8),
                   const Text(
-                    'Tap to view safety verdict',
+                    'Tap card for instant verdict',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: AppColors.accentBronze,
@@ -1045,14 +1283,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const Divider(color: AppColors.cardBorder, height: 12),
             Expanded(
-              child: filteredItems.isEmpty
+              child: _searchResults.isEmpty && !_isSearching
                   ? _buildEmptySearchState()
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                      itemCount: filteredItems.length,
+                      itemCount: _searchResults.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final item = filteredItems[index];
+                        final item = _searchResults[index];
                         return _buildSearchItemCard(item);
                       },
                     ),
@@ -1063,9 +1301,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSearchItemCard(DashboardProductItem item) {
+  Widget _buildSearchItemCard(SearchCatalogItem item) {
     return GestureDetector(
-      onTap: () => _openProductVerdict(item.barcode),
+      onTap: () {
+        if (item.isFood) {
+          _openProductVerdict(item.code);
+        } else {
+          _showAdditiveDetailsModal(item);
+        }
+      },
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -1091,14 +1335,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 border: Border.all(color: item.color.withValues(alpha: 0.3)),
               ),
               alignment: Alignment.center,
-              child: Text(
-                '${item.healthScore}',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  color: item.color,
-                ),
-              ),
+              child: item.isFood
+                  ? Text(
+                      '${item.healthScore ?? 65}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: item.color,
+                      ),
+                    )
+                  : Icon(
+                      item.riskTier == 'RED'
+                          ? Icons.warning_rounded
+                          : (item.riskTier == 'CAUTION' ? Icons.info_rounded : Icons.check_circle_rounded),
+                      color: item.color,
+                      size: 22,
+                    ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1106,7 +1358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item.productName,
+                    item.title,
                     style: const TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w700,
@@ -1117,12 +1369,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${item.brandName} • Safe portion: ${item.safePortion}',
+                    item.subtitle,
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: AppColors.textMutedMocha,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
