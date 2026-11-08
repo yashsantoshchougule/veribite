@@ -58,15 +58,17 @@ class AdvisorService {
       );
     }
 
-    // Rate Limit Guard: client-side debounce and quota enforcement
-    if (!rateLimiter.canSendRequest()) {
-      final waitSec = rateLimiter.getRemainingCooldownSeconds();
+    final activeUserId = userProfile?.userId ?? 'anonymous';
+
+    // Rate Limit Guard: client-side debounce and quota enforcement per user
+    if (!rateLimiter.canSendRequest(null, activeUserId)) {
+      final waitSec = rateLimiter.getRemainingCooldownSeconds(null, activeUserId);
       return ChatMessage.advisor(
-        text: 'You are sending questions too quickly. Please wait ${waitSec}s before sending another request.\n\nIn the meantime, feel free to inspect the scientific food information on your screen!',
+        text: 'You have reached the maximum rate of 4 requests per minute for your account. Please wait ${waitSec}s before sending another question.\n\nIn the meantime, feel free to inspect the scientific food information on your screen!',
         source: 'veribite_guardrail',
       );
     }
-    rateLimiter.recordRequest();
+    rateLimiter.recordRequest(null, activeUserId);
 
     bool isRateLimited = false;
     int retryAfter = 15;
@@ -207,7 +209,8 @@ class AdvisorService {
         } else if (response.statusCode == 429) {
           final retryAfterHeader = response.headers['retry-after'];
           final retrySec = int.tryParse(retryAfterHeader ?? '') ?? 15;
-          rateLimiter.recordServer429(retrySec);
+          final activeUserId = userProfile?.userId ?? 'anonymous';
+          rateLimiter.recordServer429(retrySec, null, activeUserId);
           lastError = RateLimitException(retrySec);
           break; // Stop immediately to protect remote quotas
         } else {
@@ -230,6 +233,7 @@ class AdvisorService {
     ProductAdvisorContext? productContext,
     UserProfileModel? userProfile,
   }) async {
+    final activeUserId = userProfile?.userId ?? 'anonymous';
     final activeWeight = userProfile?.weightKg ?? 65.0;
     final isChild = userProfile?.isChild ?? false;
     final hasDiabetes = userProfile?.isDiabetic ?? false;
@@ -242,6 +246,7 @@ class AdvisorService {
         'additives': [],
       },
       'user_guardrails': {
+        'user_id': activeUserId,
         'weight_kg': activeWeight,
         'is_child': isChild,
         'has_diabetes': hasDiabetes,
@@ -254,7 +259,10 @@ class AdvisorService {
     final response = await _client
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-Id': activeUserId,
+          },
           body: jsonEncode(requestPayload),
         )
         .timeout(const Duration(seconds: 5));
@@ -271,7 +279,7 @@ class AdvisorService {
           retrySec = (bodyJson['retry_after'] as num).toInt();
         }
       } catch (_) {}
-      rateLimiter.recordServer429(retrySec);
+      rateLimiter.recordServer429(retrySec, null, activeUserId);
       throw RateLimitException(retrySec);
     }
     return null;

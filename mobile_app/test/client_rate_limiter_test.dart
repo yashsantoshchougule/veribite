@@ -81,6 +81,35 @@ void main() {
       limiter.reset();
       expect(limiter.canSendRequest(t0), isTrue);
     });
+
+    test('enforces per-user quota isolation: User 1 reaching limit does not block User 2', () {
+      final t0 = DateTime(2026, 1, 1, 12, 0, 0);
+
+      // User 1 uses all 3 requests
+      expect(limiter.recordRequest(t0, 'user_1'), isTrue);
+      expect(limiter.recordRequest(t0.add(const Duration(milliseconds: 600)), 'user_1'), isTrue);
+      expect(limiter.recordRequest(t0.add(const Duration(milliseconds: 1200)), 'user_1'), isTrue);
+
+      // User 1 is now blocked
+      expect(limiter.canSendRequest(t0.add(const Duration(seconds: 5)), 'user_1'), isFalse);
+
+      // User 2 has independent full quota and is allowed
+      expect(limiter.canSendRequest(t0.add(const Duration(seconds: 5)), 'user_2'), isTrue);
+      expect(limiter.recordRequest(t0.add(const Duration(seconds: 5)), 'user_2'), isTrue);
+    });
+
+    test('resetting specific user clears only that user', () {
+      final t0 = DateTime(2026, 1, 1, 12, 0, 0);
+      limiter.recordServer429(60, t0, 'user_1');
+      limiter.recordServer429(60, t0, 'user_2');
+
+      expect(limiter.canSendRequest(t0, 'user_1'), isFalse);
+      expect(limiter.canSendRequest(t0, 'user_2'), isFalse);
+
+      limiter.reset('user_1');
+      expect(limiter.canSendRequest(t0, 'user_1'), isTrue);
+      expect(limiter.canSendRequest(t0, 'user_2'), isFalse);
+    });
   });
 }
 

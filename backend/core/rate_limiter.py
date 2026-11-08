@@ -15,6 +15,7 @@ Dual-mode storage:
 
 from collections import deque
 from dataclasses import dataclass
+import hashlib
 import logging
 import os
 import threading
@@ -209,22 +210,35 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def limiter(self) -> RateLimiter:
         return self._custom_limiter if self._custom_limiter is not None else get_rate_limiter()
 
-    def _extract_client_ip(self, request: Request) -> str:
-        """Extract reliable client IP from X-Forwarded-For or socket address."""
+    def _extract_client_identifier(self, request: Request) -> str:
+        """Extract per-user identifier (X-User-Id, Bearer token) or fallback to client IP."""
+        # 1. Direct user identifier header
+        user_id = request.headers.get("x-user-id") or request.headers.get("user-id")
+        if user_id and user_id.strip():
+            return f"user:{user_id.strip()}"
+
+        # 2. Bearer Authorization token fingerprint
+        auth_header = request.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                return f"user:{hashlib.sha256(token.encode('utf-8')).hexdigest()[:16]}"
+
+        # 3. Fallback to client IP address for guest/unauthenticated traffic
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return f"ip:{forwarded.split(',')[0].strip()}"
         if request.client and request.client.host:
-            return request.client.host
-        return "127.0.0.1"
+            return f"ip:{request.client.host}"
+        return "ip:127.0.0.1"
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         tier = get_tier_for_path(request.url.path)
         if tier.name == "exempt":
             return await call_next(request)
 
-        client_ip = self._extract_client_ip(request)
-        allowed, limit, remaining, reset_sec = self.limiter.check_rate_limit(client_ip, tier)
+        client_id = self._extract_client_identifier(request)
+        allowed, limit, remaining, reset_sec = self.limiter.check_rate_limit(client_id, tier)
 
         if not allowed:
             headers = {

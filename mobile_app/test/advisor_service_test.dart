@@ -292,7 +292,49 @@ void main() {
         userProfile: UserProfileModel.defaults('test_user'),
       );
       expect(reply2.source, 'veribite_guardrail');
-      expect(reply2.text, contains('You are sending questions too quickly'));
+      expect(reply2.text, contains('maximum rate of 4 requests per minute for your account'));
+    });
+
+    test('askAdvisor rate limit is isolated per user: User 1 reaching limit does not block User 2', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [{'text': 'Safe intake guidance.'}]
+                }
+              }
+            ]
+          }),
+          200,
+        );
+      });
+
+      final customLimiter = ClientRateLimiter(maxRequestsPerMinute: 1);
+      final service = AdvisorService(client: mockClient, rateLimiter: customLimiter);
+
+      // User 1 uses their 1 allowed request
+      final replyUser1A = await service.askAdvisor(
+        userMessage: 'Is sodium safe for user 1?',
+        userProfile: UserProfileModel.defaults('user_alpha'),
+      );
+      expect(replyUser1A.source, 'gemini_3.5_flash');
+
+      // User 1 is now rate limited
+      final replyUser1B = await service.askAdvisor(
+        userMessage: 'Is sugar safe for user 1?',
+        userProfile: UserProfileModel.defaults('user_alpha'),
+      );
+      expect(replyUser1B.source, 'veribite_guardrail');
+      expect(replyUser1B.text, contains('maximum rate of 4 requests per minute for your account'));
+
+      // User 2 asks a question: immediately allowed with full independent quota
+      final replyUser2 = await service.askAdvisor(
+        userMessage: 'Is salt safe for user 2?',
+        userProfile: UserProfileModel.defaults('user_beta'),
+      );
+      expect(replyUser2.source, 'gemini_3.5_flash');
     });
 
     test('askAdvisor handles HTTP 429 rate limit from Gemini and falls back to offline database', () async {
@@ -314,7 +356,7 @@ void main() {
 
       expect(reply.source, 'local_offline');
       expect(reply.text, contains('rate limit active'));
-      expect(customLimiter.canSendRequest(), isFalse);
+      expect(customLimiter.canSendRequest(null, 'test_user'), isFalse);
     });
 
     test('askAdvisor handles HTTP 429 rate limit from backend proxy and falls back gracefully', () async {
@@ -340,7 +382,7 @@ void main() {
 
       expect(reply.source, 'local_offline');
       expect(reply.text, contains('rate limit active'));
-      expect(customLimiter.canSendRequest(), isFalse);
+      expect(customLimiter.canSendRequest(null, 'test_user'), isFalse);
     });
   });
 }

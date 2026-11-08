@@ -145,7 +145,7 @@ def test_middleware_returns_429_when_exceeded():
     # Pre-consume all tokens for client '192.168.1.50' under auth tier
     client_ip = "192.168.1.50"
     for _ in range(TIER_AUTH.max_requests):
-        test_limiter.check_rate_limit(client_ip, TIER_AUTH)
+        test_limiter.check_rate_limit(f"ip:{client_ip}", TIER_AUTH)
 
     # Next request from this IP must trigger 429
     response = client.post(
@@ -161,6 +161,47 @@ def test_middleware_returns_429_when_exceeded():
     assert "Rate limit exceeded" in data["detail"]
     assert data["tier"] == "auth"
     assert data["retry_after"] > 0
+
+
+def test_middleware_per_user_isolation():
+    """Verify separate users on the SAME IP address maintain independent quotas."""
+    test_limiter = RateLimiter()
+    set_rate_limiter(test_limiter)
+    client = TestClient(app)
+
+    shared_ip = "192.168.1.100"
+
+    # User 1 pre-consumes all 4 allowed requests under advisor tier
+    for _ in range(TIER_ADVISOR.max_requests):
+        test_limiter.check_rate_limit("user:user_alpha", TIER_ADVISOR)
+
+    # User 1's next request from shared_ip is rejected with 429
+    from unittest.mock import patch
+    with patch("backend.api.advisor.call_gemini_advisor", return_value="OK"):
+        resp_user1 = client.post(
+            "/api/v1/advisor/chat",
+            json={
+                "product_data": {"product_name": "Test Snack", "nutrition": {}, "additives": []},
+                "user_guardrails": {"weight_kg": 65.0},
+                "user_message": "Is this safe?",
+            },
+            headers={"X-Forwarded-For": shared_ip, "X-User-Id": "user_alpha"},
+        )
+        assert resp_user1.status_code == 429
+
+        # User 2 from the exact SAME shared_ip has full quota and succeeds
+        resp_user2 = client.post(
+            "/api/v1/advisor/chat",
+            json={
+                "product_data": {"product_name": "Test Snack", "nutrition": {}, "additives": []},
+                "user_guardrails": {"weight_kg": 65.0},
+                "user_message": "Is this safe?",
+            },
+            headers={"X-Forwarded-For": shared_ip, "X-User-Id": "user_beta"},
+        )
+        assert resp_user2.status_code == 200
+        assert resp_user2.headers["X-RateLimit-Limit"] == "4"
+        assert resp_user2.headers["X-RateLimit-Remaining"] == "3"
 
 
 def test_health_check_is_always_exempt():
