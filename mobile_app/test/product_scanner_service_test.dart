@@ -226,7 +226,7 @@ void main() {
       expect(result.safePortionGrams, greaterThan(0));
     });
 
-    test('throws FoodWebExtractionException when food web URL is unreachable', () async {
+    test('falls forward to PromotionalQrContextException when web URL has no nutrition facts', () async {
       final mockClient = MockClient((request) async => http.Response('Network Error', 500));
       final service = ProductScannerService(httpClient: mockClient);
 
@@ -235,8 +235,200 @@ void main() {
           rawScan: 'https://zeptonow.com/pn/broken-link/p/111',
           userProfile: defaultUser,
         ),
-        throwsA(isA<FoodWebExtractionException>()),
+        throwsA(isA<PromotionalQrContextException>().having(
+          (e) => e.message,
+          'message',
+          contains('Point camera at the back nutrition table'),
+        )),
       );
+    });
+
+    test('unrollUrlAndExtractGtin extracts GTIN from URL queries and handles leading zero normalization', () async {
+      final service = ProductScannerService();
+
+      final gtin1 = await service.unrollUrlAndExtractGtin('https://qrs.ly/spice?gtin=08901234567890');
+      expect(gtin1, '8901234567890');
+
+      final gtin2 = await service.unrollUrlAndExtractGtin('https://id.gs1.org/01/08901030383786');
+      expect(gtin2, '8901030383786');
+    });
+
+    test('cleanProductQuery removes promotional and recipe noise words', () {
+      expect(
+        ProductScannerService.cleanProductQuery('Catch Chana Masala Easy Recipe Step by Step'),
+        'Catch Chana Masala',
+      );
+
+      expect(
+        ProductScannerService.cleanProductQuery('Everest Pav Bhaji Masala Official Video in Hindi'),
+        'Everest Pav Bhaji Masala',
+      );
+
+      expect(
+        ProductScannerService.cleanProductQuery('MDH Deggi Mirch Promotional Contest Win QR'),
+        'MDH Deggi Mirch',
+      );
+    });
+
+    test('extractProductIdentityFromUrl extracts title and brand from YouTube oEmbed endpoint', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.host.contains('youtube.com') && request.url.path.contains('oembed')) {
+          return http.Response(
+            jsonEncode({
+              'author_name': 'Catch Foods',
+              'title': 'Catch Chana Masala Delicious Recipe Tutorial',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      final identity = await service.extractProductIdentityFromUrl('https://www.youtube.com/watch?v=catch123');
+
+      expect(identity, isNotNull);
+      expect(identity!['title'], 'Catch Chana Masala Delicious Recipe Tutorial');
+      expect(identity['brand'], 'Catch Foods');
+    });
+
+    test('resolves promotional YouTube recipe QR via Open Food Facts India search API', () async {
+      final mockClient = MockClient((request) async {
+        final urlStr = request.url.toString();
+
+        // 1. YouTube oEmbed
+        if (urlStr.contains('youtube.com/oembed')) {
+          return http.Response(
+            jsonEncode({
+              'author_name': 'Catch Foods',
+              'title': 'Catch Chana Masala Authentic Recipe',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        // 2. Open Food Facts search API
+        if (urlStr.contains('openfoodfacts.org/cgi/search.pl')) {
+          return http.Response(
+            jsonEncode({
+              'count': 1,
+              'products': [
+                {
+                  'code': '8901234000999',
+                  'product_name': 'Catch Chana Masala Powder',
+                  'brands': 'Catch',
+                  'nutriments': {
+                    'energy-kcal_100g': 360.0,
+                    'sugars_100g': 4.5,
+                    'saturated-fat_100g': 2.0,
+                    'sodium_100g': 1.2,
+                    'proteins_100g': 12.0,
+                  },
+                  'ingredients_text': 'Coriander, Cumin, Dry Mango, Pomegranate seeds, Black Pepper, Salt',
+                  'allergens_tags': [],
+                }
+              ]
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        return http.Response('Not Found', 404);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      final result = await service.resolveScanInput(
+        rawScan: 'https://www.youtube.com/watch?v=chana_recipe',
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, 'Catch Chana Masala Powder');
+      expect(result.brandName, 'Catch');
+      expect(result.sugarGPer100g, 4.5);
+      expect(result.satFatGPer100g, 2.0);
+      expect(result.healthScore, greaterThan(0));
+    });
+
+    test('hands off promotional QR with live frame to Gemini Vision when OFF has no nutrition', () async {
+      final mockGeminiResponse = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'product_name': 'Catch Chana Masala',
+                    'brand_name': 'Catch',
+                    'category': 'Spices & Seasonings',
+                    'serving_size_g': 10.0,
+                    'pack_weight_g': 100.0,
+                    'nutrition': {
+                      'energy_kj': 1500.0,
+                      'sugar_g_per_100g': 4.0,
+                      'sat_fat_g_per_100g': 1.5,
+                      'sodium_mg_per_100g': 800.0,
+                      'protein_g': 11.0,
+                      'fiber_g': 5.0,
+                    },
+                    'ingredients': ['Coriander', 'Pomegranate seeds', 'Cumin', 'Dry Mango', 'Salt'],
+                    'additives': [],
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        final urlStr = request.url.toString();
+        // YouTube oEmbed
+        if (urlStr.contains('youtube.com/oembed')) {
+          return http.Response(
+            jsonEncode({
+              'author_name': 'Catch Spices',
+              'title': 'Catch Chana Masala Recipe Video',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        // OFF search returns empty
+        if (urlStr.contains('openfoodfacts.org/cgi/search.pl')) {
+          return http.Response(
+            jsonEncode({'count': 0, 'products': []}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        // Gemini Vision API responds
+        if (urlStr.contains('generativelanguage.googleapis.com')) {
+          return http.Response(
+            jsonEncode(mockGeminiResponse),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        return http.Response('Not Found', 404);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      final dummyFrame = List<int>.generate(150, (i) => i % 255);
+
+      final result = await service.resolveScanInput(
+        rawScan: 'https://youtu.be/catch_chana_promo',
+        userProfile: defaultUser,
+        frameImage: dummyFrame,
+      );
+
+      expect(result.productName, 'Catch Chana Masala');
+      expect(result.brandName, 'Catch');
+      expect(result.sugarGPer100g, 4.0);
+      expect(result.satFatGPer100g, 1.5);
     });
 
     test('resolves real product (MTR Badam Drink Mix) from multi-angle vision frames via Gemini Vision', () async {

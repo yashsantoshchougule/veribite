@@ -51,6 +51,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   bool _isSheetOpen = false;
   String? _lastDismissedPayload;
   DateTime? _lastDismissedTime;
+  Timer? _qrDebounceTimer;
+  String? _pendingQrPayload;
+  List<int>? _pendingQrFrame;
+  String? _activeScanningStatus;
 
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
@@ -80,6 +84,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       cameraResolution: const Size(1920, 1080),
       formats: const [BarcodeFormat.all],
       autoZoom: true,
+      returnImage: true,
     );
 
     if (_profile == null && widget.userId != null) {
@@ -97,6 +102,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   @override
   void dispose() {
+    _qrDebounceTimer?.cancel();
     _zoomOverlayTimer?.cancel();
     _zoomThrottleTimer?.cancel();
     _focusResetTimer?.cancel();
@@ -111,24 +117,100 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   void _handleBarcodeCapture(BarcodeCapture capture) {
     if (_isProcessingScan || _isSheetOpen) return;
 
-    for (final barcode in capture.barcodes) {
-      final rawVal = barcode.rawValue;
-      if (rawVal != null && rawVal.trim().isNotEmpty) {
-        final trimmed = rawVal.trim();
-        // Debounce: prevent re-triggering the same payload within 2.5s of dismissal
-        if (_lastDismissedPayload != null &&
-            _lastDismissedTime != null &&
-            trimmed == _lastDismissedPayload &&
-            DateTime.now().difference(_lastDismissedTime!) < const Duration(milliseconds: 2500)) {
-          return;
-        }
-        _onBarcodeDetected(trimmed);
+    Barcode? oneDBarcode;
+    Barcode? qrBarcode;
+
+    for (final b in capture.barcodes) {
+      final raw = b.rawValue?.trim();
+      if (raw == null || raw.isEmpty) continue;
+
+      if (b.format == BarcodeFormat.ean13 ||
+          b.format == BarcodeFormat.ean8 ||
+          b.format == BarcodeFormat.upcA ||
+          b.format == BarcodeFormat.upcE ||
+          RegExp(r'^\d{8,14}$').hasMatch(raw)) {
+        oneDBarcode = b;
         break;
+      } else if (b.format == BarcodeFormat.qrCode ||
+          raw.startsWith('http://') ||
+          raw.startsWith('https://') ||
+          raw.startsWith('{')) {
+        qrBarcode ??= b;
       }
+    }
+
+    // STAGE 1 PRIORITY: 1D product barcode processes IMMEDIATELY, canceling any pending QR debounce
+    if (oneDBarcode != null) {
+      _qrDebounceTimer?.cancel();
+      _qrDebounceTimer = null;
+      _pendingQrPayload = null;
+      _pendingQrFrame = null;
+
+      final trimmed = oneDBarcode.rawValue!.trim();
+      if (_lastDismissedPayload != null &&
+          _lastDismissedTime != null &&
+          trimmed == _lastDismissedPayload &&
+          DateTime.now().difference(_lastDismissedTime!) < const Duration(milliseconds: 2500)) {
+        return;
+      }
+      _onBarcodeDetected(trimmed);
+      return;
+    }
+
+    // If only a QR code is detected:
+    if (qrBarcode != null) {
+      final trimmed = qrBarcode.rawValue!.trim();
+
+      // Immediately reject non-web QR payloads (e.g. upi://, WIFI:, tel:, mailto:, vCard) without debounce
+      if (trimmed.startsWith('upi:') ||
+          trimmed.startsWith('wifi:') ||
+          trimmed.startsWith('WIFI:') ||
+          trimmed.startsWith('tel:') ||
+          trimmed.startsWith('mailto:') ||
+          trimmed.startsWith('begin:vcard') ||
+          trimmed.startsWith('BEGIN:VCARD')) {
+        _qrDebounceTimer?.cancel();
+        _qrDebounceTimer = null;
+        _pendingQrPayload = null;
+        _pendingQrFrame = null;
+        _onBarcodeDetected(trimmed);
+        return;
+      }
+
+      // Check 2.5s dismissal debounce
+      if (_lastDismissedPayload != null &&
+          _lastDismissedTime != null &&
+          trimmed == _lastDismissedPayload &&
+          DateTime.now().difference(_lastDismissedTime!) < const Duration(milliseconds: 2500)) {
+        return;
+      }
+
+      // If a QR debounce timer is already running: update frame if available and continue
+      if (_qrDebounceTimer != null && _qrDebounceTimer!.isActive) {
+        if (capture.image != null) {
+          _pendingQrFrame = capture.image;
+        }
+        return;
+      }
+
+      // Stage 1: Buffer QR payload & frame for 450ms while listening for 1D barcode
+      _pendingQrPayload = trimmed;
+      _pendingQrFrame = capture.image;
+
+      _qrDebounceTimer = Timer(const Duration(milliseconds: 450), () {
+        if (!mounted || _isProcessingScan || _isSheetOpen) return;
+        final payload = _pendingQrPayload;
+        final frame = _pendingQrFrame;
+        _pendingQrPayload = null;
+        _pendingQrFrame = null;
+        if (payload != null) {
+          _onBarcodeDetected(payload, frameImage: frame);
+        }
+      });
     }
   }
 
-  Future<void> _onBarcodeDetected(String rawBarcode) async {
+  Future<void> _onBarcodeDetected(String rawBarcode, {List<int>? frameImage}) async {
     if (!_isLiveScanMode) {
       await HapticFeedback.selectionClick();
       debugPrint('[Camera Test Mode] Barcode detected: $rawBarcode (Result report suppressed in test mode)');
@@ -148,10 +230,17 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       final resolvedProduct = await _productService.resolveScanInput(
         rawScan: rawBarcode,
         userProfile: activeProfile,
+        frameImage: frameImage,
+        onStatusUpdate: (msg) {
+          if (mounted) setState(() => _activeScanningStatus = msg);
+        },
       );
 
       if (!mounted) return;
       await _showScanResultReport(resolvedProduct, activeProfile);
+    } on PromotionalQrContextException catch (e) {
+      if (!mounted) return;
+      await _showPromotionalQrContextSheet(e);
     } on NonFoodScanException catch (e) {
       if (!mounted) return;
       await _showNonFoodDialog(e.message, rawBarcode);
@@ -189,7 +278,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isProcessingScan = false);
+        setState(() {
+          _isProcessingScan = false;
+          _activeScanningStatus = null;
+        });
       }
     }
   }
@@ -617,6 +709,150 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         try {
           await _scannerController.start();
         } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _showPromotionalQrContextSheet(PromotionalQrContextException exception) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    String? action;
+    try {
+      if (!mounted) return;
+      final displayTitle = [
+        if (exception.brandName != null && exception.brandName!.isNotEmpty) exception.brandName,
+        if (exception.productName != null && exception.productName!.isNotEmpty) exception.productName,
+      ].join(' ');
+
+      action = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F0FE),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFF4285F4).withValues(alpha: 0.3)),
+                  ),
+                  child: const Icon(Icons.menu_book_rounded, color: Color(0xFF1967D2), size: 32),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  displayTitle.isNotEmpty ? 'Detected $displayTitle' : 'Detected Recipe / Brand QR',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textObsidian,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  exception.message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: AppColors.textMutedMocha,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.of(ctx).pop('multi_angle'),
+                        icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                        label: const Text('Scan Backside Nutrition Label', style: TextStyle(fontWeight: FontWeight.w700)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4285F4),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.of(ctx).pop('macros'),
+                            icon: const Icon(Icons.tune_rounded, size: 18),
+                            label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.textObsidian,
+                              side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop('dismiss'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.textMutedMocha,
+                              side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: const Text('Back to Scanner', style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = exception.url;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      if (action == 'multi_angle') {
+        ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
+      } else {
+        ref.read(cameraScanNotifierProvider.notifier).reset();
+      }
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+        if (action == 'macros') {
+          _openMacroSliderSheet();
+        }
       }
     }
   }
@@ -1152,7 +1388,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       ),
                       child: Text(
                         _isProcessingScan
-                            ? 'Resolving product toxicology...'
+                            ? (_activeScanningStatus ?? 'Resolving product toxicology...')
                             : 'Tap barcode or ingredients to focus • Pinch to zoom',
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                         textAlign: TextAlign.center,
@@ -1365,6 +1601,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               label: const Text(
                 'Simulate Non-Food QR Scan',
                 style: TextStyle(color: AppColors.safetyRed, fontSize: 12.5),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _onBarcodeDetected('https://www.youtube.com/watch?v=everest_chole_recipe'),
+              icon: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF4285F4)),
+              label: const Text(
+                'Simulate Recipe QR Scan (Everest)',
+                style: TextStyle(color: Color(0xFF4285F4), fontSize: 12.5),
               ),
             ),
           ],

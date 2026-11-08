@@ -50,6 +50,28 @@ class VisionExtractionException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a packaging QR code points to a recipe video or promotional microsite
+/// where structured nutrition tables are absent, carrying extracted Brand and Product context
+/// so the camera can guide the user or pass the context to Vision OCR.
+class PromotionalQrContextException implements Exception {
+  final String url;
+  final String? brandName;
+  final String? productName;
+  final String message;
+  final bool isRecipeOrPromo;
+
+  PromotionalQrContextException({
+    required this.url,
+    this.brandName,
+    this.productName,
+    required this.message,
+    this.isRecipeOrPromo = true,
+  });
+
+  @override
+  String toString() => message;
+}
+
 /// Detailed result of a scanned food product resolved against databases and safety engines
 class ScannedProductResult {
   final String barcode;
@@ -136,10 +158,13 @@ class ProductScannerService {
   late final GeminiVisionService _visionService =
       _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
 
-  /// Resolve product by any scanned QR code payload, GS1 link, food web URL, or barcode string
+  /// Resolve product by any scanned QR code payload, GS1 link, food web URL, or barcode string.
+  /// Supports optional camera [frameImage] and intermediate [onStatusUpdate] callbacks.
   Future<ScannedProductResult> resolveScanInput({
     required String rawScan,
     required UserProfileModel userProfile,
+    List<int>? frameImage,
+    void Function(String message)? onStatusUpdate,
   }) async {
     final parsed = parseQrOrBarcode(rawScan);
 
@@ -157,9 +182,18 @@ class ProductScannerService {
       return _evaluateProduct(parsed.jsonData!, userProfile, barcode);
     }
 
-    // Tier 0.5: Food E-Commerce or Brand Web URL
-    if (parsed.type == QrScanType.foodWebUrl) {
-      return resolveFoodWebUrl(url: parsed.rawInput, userProfile: userProfile);
+    // Tier 0.5: Web URL (food e-commerce, GS1 link, promotional campaign, or YouTube recipe)
+    final isUrl = parsed.type == QrScanType.foodWebUrl ||
+        rawScan.startsWith('http://') ||
+        rawScan.startsWith('https://');
+
+    if (isUrl) {
+      return _resolveWebQrPipeline(
+        url: rawScan,
+        userProfile: userProfile,
+        frameImage: frameImage,
+        onStatusUpdate: onStatusUpdate,
+      );
     }
 
     if (parsed.type != QrScanType.barcode || parsed.barcode == null) {
@@ -169,6 +203,420 @@ class ProductScannerService {
     }
 
     return resolveBarcode(barcode: parsed.barcode!, userProfile: userProfile);
+  }
+
+  /// 4-Stage resolution pipeline for packaging web QR codes:
+  /// Stage 2: URL unrolling & GS1 GTIN extraction
+  /// Stage 3: Entity extraction & Open Food Facts search
+  /// Stage 4: Context-enriched Gemini Vision handoff
+  Future<ScannedProductResult> _resolveWebQrPipeline({
+    required String url,
+    required UserProfileModel userProfile,
+    List<int>? frameImage,
+    void Function(String message)? onStatusUpdate,
+  }) async {
+    onStatusUpdate?.call('Resolving packaging link...');
+
+    // 1. STAGE 2: URL Redirect Unrolling & GS1 India GTIN Extraction
+    final gtin = await unrollUrlAndExtractGtin(url);
+    if (gtin != null && gtin.isNotEmpty) {
+      onStatusUpdate?.call('Matched product barcode $gtin...');
+      try {
+        return await resolveBarcode(barcode: gtin, userProfile: userProfile);
+      } catch (e) {
+        debugPrint('[ProductScannerService] Extracted GTIN barcode lookup notice: $e');
+      }
+    }
+
+    // 2. Direct Web Nutrition Extraction (if the link is an e-commerce page or has nutrition tables)
+    try {
+      final directResult = await resolveFoodWebUrl(url: url, userProfile: userProfile);
+      return directResult;
+    } catch (_) {}
+
+    // 3. STAGE 3: Promotional Video & Recipe Microsite Entity Extraction
+    onStatusUpdate?.call('Analyzing packaging details...');
+    final identity = await extractProductIdentityFromUrl(url);
+    final rawTitle = identity?['title'] ?? '';
+    final brand = identity?['brand'] ?? '';
+    final cleanedQuery = cleanProductQuery(rawTitle.isNotEmpty ? '$brand $rawTitle' : brand);
+
+    if (cleanedQuery.length >= 3) {
+      onStatusUpdate?.call('Searching product catalog for $cleanedQuery...');
+      final offMatch = await queryOpenFoodFactsIndia(cleanedQuery);
+      if (offMatch != null) {
+        final barcodeKey = offMatch['barcode']?.toString() ?? url;
+        _writeThroughCache(offMatch);
+        return _evaluateProduct(offMatch, userProfile, barcodeKey);
+      }
+    }
+
+    // 4. STAGE 4: Context-Enriched Live Frame Handoff to Gemini Vision
+    if (frameImage != null && frameImage.length >= 50) {
+      onStatusUpdate?.call('Analyzing package photo with brand context...');
+      try {
+        final contextHint = cleanedQuery.isNotEmpty
+            ? 'Detected QR Brand/Product context: $cleanedQuery.'
+            : (brand.isNotEmpty ? 'Detected QR Brand: $brand.' : null);
+
+        final visionData = await _visionService.analyzeProductPhoto(
+          frames: [frameImage],
+          hintBarcode: contextHint,
+        );
+        if (visionData != null) {
+          final barcodeKey = visionData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
+          _writeThroughCache(visionData);
+          return _evaluateProduct(visionData, userProfile, barcodeKey);
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] Vision handoff notice: $e');
+      }
+    }
+
+    // If all stages fail to extract complete nutrition:
+    throw PromotionalQrContextException(
+      url: url,
+      brandName: brand.isNotEmpty ? brand : null,
+      productName: rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : null,
+      message: 'Detected ${brand.isNotEmpty ? "$brand " : ""}${rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : "Product"} Recipe QR — Point camera at the back nutrition table to complete analysis.',
+    );
+  }
+
+  /// Stage 2: Checks raw URL and performs lightweight HTTP GET unrolling to extract GS1 GTIN/EAN barcodes
+  Future<String?> unrollUrlAndExtractGtin(String url) async {
+    // 1. Direct pattern check in raw URL
+    final direct = extractGtinFromUrl(url);
+    if (direct != null) return direct;
+
+    final trimmed = url.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
+
+    try {
+      final uri = Uri.tryParse(trimmed);
+      if (uri == null) return null;
+
+      final request = http.Request('GET', uri)
+        ..followRedirects = true
+        ..maxRedirects = 5
+        ..headers['User-Agent'] =
+            'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 VeriBiteApp/1.0'
+        ..headers['Range'] = 'bytes=0-32768'
+        ..headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7';
+
+      final streamedResponse = await _httpClient.send(request).timeout(const Duration(seconds: 4));
+      final response = await http.Response.fromStream(streamedResponse);
+
+      // Check final redirected URL
+      final redirectedUrl = response.request?.url.toString() ?? '';
+      final redirectGtin = extractGtinFromUrl(redirectedUrl);
+      if (redirectGtin != null) return redirectGtin;
+
+      final body = response.body;
+      if (body.isNotEmpty) {
+        // Check JSON-LD / schema.org GTIN attributes
+        final gtinMatch = RegExp(
+          r'"(?:gtin13|gtin14|gtin8|gtin|barcode|sku)"\s*:\s*"?(\d{8,14})"?',
+          caseSensitive: false,
+        ).firstMatch(body);
+        if (gtinMatch != null) {
+          var code = gtinMatch.group(1)!;
+          if (code.length == 14 && code.startsWith('0')) {
+            code = code.substring(1);
+          }
+          final norm = validateAndNormalizeBarcode(code);
+          if (norm != null) return norm;
+          if (RegExp(r'^\d{8,14}$').hasMatch(code)) return code;
+        }
+
+        // Check for Indian GTIN barcode sequence (starts with 890 or 0890)
+        final indianMatch = RegExp(r'\b(0?890\d{9,10})\b').firstMatch(body);
+        if (indianMatch != null) {
+          var code = indianMatch.group(1)!;
+          if (code.length == 14 && code.startsWith('0')) {
+            code = code.substring(1);
+          }
+          final norm = validateAndNormalizeBarcode(code);
+          if (norm != null) return norm;
+        }
+      }
+    } catch (e) {
+      debugPrint('[ProductScannerService] URL redirect unrolling notice: $e');
+    }
+    return null;
+  }
+
+  /// Stage 3: Extracts product title and brand from YouTube oEmbed or webpage metadata
+  Future<Map<String, String>?> extractProductIdentityFromUrl(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return null;
+
+    // 1. YouTube recipe video links
+    if (isYouTubeUrl(trimmed)) {
+      try {
+        final oembedUri = Uri.parse('https://www.youtube.com/oembed?url=${Uri.encodeComponent(trimmed)}&format=json');
+        final response = await _httpClient.get(oembedUri, headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 3));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data is Map) {
+            final author = (data['author_name'] ?? '').toString().trim();
+            final title = (data['title'] ?? '').toString().trim();
+            return {
+              'brand': author,
+              'title': title,
+            };
+          }
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] YouTube oEmbed extraction notice: $e');
+      }
+    }
+
+    // 2. Brand promotional microsite or recipe webpage
+    try {
+      final uri = Uri.tryParse(trimmed);
+      if (uri != null) {
+        final response = await _httpClient.get(
+          uri,
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 VeriBiteApp/1.0',
+            'Range': 'bytes=0-32768',
+            'Accept': 'text/html,*/*',
+          },
+        ).timeout(const Duration(seconds: 3));
+
+        if (response.statusCode >= 200 && response.statusCode < 400) {
+          final html = response.body;
+
+          // OpenGraph & Meta title
+          String? title;
+          final ogTitle = RegExp(r'''<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
+          if (ogTitle != null) title = ogTitle.group(1);
+
+          if (title == null || title.isEmpty) {
+            final twTitle = RegExp(r'''<meta[^>]*name=["']twitter:title["'][^>]*content=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
+            if (twTitle != null) title = twTitle.group(1);
+          }
+
+          if (title == null || title.isEmpty) {
+            final tagTitle = RegExp(r'<title[^>]*>([^<]+)</title>', caseSensitive: false).firstMatch(html);
+            if (tagTitle != null) title = tagTitle.group(1);
+          }
+
+          // Brand detection from og:site_name or domain
+          String? brand;
+          final ogSite = RegExp(r'''<meta[^>]*property=["']og:site_name["'][^>]*content=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
+          if (ogSite != null) brand = ogSite.group(1);
+
+          if (brand == null || brand.isEmpty) {
+            final host = uri.host.toLowerCase();
+            if (host.contains('everest')) {
+              brand = 'Everest';
+            } else if (host.contains('catch')) {
+              brand = 'Catch';
+            } else if (host.contains('mdh')) {
+              brand = 'MDH';
+            } else if (host.contains('badshah')) {
+              brand = 'Badshah';
+            } else if (host.contains('suhana')) {
+              brand = 'Suhana';
+            } else if (host.contains('amul')) {
+              brand = 'Amul';
+            } else if (host.contains('mtr')) {
+              brand = 'MTR';
+            } else if (host.contains('haldiram')) {
+              brand = 'Haldiram\'s';
+            } else if (host.contains('britannia')) {
+              brand = 'Britannia';
+            } else if (host.contains('parle')) {
+              brand = 'Parle';
+            } else if (host.contains('nestle')) {
+              brand = 'Nestle';
+            }
+          }
+
+          if (title != null && title.isNotEmpty) {
+            return {
+              'brand': brand ?? 'Brand Verified',
+              'title': title.trim(),
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[ProductScannerService] Webpage entity extraction notice: $e');
+    }
+
+    // 3. Fallback: Parse URL slug
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null) {
+      final segments = uri.pathSegments
+          .where((s) => s.isNotEmpty && s != 'p' && s != 'product' && s != 'recipe' && s != 'recipes')
+          .toList();
+      if (segments.isNotEmpty) {
+        final slug = segments.last.replaceAll(RegExp(r'[-_]'), ' ').trim();
+        return {
+          'brand': uri.host.split('.').length > 2 ? uri.host.split('.')[1] : uri.host.split('.').first,
+          'title': slug,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /// Sanitizes product titles by stripping promotional and recipe filler words
+  static String cleanProductQuery(String rawTitle) {
+    if (rawTitle.trim().isEmpty) return '';
+
+    // Remove HTML entities
+    var clean = rawTitle
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ');
+
+    // Remove promotional & recipe filler words case-insensitively
+    const fillerWords = [
+      'how to make', 'step by step', 'official recipe', 'recipe video',
+      'recipe', 'recipes', 'official', 'video', 'promo', 'promotional',
+      'campaign', 'contest', 'win', 'scan', 'qr code', 'qr', 'welcome to',
+      'welcome', 'youtube', 'in hindi', 'in english', 'in tamil', 'in telugu',
+      'tasty', 'easy', 'authentic', 'delicious', 'special', 'quick',
+      'homemade', 'hotel style', 'restaurant style', 'dhaba style',
+      'best', 'ever', 'new', 'watch now', 'subscribe'
+    ];
+
+    for (final filler in fillerWords) {
+      clean = clean.replaceAll(RegExp(r'\b' + RegExp.escape(filler) + r'\b', caseSensitive: false), ' ');
+    }
+
+    // Remove separator pipes, hyphens, brackets, special punctuation
+    clean = clean.replaceAll(RegExp(r'[|•\-_—\[\]\(\)\{\}\*!#?]'), ' ');
+    // Collapse whitespace
+    clean = clean.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    return clean;
+  }
+
+  /// Queries Open Food Facts India Search API for a matching food product
+  Future<Map<String, dynamic>?> queryOpenFoodFactsIndia(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 3) return null;
+
+    try {
+      final searchUrl = Uri.parse(
+        'https://in.openfoodfacts.org/cgi/search.pl?search_terms=${Uri.encodeComponent(trimmed)}&search_simple=1&action=process&json=1&page_size=5&fields=code,product_name,brands,categories,serving_quantity,product_quantity,nutriments,additives_tags,ingredients_text,nova_group',
+      );
+
+      final response = await _httpClient.get(
+        searchUrl,
+        headers: {
+          'User-Agent': 'VeriBiteApp/1.0 (contact@veribite.app)',
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['products'] is List && (data['products'] as List).isNotEmpty) {
+          final products = data['products'] as List;
+
+          for (final item in products) {
+            if (item is Map<String, dynamic>) {
+              final nutriments = (item['nutriments'] as Map<String, dynamic>?) ?? {};
+              final hasNutrition = nutriments.containsKey('energy-kcal_100g') ||
+                  nutriments.containsKey('energy-kj_100g') ||
+                  nutriments.containsKey('sugars_100g');
+              final hasIngredients = (item['ingredients_text']?.toString().trim().isNotEmpty ?? false);
+
+              if (hasNutrition || hasIngredients) {
+                return _mapOffProductToVeribiteFormat(item, fallbackQuery: trimmed);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[ProductScannerService] Open Food Facts India query notice: $e');
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _mapOffProductToVeribiteFormat(
+    Map<String, dynamic> p, {
+    required String fallbackQuery,
+  }) {
+    final barcode = p['code']?.toString() ?? 'search_${DateTime.now().millisecondsSinceEpoch}';
+    final name = p['product_name']?.toString().trim().isNotEmpty == true
+        ? p['product_name'].toString().trim()
+        : fallbackQuery;
+    final brand = p['brands']?.toString().trim().isNotEmpty == true
+        ? p['brands'].toString().trim()
+        : 'Brand Verified';
+    final category = p['categories']?.toString().split(',').first.trim().isNotEmpty == true
+        ? p['categories'].toString().split(',').first.trim()
+        : 'Packaged Food';
+
+    final nutriments = (p['nutriments'] as Map<String, dynamic>?) ?? {};
+    final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ?? 0.0;
+    final satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ?? 0.0;
+
+    double sodium = 0.0;
+    if (nutriments['sodium_100g'] != null) {
+      sodium = (nutriments['sodium_100g'] as num).toDouble() * 1000.0;
+    } else if (nutriments['salt_100g'] != null) {
+      sodium = (nutriments['salt_100g'] as num).toDouble() * 400.0;
+    }
+
+    final energyKj = (nutriments['energy-kj_100g'] as num?)?.toDouble() ??
+        ((nutriments['energy-kcal_100g'] as num?)?.toDouble() ?? 100.0) * 4.184;
+
+    final servingG = (p['serving_quantity'] as num?)?.toDouble() ?? 30.0;
+    final packG = (p['product_quantity'] as num?)?.toDouble() ?? (servingG * 3.0);
+
+    // Extract additives
+    final additivesList = <Map<String, dynamic>>[];
+    final tags = (p['additives_tags'] as List?) ?? [];
+    for (final tag in tags) {
+      final cleanTag = tag.toString().replaceAll(RegExp(r'^en:'), '').toUpperCase();
+      final insNumber = cleanTag.replaceAll(RegExp(r'[^0-9]'), '');
+      additivesList.add({
+        'ins_code': insNumber.isNotEmpty ? insNumber : cleanTag,
+        'primary_name': cleanTag,
+        'risk_tier': 'GREEN',
+      });
+    }
+
+    // Extract ingredients
+    final ingredientsRaw = p['ingredients_text']?.toString() ?? '';
+    final ingredientsList = ingredientsRaw.isNotEmpty
+        ? ingredientsRaw.split(RegExp(r'[,;]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList()
+        : ['Natural Spices & Food Ingredients'];
+
+    return {
+      'barcode': barcode,
+      'product_name': name,
+      'brand_name': brand,
+      'category': category,
+      'serving_size_g': servingG,
+      'pack_weight_g': packG,
+      'piece_weight_g': null,
+      'health_score': 65,
+      'nova_grade': (p['nova_group'] as num?)?.toInt() ?? 3,
+      'red_cap_triggered': 0,
+      'nutrition_json': jsonEncode({
+        'energy_kj': energyKj,
+        'sugar_g_per_100g': sugars,
+        'sat_fat_g_per_100g': satFat,
+        'sodium_mg_per_100g': sodium,
+        'protein_g': (nutriments['proteins_100g'] as num?)?.toDouble() ?? 2.0,
+        'fiber_g': (nutriments['fiber_100g'] as num?)?.toDouble() ?? 1.0,
+        'fruit_veg_nut_pct': 0.0,
+      }),
+      'additives_json': jsonEncode(additivesList),
+      'ingredients_json': jsonEncode(ingredientsList),
+    };
   }
 
   /// Resolves a product directly from a food e-commerce or brand product web page

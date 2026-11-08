@@ -91,7 +91,6 @@ bool isKnownNonFood(String input) {
     'twitter.com',
     'x.com',
     'linkedin.com',
-    'youtube.com',
     't.me',
     'telegram.me',
     'paytm',
@@ -265,6 +264,71 @@ bool isFoodWebUrl(String input) {
   return false;
 }
 
+/// Checks if a URL string contains a GS1 GTIN, path pattern, query parameter,
+/// or Indian barcode sequence, normalizing 14-digit GTINs starting with 0890 to 13-digit EAN-13.
+String? extractGtinFromUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return null;
+
+  // 1. GS1 Digital Link & standard path patterns: /01/{8-14 digits}, /gtin/{8-14 digits}, /ean/{8-14 digits}, /barcode/{8-14 digits}
+  final pathMatch = RegExp(r'/(?:01|gtin|ean|barcode)/(\d{8,14})', caseSensitive: false).firstMatch(trimmed);
+  if (pathMatch != null) {
+    var code = pathMatch.group(1)!;
+    if (code.length == 14 && code.startsWith('0')) {
+      code = code.substring(1);
+    }
+    final normalized = validateAndNormalizeBarcode(code) ?? code;
+    return normalized;
+  }
+
+  // 2. Open Food Facts URL pattern: /product/{8-14 digits}
+  final offMatch = RegExp(r'/product/(\d{8,14})', caseSensitive: false).firstMatch(trimmed);
+  if (offMatch != null) {
+    var code = offMatch.group(1)!;
+    if (code.length == 14 && code.startsWith('0')) {
+      code = code.substring(1);
+    }
+    final normalized = validateAndNormalizeBarcode(code) ?? code;
+    return normalized;
+  }
+
+  // 3. Query parameters: gtin, ean, barcode, upc, sku, id, code
+  final uri = Uri.tryParse(trimmed);
+  if (uri != null && uri.hasQuery) {
+    final queryParams = uri.queryParameters;
+    for (final key in ['gtin', 'ean', 'barcode', 'upc', 'sku', 'code', 'id']) {
+      if (queryParams.containsKey(key)) {
+        var val = queryParams[key]!.trim();
+        if (val.length == 14 && val.startsWith('0')) {
+          val = val.substring(1);
+        }
+        final normalized = validateAndNormalizeBarcode(val);
+        if (normalized != null) return normalized;
+        if (RegExp(r'^\d{8,14}$').hasMatch(val)) return val;
+      }
+    }
+  }
+
+  // 4. Indian 13- or 14-digit barcode pattern (starting with 890 or 0890) embedded in URL
+  final indianMatch = RegExp(r'\b(0?890\d{9,10})\b').firstMatch(trimmed);
+  if (indianMatch != null) {
+    var code = indianMatch.group(1)!;
+    if (code.length == 14 && code.startsWith('0')) {
+      code = code.substring(1);
+    }
+    final normalized = validateAndNormalizeBarcode(code) ?? code;
+    return normalized;
+  }
+
+  return null;
+}
+
+/// Checks if the URL points to YouTube or YouTube Shorts / Mobile
+bool isYouTubeUrl(String url) {
+  final lower = url.toLowerCase().trim();
+  return lower.contains('youtube.com') || lower.contains('youtu.be');
+}
+
 /// Parses a scanned QR code or barcode string into a structured QrScanResult.
 QrScanResult parseQrOrBarcode(String? rawInput) {
   if (rawInput == null || rawInput.trim().isEmpty) {
@@ -315,50 +379,22 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
     } catch (_) {}
   }
 
-  // Tier 2: Check for GS1 Digital Link in URI (e.g. /01/08901030383786)
-  final gs1Match = RegExp(r'/01/(\d{12,14})').firstMatch(trimmed);
-  if (gs1Match != null) {
-    var gtin = gs1Match.group(1)!;
-    if (gtin.length == 14 && gtin.startsWith('0')) {
-      gtin = gtin.substring(1);
-    }
-    final normalized = validateAndNormalizeBarcode(gtin) ?? gtin;
+  // Tier 2: Check for GS1 Digital Link / GTIN in URL
+  final gtinFromUrl = extractGtinFromUrl(trimmed);
+  if (gtinFromUrl != null) {
     return QrScanResult(
       type: QrScanType.barcode,
-      barcode: normalized,
+      barcode: gtinFromUrl,
       rawInput: trimmed,
     );
   }
 
-  // Tier 3: Check for Open Food Facts URL (e.g. /product/3017620422003)
-  final offMatch = RegExp(r'/product/(\d{8,14})').firstMatch(trimmed);
-  if (offMatch != null) {
-    final code = offMatch.group(1)!;
-    final normalized = validateAndNormalizeBarcode(code) ?? code;
+  // Tier 3: YouTube Recipe / Promotional Video URL
+  if (isYouTubeUrl(trimmed)) {
     return QrScanResult(
-      type: QrScanType.barcode,
-      barcode: normalized,
+      type: QrScanType.foodWebUrl,
       rawInput: trimmed,
     );
-  }
-
-  // Tier 4: Check for URL with food query parameters (e.g. ?upc=... or ?barcode=...)
-  final uri = Uri.tryParse(trimmed);
-  if (uri != null && uri.hasQuery) {
-    final queryParams = uri.queryParameters;
-    for (final key in ['barcode', 'upc', 'gtin', 'ean', 'code', 'id']) {
-      if (queryParams.containsKey(key)) {
-        final val = queryParams[key]!;
-        final normalized = validateAndNormalizeBarcode(val);
-        if (normalized != null) {
-          return QrScanResult(
-            type: QrScanType.barcode,
-            barcode: normalized,
-            rawInput: trimmed,
-          );
-        }
-      }
-    }
   }
 
   // Tier 4.5: Check for food e-commerce, quick-commerce, or brand food web URLs

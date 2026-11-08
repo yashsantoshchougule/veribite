@@ -350,4 +350,43 @@ void main() {
     expect(find.textContaining('MTR Badam Drink Mix'), findsOneWidget);
     expect(find.textContaining('MTR'), findsWidgets);
   });
+
+  testWidgets('SmartCameraScreen simulated promotional QR scan surfaces context sheet and transitions to multi-angle mode', (tester) async {
+    final mockClient = MockClient((request) async {
+      return http.Response('Not Found', 404);
+    });
+    final customProductService = ProductScannerService(httpClient: mockClient);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(
+            useSimulatedFeed: true,
+            disableResultSheet: false,
+            productService: customProductService,
+          ),
+        ),
+      ),
+    );
+
+    // Tap Simulate Recipe QR Scan
+    final recipeBtn = find.text('Simulate Recipe QR Scan (Everest)');
+    expect(recipeBtn, findsOneWidget);
+
+    await tester.tap(recipeBtn);
+    await tester.pumpAndSettle();
+
+    // Verify context-aware promotional QR bottom sheet is displayed
+    expect(find.textContaining('Detected'), findsWidgets);
+    expect(find.text('Scan Backside Nutrition Label'), findsOneWidget);
+    expect(find.text('Enter Macros'), findsOneWidget);
+    expect(find.text('Back to Scanner'), findsOneWidget);
+
+    // Tap "Scan Backside Nutrition Label"
+    await tester.tap(find.text('Scan Backside Nutrition Label'));
+    await tester.pumpAndSettle();
+
+    // Verify sheet dismissed and switched to Curved Bottle / Multi-Angle mode
+    expect(find.text('Curved Bottle Multi-Angle Mode (0/4)'), findsOneWidget);
+  });
 }

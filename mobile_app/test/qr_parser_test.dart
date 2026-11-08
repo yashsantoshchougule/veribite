@@ -140,6 +140,42 @@ void main() {
       expect(res8.type, QrScanType.foodWebUrl);
       expect(res8.isNonFood, isFalse);
       expect(res8.isValid, isTrue);
+
+      // YouTube cooking & recipe video QR codes on Indian spice packaging
+      const ytUrl1 = 'https://www.youtube.com/watch?v=recipe123';
+      final resYt1 = parseQrOrBarcode(ytUrl1);
+      expect(resYt1.type, QrScanType.foodWebUrl);
+      expect(resYt1.isNonFood, isFalse);
+      expect(resYt1.isValid, isTrue);
+
+      const ytUrl2 = 'https://youtu.be/chole_masala_recipe';
+      final resYt2 = parseQrOrBarcode(ytUrl2);
+      expect(resYt2.type, QrScanType.foodWebUrl);
+      expect(resYt2.isNonFood, isFalse);
+      expect(resYt2.isValid, isTrue);
+    });
+
+    test('extractGtinFromUrl extracts and normalizes GTINs from various URL schemes', () {
+      // 1. GS1 standard digital link with 14-digit GTIN starting with leading 0
+      expect(extractGtinFromUrl('https://id.gs1.org/01/08901030383786?10=BATCH'), '8901030383786');
+
+      // 2. Path-based /gtin/ pattern
+      expect(extractGtinFromUrl('https://brand.com/gtin/8901234567890'), '8901234567890');
+
+      // 3. Query parameter gtin= with leading 0
+      expect(extractGtinFromUrl('https://qrs.ly/spice?gtin=08909876543210'), '8909876543210');
+
+      // 4. Query parameter ean=
+      expect(extractGtinFromUrl('https://qrs.ly/product?ean=8901112223334'), '8901112223334');
+
+      // 5. Query parameter barcode=
+      expect(extractGtinFromUrl('https://qrs.ly/lookup?barcode=8905556667778'), '8905556667778');
+
+      // 6. Indian 890 embedded in path slug
+      expect(extractGtinFromUrl('https://catchfoods.com/products/8901234567890/chana-masala'), '8901234567890');
+
+      // 7. Non-barcode URL returns null
+      expect(extractGtinFromUrl('https://everestspices.com/recipes/chole-gravy'), isNull);
     });
   });
 }
