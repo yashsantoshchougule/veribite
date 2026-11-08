@@ -3,27 +3,41 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/config/gemini_config.dart';
+import '../../../core/network/client_rate_limiter.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/advisor_chat_model.dart';
 import '../domain/advisor_rules.dart';
 
+/// Exception thrown when remote API signals HTTP 429 Too Many Requests
+class RateLimitException implements Exception {
+  final int retryAfterSeconds;
+  const RateLimitException([this.retryAfterSeconds = 15]);
+
+  @override
+  String toString() => 'RateLimitException: retry after $retryAfterSeconds seconds';
+}
+
 /// Application service connecting VeriBite to Google Gemini Live AI
 /// with Citation RAG grounding, strict domain & identity guardrails,
-/// backend FastAPI proxy support, and automatic offline factual fallback.
+/// backend FastAPI proxy support, client rate limiting, and automatic offline factual fallback.
 class AdvisorService {
   final http.Client _client;
   final String? customBaseUrl;
+  final ClientRateLimiter rateLimiter;
 
   AdvisorService({
     http.Client? client,
     this.customBaseUrl,
-  }) : _client = client ?? http.Client();
+    ClientRateLimiter? rateLimiter,
+  })  : _client = client ?? http.Client(),
+        rateLimiter = rateLimiter ?? ClientRateLimiter();
 
   /// Primary query method:
   /// 1. Enforces early domain boundary & identity guardrails.
-  /// 2. If a custom backend is configured, queries the backend endpoint.
-  /// 3. Tries direct Google Gemini Live REST API with multi-model failover.
-  /// 4. Seamlessly falls back to local offline factual regulatory engine.
+  /// 2. Enforces client-side rate limiting and anti-spam debouncing.
+  /// 3. If a custom backend is configured, queries the backend endpoint.
+  /// 4. Tries direct Google Gemini Live REST API with multi-model failover.
+  /// 5. Seamlessly falls back to local offline factual regulatory engine on 429/errors.
   Future<ChatMessage> askAdvisor({
     required String userMessage,
     ProductAdvisorContext? productContext,
@@ -44,6 +58,19 @@ class AdvisorService {
       );
     }
 
+    // Rate Limit Guard: client-side debounce and quota enforcement
+    if (!rateLimiter.canSendRequest()) {
+      final waitSec = rateLimiter.getRemainingCooldownSeconds();
+      return ChatMessage.advisor(
+        text: 'You are sending questions too quickly. Please wait ${waitSec}s before sending another request.\n\nIn the meantime, feel free to inspect the scientific food information on your screen!',
+        source: 'veribite_guardrail',
+      );
+    }
+    rateLimiter.recordRequest();
+
+    bool isRateLimited = false;
+    int retryAfter = 15;
+
     // 1. If custom backend is specified, attempt custom backend first
     if (customBaseUrl != null) {
       try {
@@ -53,13 +80,17 @@ class AdvisorService {
           userProfile: userProfile,
         );
         if (backendRes != null) return backendRes;
+      } on RateLimitException catch (e) {
+        isRateLimited = true;
+        retryAfter = e.retryAfterSeconds;
+        debugPrint('[AdvisorService] Backend proxy rate limited ($e).');
       } catch (e) {
         debugPrint('[AdvisorService] Custom backend proxy error ($e). Attempting direct Gemini.');
       }
     }
 
     // 2. Direct Google Gemini Live API Call
-    if (GeminiConfig.isConfigured) {
+    if (!isRateLimited && GeminiConfig.isConfigured) {
       try {
         final liveAiRes = await _askGeminiDirect(
           userMessage: userMessage,
@@ -67,13 +98,27 @@ class AdvisorService {
           userProfile: userProfile,
         );
         return liveAiRes;
+      } on RateLimitException catch (e) {
+        isRateLimited = true;
+        retryAfter = e.retryAfterSeconds;
+        debugPrint('[AdvisorService] Gemini direct API rate limited ($e).');
       } catch (e) {
         debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to offline engine.');
       }
     }
 
-    // 3. Offline Factual Regulatory Engine (Airplane mode / no internet)
-    return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
+    // 3. Offline Factual Regulatory Engine (Airplane mode, rate limit, or network fallback)
+    final fallback = _buildOfflineFactualFallback(userMessage, productContext, userProfile);
+    if (isRateLimited) {
+      return ChatMessage.advisor(
+        text: 'The AI service is currently experiencing high traffic (rate limit active, retry in ${retryAfter}s). Switching to our offline scientific database:\n\n${fallback.text}',
+        source: 'local_offline',
+        citations: fallback.citations,
+        safePortionGrams: fallback.safePortionGrams,
+        frequencySchedule: fallback.frequencySchedule,
+      );
+    }
+    return fallback;
   }
 
   /// Direct query to Google Gemini REST endpoint with strict System Rules & Citation RAG assembly
@@ -159,9 +204,17 @@ class AdvisorService {
               );
             }
           }
+        } else if (response.statusCode == 429) {
+          final retryAfterHeader = response.headers['retry-after'];
+          final retrySec = int.tryParse(retryAfterHeader ?? '') ?? 15;
+          rateLimiter.recordServer429(retrySec);
+          lastError = RateLimitException(retrySec);
+          break; // Stop immediately to protect remote quotas
         } else {
           lastError = Exception('Gemini model $model returned status ${response.statusCode}: ${response.body}');
         }
+      } on RateLimitException {
+        rethrow;
       } catch (e) {
         lastError = Exception('Gemini model $model request failed: $e');
       }
@@ -209,6 +262,17 @@ class AdvisorService {
     if (response.statusCode == 200) {
       final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       return ChatMessage.fromJson(data);
+    } else if (response.statusCode == 429) {
+      final retryAfterHeader = response.headers['retry-after'];
+      int retrySec = int.tryParse(retryAfterHeader ?? '') ?? 15;
+      try {
+        final bodyJson = jsonDecode(response.body) as Map<String, dynamic>;
+        if (bodyJson['retry_after'] is num) {
+          retrySec = (bodyJson['retry_after'] as num).toInt();
+        }
+      } catch (_) {}
+      rateLimiter.recordServer429(retrySec);
+      throw RateLimitException(retrySec);
     }
     return null;
   }

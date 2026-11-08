@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mobile_app/core/network/client_rate_limiter.dart';
 import 'package:mobile_app/features/advisor/application/advisor_service.dart';
 import 'package:mobile_app/features/advisor/domain/advisor_chat_model.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
@@ -254,6 +255,92 @@ void main() {
 
       expect(reply.safePortionGrams, isNull);
       expect(reply.frequencySchedule, isNull);
+    });
+
+    test('askAdvisor enforces client-side rate limit and returns guardrail cooldown message', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [{'text': 'Safe intake is 20g.'}]
+                }
+              }
+            ]
+          }),
+          200,
+        );
+      });
+
+      final customLimiter = ClientRateLimiter(
+        maxRequestsPerMinute: 1,
+        minimumInterval: const Duration(seconds: 10),
+      );
+      final service = AdvisorService(client: mockClient, rateLimiter: customLimiter);
+
+      // 1st request succeeds
+      final reply1 = await service.askAdvisor(
+        userMessage: 'Is sugar safe?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+      expect(reply1.source, 'gemini_3.5_flash');
+
+      // 2nd request immediately blocked by client limiter
+      final reply2 = await service.askAdvisor(
+        userMessage: 'Is sugar safe again?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+      expect(reply2.source, 'veribite_guardrail');
+      expect(reply2.text, contains('You are sending questions too quickly'));
+    });
+
+    test('askAdvisor handles HTTP 429 rate limit from Gemini and falls back to offline database', () async {
+      final rateLimitedClient = MockClient((request) async {
+        return http.Response(
+          '{"error": {"code": 429, "message": "Resource exhausted"}}',
+          429,
+          headers: {'retry-after': '20'},
+        );
+      });
+
+      final customLimiter = ClientRateLimiter(maxRequestsPerMinute: 20);
+      final service = AdvisorService(client: rateLimitedClient, rateLimiter: customLimiter);
+
+      final reply = await service.askAdvisor(
+        userMessage: 'What is safe salt dosage?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'local_offline');
+      expect(reply.text, contains('rate limit active'));
+      expect(customLimiter.canSendRequest(), isFalse);
+    });
+
+    test('askAdvisor handles HTTP 429 rate limit from backend proxy and falls back gracefully', () async {
+      final proxyRateLimitedClient = MockClient((request) async {
+        return http.Response(
+          '{"detail": "Rate limit exceeded for advisor tier", "retry_after": 25, "tier": "advisor"}',
+          429,
+          headers: {'retry-after': '25'},
+        );
+      });
+
+      final customLimiter = ClientRateLimiter(maxRequestsPerMinute: 20);
+      final service = AdvisorService(
+        client: proxyRateLimitedClient,
+        customBaseUrl: 'http://localhost:8000',
+        rateLimiter: customLimiter,
+      );
+
+      final reply = await service.askAdvisor(
+        userMessage: 'How much sugar can I eat?',
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'local_offline');
+      expect(reply.text, contains('rate limit active'));
+      expect(customLimiter.canSendRequest(), isFalse);
     });
   });
 }

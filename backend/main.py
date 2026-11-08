@@ -9,12 +9,16 @@ from backend.api.products import router as products_router
 from backend.api.vision import router as vision_router
 from backend.api.advisor import router as advisor_router
 from backend.api.auth import router as auth_router
+from backend.core.rate_limiter import RateLimitMiddleware
 
 app = FastAPI(
     title="Smart Packaged Product Scanner API",
     version="1.0.0",
     description="Backend services for barcode resolution, Gemini 2.5 Flash vision extraction, citation RAG, and Supabase auth"
 )
+
+# Enforce multi-tier sliding window rate limiting
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(products_router)
 app.include_router(vision_router)
