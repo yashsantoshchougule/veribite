@@ -13,6 +13,11 @@ void main() {
       limiter.reset();
     });
 
+    test('default instance sets maxRequestsPerMinute to 4 for AI advisor safety', () {
+      final defaultLimiter = ClientRateLimiter();
+      expect(defaultLimiter.maxRequestsPerMinute, equals(4));
+    });
+
     test('allows requests within limit and minimum interval', () {
       final t0 = DateTime(2026, 1, 1, 12, 0, 0);
 
@@ -78,3 +83,4 @@ void main() {
     });
   });
 }
+

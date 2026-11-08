@@ -12,7 +12,7 @@ class ClientRateLimiter {
   DateTime? _serverThrottledUntil;
 
   ClientRateLimiter({
-    this.maxRequestsPerMinute = 15,
+    this.maxRequestsPerMinute = 4,
     this.minimumInterval = Duration.zero,
   });
 

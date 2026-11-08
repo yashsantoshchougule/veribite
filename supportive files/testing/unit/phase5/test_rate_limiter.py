@@ -37,6 +37,8 @@ def test_tier_mapping_for_endpoints():
     assert get_tier_for_path("/openapi.json") == TIER_EXEMPT
 
     assert get_tier_for_path("/api/v1/advisor/chat") == TIER_ADVISOR
+    assert TIER_ADVISOR.max_requests == 4
+    assert TIER_ADVISOR.window_seconds == 60
     assert get_tier_for_path("/api/v1/scan/vision") == TIER_VISION
     assert get_tier_for_path("/api/v1/product/8901030000000") == TIER_PRODUCTS
     assert get_tier_for_path("/api/v1/auth/verify-token") == TIER_AUTH
@@ -168,3 +170,4 @@ def test_health_check_is_always_exempt():
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+

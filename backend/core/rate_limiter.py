@@ -1,7 +1,7 @@
 """Production-grade multi-tier sliding-window rate limiting engine for FastAPI.
 
 Provides token-bucket sliding-window rate tracking across distinct API tiers:
-- AI Advisor Chat (/api/v1/advisor/*): 15 req/min
+- AI Advisor Chat (/api/v1/advisor/*): 4 req/min
 - Cloud Vision OCR (/api/v1/scan/vision): 10 req/min
 - Product Barcode Resolution (/api/v1/product/*): 60 req/min
 - Authentication (/api/v1/auth/*): 20 req/min
@@ -37,7 +37,7 @@ class RateLimitTier:
 
 
 # Pre-defined rate limiting tiers
-TIER_ADVISOR = RateLimitTier(name="advisor", max_requests=15, window_seconds=60)
+TIER_ADVISOR = RateLimitTier(name="advisor", max_requests=4, window_seconds=60)
 TIER_VISION = RateLimitTier(name="vision", max_requests=10, window_seconds=60)
 TIER_PRODUCTS = RateLimitTier(name="products", max_requests=60, window_seconds=60)
 TIER_AUTH = RateLimitTier(name="auth", max_requests=20, window_seconds=60)
