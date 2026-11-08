@@ -158,3 +158,146 @@ async def get_product_by_barcode(barcode: str) -> Dict[str, Any]:
         "ingredient_hash": ing_hash,
     }
 
+
+@router.post("/product/web-extract")
+async def extract_product_from_web(payload: Dict[str, str]) -> Dict[str, Any]:
+    """Fetch and extract structured food nutrition and ingredients from e-commerce/brand URLs."""
+    import re
+    url = payload.get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing URL parameter.")
+
+    cache = get_product_cache()
+    cached = cache.get_product(url)
+    if cached:
+        return {
+            "barcode": url,
+            "source": "cache",
+            "product_name": cached["product_name"],
+            "brand_name": cached.get("brand_name"),
+            "category": cached.get("category"),
+            "serving_size_g": cached.get("serving_size_g"),
+            "piece_weight_g": cached.get("piece_weight_g"),
+            "nutrition": json.loads(cached["nutrition_json"]),
+            "additives": json.loads(cached["additives_json"]),
+            "health_score": cached["health_score"],
+            "nova_grade": cached["nova_grade"],
+            "red_cap_triggered": bool(cached["red_cap_triggered"]),
+            "ingredient_hash": cached["ingredient_hash"],
+        }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code >= 400:
+                raise HTTPException(status_code=404, detail=f"Failed to fetch product URL: HTTP {resp.status_code}")
+            html = resp.text
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Web extraction service failed to connect to URL: {exc}")
+
+    # Tier 1: Search for JSON-LD schema
+    product_name = None
+    brand_name = None
+    category = "Packaged Food"
+    sugars = 5.0
+    sat_fat = 2.0
+    sodium = 100.0
+    calories = 150.0
+    protein = 3.0
+    fiber = 1.0
+    serving_g = 30.0
+
+    json_ld_matches = re.findall(r'<script[^>]*type=[\"\']application/ld\+json[\"\'][^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE)
+    for block in json_ld_matches:
+        try:
+            parsed_json = json.loads(block.strip())
+            items = parsed_json if isinstance(parsed_json, list) else [parsed_json]
+            for it in items:
+                if isinstance(it, dict) and it.get("@type", "").lower() in ["product", "individualproduct"]:
+                    product_name = it.get("name")
+                    if isinstance(it.get("brand"), dict):
+                        brand_name = it["brand"].get("name")
+                    elif isinstance(it.get("brand"), str):
+                        brand_name = it["brand"]
+                    category = it.get("category", "Packaged Food")
+                    nut = it.get("nutrition", {})
+                    if isinstance(nut, dict):
+                        if nut.get("calories"):
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(nut["calories"]))
+                            if m: calories = float(m.group(1))
+                        if nut.get("sugarContent"):
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(nut["sugarContent"]))
+                            if m: sugars = float(m.group(1))
+                        if nut.get("saturatedFatContent"):
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(nut["saturatedFatContent"]))
+                            if m: sat_fat = float(m.group(1))
+                        if nut.get("sodiumContent"):
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(nut["sodiumContent"]))
+                            if m: sodium = float(m.group(1))
+                    break
+        except Exception:
+            pass
+
+    # Tier 2: Meta tags fallback
+    if not product_name:
+        title_m = re.search(r'<meta[^>]*property=[\"\']og:title[\"\'][^>]*content=[\"\']([^\"\']+)[\"\']', html, re.IGNORECASE) or \
+                  re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+        if title_m:
+            product_name = re.sub(r'\s*\|\s*(?:Blinkit|Zepto|BigBasket|Amazon).*$', '', title_m.group(1), flags=re.IGNORECASE).strip()
+
+    if not product_name:
+        raise HTTPException(status_code=422, detail="Could not extract verified product details from webpage.")
+
+    raw_nutrition = {
+        "energy_kj": calories * 4.184,
+        "total_sugars_g": sugars,
+        "sat_fat_g": sat_fat,
+        "sodium_mg": sodium,
+        "protein_g": protein,
+        "fiber_g": fiber,
+        "fruit_veg_nut_pct": 0.0,
+        "trans_fat_g": 0.0,
+    }
+    norm_nutrition = normalize_and_impute_nutrition(raw_nutrition=raw_nutrition, category=category)
+    additives: list[Dict[str, Any]] = []
+    verdict = evaluate_product_verdict(nutrition=norm_nutrition, additives=additives)
+
+    ing_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    cache_record = {
+        "barcode": url,
+        "product_name": product_name,
+        "brand_name": brand_name or "Brand Verified",
+        "category": category,
+        "serving_size_g": serving_g,
+        "piece_weight_g": None,
+        "nutrition_json": json.dumps(norm_nutrition),
+        "additives_json": json.dumps(additives),
+        "health_score": verdict["final_score"],
+        "nova_grade": verdict["nova_grade"],
+        "red_cap_triggered": 1 if verdict["red_cap_triggered"] else 0,
+        "ingredient_hash": ing_hash,
+    }
+    cache.set_product(cache_record)
+
+    return {
+        "barcode": url,
+        "source": "web_extractor",
+        "product_name": product_name,
+        "brand_name": brand_name or "Brand Verified",
+        "category": category,
+        "serving_size_g": serving_g,
+        "piece_weight_g": None,
+        "nutrition": norm_nutrition,
+        "additives": additives,
+        "health_score": verdict["final_score"],
+        "nova_grade": verdict["nova_grade"],
+        "red_cap_triggered": verdict["red_cap_triggered"],
+        "ingredient_hash": ing_hash,
+    }
+

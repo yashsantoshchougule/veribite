@@ -85,3 +85,48 @@ def test_tier1_openfoodfacts_enrichment_flow():
         assert data["red_cap_triggered"] is False
         assert mock_cache.set_product.called
 
+
+def test_tier1_web_extractor_flow():
+    mock_html = '''
+    <html>
+    <head>
+      <title>Amul Salted Butter 100g | Blinkit</title>
+      <script type="application/ld+json">
+      {
+        "@type": "Product",
+        "name": "Amul Salted Butter 100g",
+        "brand": {"name": "Amul"},
+        "category": "Dairy",
+        "nutrition": {
+          "calories": "720 kcal",
+          "sugarContent": "0 g",
+          "saturatedFatContent": "52 g",
+          "sodiumContent": "830 mg"
+        }
+      }
+      </script>
+    </head>
+    <body><h1>Amul Butter</h1></body>
+    </html>
+    '''
+    with patch("httpx.AsyncClient.get") as mock_get, \
+         patch("backend.api.products.get_product_cache") as mock_cache_getter:
+
+        mock_cache = MagicMock()
+        mock_cache.get_product.return_value = None
+        mock_cache_getter.return_value = mock_cache
+
+        mock_http_resp = MagicMock()
+        mock_http_resp.status_code = 200
+        mock_http_resp.text = mock_html
+        mock_get.return_value = mock_http_resp
+
+        response = client.post("/api/v1/product/web-extract", json={"url": "https://blinkit.com/prn/amul-butter/123"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source"] == "web_extractor"
+        assert "Amul" in data["product_name"]
+        assert data["brand_name"] == "Amul"
+        assert data["health_score"] > 0
+        assert mock_cache.set_product.called
+
