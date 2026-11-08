@@ -6,6 +6,27 @@ import '../../../core/scoring/dosage_engine.dart';
 import '../../../core/vision/barcode_scanner_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 
+/// Thrown when a scanned QR code belongs to electronics, laptop support, or non-food services
+class NonFoodScanException implements Exception {
+  final String message;
+  final String? domainOrType;
+
+  NonFoodScanException(this.message, {this.domainOrType});
+
+  @override
+  String toString() => message;
+}
+
+/// Thrown when a barcode is validly formatted but does not exist in any food database
+class ProductNotFoundException implements Exception {
+  final String barcode;
+
+  ProductNotFoundException(this.barcode);
+
+  @override
+  String toString() => 'Product with barcode $barcode not found in food database';
+}
+
 /// Detailed result of a scanned food product resolved against databases and safety engines
 class ScannedProductResult {
   final String barcode;
@@ -91,14 +112,27 @@ class ProductScannerService {
   }) async {
     final parsed = parseQrOrBarcode(rawScan);
 
+    // Guardrail 1: Explicit non-food QR codes (e.g. laptop WhatsApp support, electronics, general links)
+    if (parsed.isNonFood) {
+      throw NonFoodScanException(
+        'This QR code is for an electronic device or service (${parsed.nonFoodReason ?? "Non-food link"}), not a packaged food item.',
+        domainOrType: parsed.nonFoodReason,
+      );
+    }
+
     // Tier 0: Direct embedded JSON payload inside QR code
     if (parsed.type == QrScanType.productJson && parsed.jsonData != null) {
       final barcode = parsed.barcode ?? 'qr_json_${DateTime.now().millisecondsSinceEpoch}';
       return _evaluateProduct(parsed.jsonData!, userProfile, barcode);
     }
 
-    final barcode = parsed.barcode ?? rawScan.trim();
-    return resolveBarcode(barcode: barcode, userProfile: userProfile);
+    if (parsed.type != QrScanType.barcode || parsed.barcode == null) {
+      throw NonFoodScanException(
+        'This QR code does not contain a recognized packaged food barcode or nutrition profile.',
+      );
+    }
+
+    return resolveBarcode(barcode: parsed.barcode!, userProfile: userProfile);
   }
 
   /// Resolve product by barcode string and evaluate against user biometrics
@@ -140,8 +174,10 @@ class ProductScannerService {
       }
     }
 
-    // 4. Fallback to smart baseline product if completely uncatalogued
-    productData ??= _getGenericBaselineProduct(barcode);
+    // If product is not registered in any food database, do NOT invent fake food facts!
+    if (productData == null) {
+      throw ProductNotFoundException(barcode);
+    }
 
     return _evaluateProduct(productData, userProfile, barcode);
   }
@@ -578,35 +614,5 @@ class ProductScannerService {
       return catalog[barcode];
     }
     return null;
-  }
-
-  /// Generic safe baseline product for unknown scanned barcode
-  Map<String, dynamic> _getGenericBaselineProduct(String barcode) {
-    return {
-      'barcode': barcode,
-      'product_name': 'Packaged Snack Item',
-      'brand_name': 'Packaged Foods',
-      'category': 'Packaged Food',
-      'serving_size_g': 35.0,
-      'pack_weight_g': 70.0,
-      'piece_weight_g': null,
-      'health_score': 62,
-      'nova_grade': 3,
-      'red_cap_triggered': 0,
-      'nutrition_json': jsonEncode({
-        'energy_kj': 1800.0,
-        'sugar_g_per_100g': 14.0,
-        'sat_fat_g_per_100g': 5.5,
-        'sodium_mg_per_100g': 320.0,
-        'fiber_g': 2.0,
-        'protein_g': 5.0,
-        'fruit_veg_nut_pct': 0.0,
-      }),
-      'additives_json': jsonEncode([
-        {'ins_code': '322', 'primary_name': 'Lecithin', 'risk_tier': 'GREEN'},
-        {'ins_code': '500(ii)', 'primary_name': 'Sodium Bicarbonate', 'risk_tier': 'GREEN'},
-      ]),
-      'ingredients_json': jsonEncode(['Wheat Flour', 'Sugar', 'Vegetable Fat', 'Malt Extract']),
-    };
   }
 }

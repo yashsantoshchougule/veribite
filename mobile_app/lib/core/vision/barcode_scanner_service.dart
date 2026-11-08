@@ -7,6 +7,7 @@ import 'dart:convert';
 enum QrScanType {
   barcode,
   productJson,
+  nonFood,
   unknown,
 }
 
@@ -15,19 +16,22 @@ class QrScanResult {
   final QrScanType type;
   final String? barcode;
   final Map<String, dynamic>? jsonData;
+  final String? nonFoodReason;
   final String rawInput;
 
   const QrScanResult({
     required this.type,
     this.barcode,
     this.jsonData,
+    this.nonFoodReason,
     required this.rawInput,
   });
 
-  bool get isValid => type != QrScanType.unknown;
+  bool get isValid => type == QrScanType.barcode || type == QrScanType.productJson;
+  bool get isNonFood => type == QrScanType.nonFood;
 
   @override
-  String toString() => 'QrScanResult(type: $type, barcode: $barcode, hasJson: ${jsonData != null})';
+  String toString() => 'QrScanResult(type: $type, barcode: $barcode, nonFoodReason: $nonFoodReason)';
 }
 
 int calculateEan13CheckDigit(String digits12) {
@@ -48,14 +52,85 @@ int calculateEan8CheckDigit(String digits7) {
   return (10 - (s % 10)) % 10;
 }
 
+/// Detects if a scanned string or URL belongs to non-food domains (laptops, tech support, payments, socials)
+bool isKnownNonFood(String input) {
+  final lower = input.toLowerCase().trim();
+
+  // Non-food URL schemes
+  if (lower.startsWith('tel:') ||
+      lower.startsWith('mailto:') ||
+      lower.startsWith('smsto:') ||
+      lower.startsWith('wifi:') ||
+      lower.startsWith('upi:') ||
+      lower.startsWith('begin:vcard')) {
+    return true;
+  }
+
+  // Non-food hardware, tech support, social, or communication domains
+  const nonFoodDomains = [
+    'wa.me',
+    'whatsapp.com',
+    'hp.com',
+    'support.hp.com',
+    'dell.com',
+    'lenovo.com',
+    'apple.com',
+    'microsoft.com',
+    'asus.com',
+    'samsung.com',
+    'intel.com',
+    'amd.com',
+    'nvidia.com',
+    'instagram.com',
+    'facebook.com',
+    'twitter.com',
+    'x.com',
+    'linkedin.com',
+    'youtube.com',
+    't.me',
+    'telegram.me',
+    'paytm',
+    'phonepe',
+    'gpay',
+  ];
+
+  for (final domain in nonFoodDomains) {
+    if (lower.contains(domain)) return true;
+  }
+
+  // Check tech support or electronic device keywords in URL
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    const techKeywords = [
+      'support', 'warranty', 'feedback', 'service', 'driver',
+      'firmware', 'hardware', 'laptop', 'desktop', 'printer',
+      'electronics', 'device', 'manual', 'serial', 'troubleshoot'
+    ];
+    if (techKeywords.any((kw) => lower.contains(kw))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+String getNonFoodReason(String input) {
+  final lower = input.toLowerCase();
+  if (lower.contains('hp.com') || lower.contains('dell') || lower.contains('laptop') || lower.contains('hardware')) {
+    return 'Electronics / Laptop Support QR Code';
+  }
+  if (lower.contains('wa.me') || lower.contains('whatsapp')) {
+    return 'WhatsApp Support Link';
+  }
+  if (lower.startsWith('upi:') || lower.contains('paytm') || lower.contains('phonepe')) {
+    return 'Payment / UPI QR Code';
+  }
+  if (lower.startsWith('wifi:')) {
+    return 'Wi-Fi Network QR Code';
+  }
+  return 'Non-Food Link / Service';
+}
+
 /// Parses a scanned QR code or barcode string into a structured QrScanResult.
-/// Seamlessly handles:
-/// 1. Embedded JSON product payloads inside QR codes.
-/// 2. GS1 Digital Link URIs (e.g. https://id.gs1.org/01/08901030383786).
-/// 3. Open Food Facts product URLs (e.g. https://world.openfoodfacts.org/product/3017620422003).
-/// 4. SmartLabel / Brand QR URLs with query parameters (?upc=, ?gtin=, ?barcode=).
-/// 5. URL path segments containing product barcode digits.
-/// 6. Standard 1D barcode numbers (EAN-13, EAN-8, UPC-A).
 QrScanResult parseQrOrBarcode(String? rawInput) {
   if (rawInput == null || rawInput.trim().isEmpty) {
     return const QrScanResult(type: QrScanType.unknown, rawInput: '');
@@ -63,12 +138,20 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
 
   final trimmed = rawInput.trim();
 
+  // Tier 0: Check if it's a known non-food QR code (e.g. laptop WhatsApp support, Wi-Fi, payments)
+  if (isKnownNonFood(trimmed)) {
+    return QrScanResult(
+      type: QrScanType.nonFood,
+      rawInput: trimmed,
+      nonFoodReason: getNonFoodReason(trimmed),
+    );
+  }
+
   // Tier 1: Check for embedded JSON payload in QR code
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       final decoded = jsonDecode(trimmed);
       if (decoded is Map<String, dynamic>) {
-        // If it's a JSON containing product data
         final hasProductInfo = decoded.containsKey('product_name') ||
             decoded.containsKey('nutrition') ||
             decoded.containsKey('nutrition_json') ||
@@ -94,9 +177,7 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
           );
         }
       }
-    } catch (_) {
-      // Not valid JSON, continue with URI/barcode checks
-    }
+    } catch (_) {}
   }
 
   // Tier 2: Check for GS1 Digital Link in URI (e.g. /01/08901030383786)
@@ -126,7 +207,7 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
     );
   }
 
-  // Tier 4: Check for URL with query parameters (e.g. ?upc=... or ?barcode=...)
+  // Tier 4: Check for URL with food query parameters (e.g. ?upc=... or ?barcode=...)
   final uri = Uri.tryParse(trimmed);
   if (uri != null && uri.hasQuery) {
     final queryParams = uri.queryParameters;
@@ -145,24 +226,16 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
     }
   }
 
-  // Tier 5: Check URL path segments for barcode digits
-  if (uri != null && uri.pathSegments.isNotEmpty) {
-    for (final seg in uri.pathSegments) {
-      final digits = seg.replaceAll(RegExp(r'\D'), '');
-      if (digits.length >= 8 && digits.length <= 14) {
-        final normalized = validateAndNormalizeBarcode(digits);
-        if (normalized != null) {
-          return QrScanResult(
-            type: QrScanType.barcode,
-            barcode: normalized,
-            rawInput: trimmed,
-          );
-        }
-      }
-    }
+  // If it's a web URL (http/https) that didn't match any food patterns, mark as non-food!
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return QrScanResult(
+      type: QrScanType.nonFood,
+      rawInput: trimmed,
+      nonFoodReason: 'General Web Link',
+    );
   }
 
-  // Tier 6: Check standard 1D barcode digits
+  // Tier 5: Check standard 1D barcode digits
   final normalized = validateAndNormalizeBarcode(trimmed);
   if (normalized != null) {
     return QrScanResult(
@@ -172,7 +245,7 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
     );
   }
 
-  // Tier 7: If contains a clean run of 8-14 digits anywhere in text
+  // Tier 6: Clean numeric barcode string (8-14 digits)
   final rawDigitsMatch = RegExp(r'^\d{8,14}$').firstMatch(trimmed);
   if (rawDigitsMatch != null) {
     final candidate = rawDigitsMatch.group(0)!;

@@ -131,5 +131,46 @@ void main() {
 
       expect(result.isExceededBudget, isFalse);
     });
+
+    test('throws NonFoodScanException for non-food QR codes like laptop support or WhatsApp link', () async {
+      final service = ProductScannerService();
+
+      expect(
+        () => service.resolveScanInput(
+          rawScan: 'https://wa.me/912261014560',
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<NonFoodScanException>().having(
+          (e) => e.message,
+          'message',
+          contains('not a packaged food item'),
+        )),
+      );
+
+      expect(
+        () => service.resolveScanInput(
+          rawScan: 'https://support.hp.com/in-en',
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<NonFoodScanException>()),
+      );
+    });
+
+    test('throws ProductNotFoundException for uncatalogued barcodes instead of fabricating fake food', () async {
+      final mockClient = MockClient((request) async => http.Response('Not found', 404));
+      final service = ProductScannerService(httpClient: mockClient);
+
+      expect(
+        () => service.resolveScanInput(
+          rawScan: '9999999999999',
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<ProductNotFoundException>().having(
+          (e) => e.barcode,
+          'barcode',
+          '9999999999999',
+        )),
+      );
+    });
   });
 }

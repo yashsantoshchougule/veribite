@@ -74,5 +74,25 @@ void main() {
       expect(parseQrOrBarcode('   ').isValid, isFalse);
       expect(parseQrOrBarcode('hello world without any digits').isValid, isFalse);
     });
+
+    test('detects HP laptop and WhatsApp support QR codes as non-food payloads', () {
+      const hpWhatsApp = 'https://wa.me/912261014560?text=HP%20Victus%20Support';
+      final res1 = parseQrOrBarcode(hpWhatsApp);
+      expect(res1.isNonFood, isTrue);
+      expect(res1.isValid, isFalse);
+      expect(res1.nonFoodReason, contains('WhatsApp Support'));
+
+      const hpWeb = 'https://support.hp.com/in-en';
+      final res2 = parseQrOrBarcode(hpWeb);
+      expect(res2.isNonFood, isTrue);
+      expect(res2.isValid, isFalse);
+      expect(res2.nonFoodReason, contains('Electronics / Laptop Support'));
+
+      const upiQr = 'upi://pay?pa=merchant@upi&pn=RetailStore&am=100';
+      final res3 = parseQrOrBarcode(upiQr);
+      expect(res3.isNonFood, isTrue);
+      expect(res3.isValid, isFalse);
+    });
   });
 }
+

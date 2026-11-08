@@ -138,6 +138,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
       if (!mounted) return;
       await _showScanResultReport(resolvedProduct, activeProfile);
+    } on NonFoodScanException catch (e) {
+      if (!mounted) return;
+      _showNonFoodDialog(e.message);
+    } on ProductNotFoundException catch (e) {
+      if (!mounted) return;
+      _showProductNotFoundDialog(e.barcode);
     } catch (e, st) {
       debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
@@ -185,6 +191,168 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         await _scannerController.start();
       } catch (_) {}
     }
+  }
+
+  void _showNonFoodDialog(String message) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.cardSurface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.safetyRedBg,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.safetyRedBorder),
+              ),
+              child: const Icon(Icons.devices_other_rounded, color: AppColors.safetyRed, size: 32),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Not a Food Product',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textObsidian,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppColors.textMutedMocha,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryObsidian,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text('Scan Food Product', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showProductNotFoundDialog(String barcode) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.cardSurface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.sugarPeachBg,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.sugarPeachBorder),
+              ),
+              child: const Icon(Icons.search_off_rounded, color: AppColors.sugarPeachText, size: 32),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Product Not Found in Registry',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textObsidian,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Barcode "$barcode" was not found in our global food databases. If this is a real packaged food item, you can enter its nutritional values manually.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppColors.textMutedMocha,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _openMacroSliderSheet();
+                    },
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textObsidian,
+                      side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryObsidian,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('Try Again', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showScanResultSheet(ScannedProductResult product) {
