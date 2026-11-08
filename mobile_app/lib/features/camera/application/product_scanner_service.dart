@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/scoring/dosage_engine.dart';
+import '../../../core/vision/barcode_scanner_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 
 /// Detailed result of a scanned food product resolved against databases and safety engines
@@ -61,12 +63,15 @@ class ScannedProductResult {
   });
 }
 
-/// Service that queries Supabase Cloud, local SQLite, or built-in verified product registries,
+/// Service that queries Supabase Cloud, Open Food Facts live API, or built-in verified product registries,
 /// and computes personalized safe consumption ceilings and toxicology guardrails.
 class ProductScannerService {
   final SupabaseClient? _injectedClient;
+  final http.Client? _injectedHttpClient;
 
-  ProductScannerService({SupabaseClient? client}) : _injectedClient = client;
+  ProductScannerService({SupabaseClient? client, http.Client? httpClient})
+      : _injectedClient = client,
+        _injectedHttpClient = httpClient;
 
   SupabaseClient? get _client {
     if (_injectedClient != null) return _injectedClient;
@@ -77,7 +82,26 @@ class ProductScannerService {
     }
   }
 
-  /// Resolve product by barcode and evaluate against user biometrics
+  http.Client get _httpClient => _injectedHttpClient ?? http.Client();
+
+  /// Resolve product by any scanned QR code payload, GS1 link, or barcode string
+  Future<ScannedProductResult> resolveScanInput({
+    required String rawScan,
+    required UserProfileModel userProfile,
+  }) async {
+    final parsed = parseQrOrBarcode(rawScan);
+
+    // Tier 0: Direct embedded JSON payload inside QR code
+    if (parsed.type == QrScanType.productJson && parsed.jsonData != null) {
+      final barcode = parsed.barcode ?? 'qr_json_${DateTime.now().millisecondsSinceEpoch}';
+      return _evaluateProduct(parsed.jsonData!, userProfile, barcode);
+    }
+
+    final barcode = parsed.barcode ?? rawScan.trim();
+    return resolveBarcode(barcode: barcode, userProfile: userProfile);
+  }
+
+  /// Resolve product by barcode string and evaluate against user biometrics
   Future<ScannedProductResult> resolveBarcode({
     required String barcode,
     required UserProfileModel userProfile,
@@ -101,10 +125,107 @@ class ProductScannerService {
       debugPrint('ProductScannerService: Supabase query failed: $e');
     }
 
-    // 2. If not found in cloud, lookup in verified fallback registry or generate smart profile
-    productData ??= _getFallbackProduct(barcode);
+    // 2. Check built-in verified catalog (Instant 0ms resolution for verified products)
+    productData ??= _getCatalogProduct(barcode);
+
+    // 3. Try Open Food Facts Live Global API (v2) for uncatalogued products
+    if (productData == null) {
+      try {
+        final offData = await _fetchFromOpenFoodFacts(barcode);
+        if (offData != null) {
+          productData = offData;
+        }
+      } catch (e) {
+        debugPrint('ProductScannerService: Open Food Facts query notice: $e');
+      }
+    }
+
+    // 4. Fallback to smart baseline product if completely uncatalogued
+    productData ??= _getGenericBaselineProduct(barcode);
 
     return _evaluateProduct(productData, userProfile, barcode);
+  }
+
+  /// Live query to Open Food Facts v2 API
+  Future<Map<String, dynamic>?> _fetchFromOpenFoodFacts(String barcode) async {
+    final url = Uri.parse('https://world.openfoodfacts.org/api/v2/product/$barcode');
+    try {
+      final response = await _httpClient.get(
+        url,
+        headers: {
+          'User-Agent': 'VeriBiteApp/1.0 (contact@veribite.app)',
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['status'] == 1 && data['product'] is Map) {
+          final p = data['product'] as Map<String, dynamic>;
+          final nutriments = (p['nutriments'] as Map<String, dynamic>?) ?? {};
+
+          // Extract additives
+          final additivesList = <Map<String, dynamic>>[];
+          final tags = (p['additives_tags'] as List?) ?? (p['additives_original_tags'] as List?) ?? [];
+          for (final tag in tags) {
+            final cleanTag = tag.toString().replaceAll(RegExp(r'^en:'), '').toUpperCase();
+            final insNumber = cleanTag.replaceAll(RegExp(r'[^0-9]'), '');
+            additivesList.add({
+              'ins_code': insNumber.isNotEmpty ? insNumber : cleanTag,
+              'primary_name': cleanTag,
+              'risk_tier': 'GREEN',
+            });
+          }
+
+          // Impute nutrition values
+          final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ?? 0.0;
+          final satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ?? 0.0;
+          double sodium = 0.0;
+          if (nutriments['sodium_100g'] != null) {
+            sodium = (nutriments['sodium_100g'] as num).toDouble() * 1000.0;
+          } else if (nutriments['salt_100g'] != null) {
+            sodium = (nutriments['salt_100g'] as num).toDouble() * 400.0;
+          }
+          final energyKj = (nutriments['energy-kj_100g'] as num?)?.toDouble() ??
+              ((nutriments['energy-kcal_100g'] as num?)?.toDouble() ?? 100.0) * 4.184;
+
+          final servingG = (p['serving_quantity'] as num?)?.toDouble() ?? 30.0;
+          final packG = (p['product_quantity'] as num?)?.toDouble() ?? (servingG * 3.0);
+
+          return {
+            'barcode': barcode,
+            'product_name': p['product_name'] ?? p['product_name_en'] ?? 'Packaged Food Item',
+            'brand_name': p['brands'] ?? 'Brand Verified',
+            'category': p['categories'] ?? 'Packaged Food',
+            'serving_size_g': servingG,
+            'pack_weight_g': packG,
+            'piece_weight_g': null,
+            'health_score': 65,
+            'nova_grade': (p['nova_group'] as num?)?.toInt() ?? 3,
+            'red_cap_triggered': 0,
+            'nutrition_json': jsonEncode({
+              'energy_kj': energyKj,
+              'sugar_g_per_100g': sugars,
+              'sat_fat_g_per_100g': satFat,
+              'sodium_mg_per_100g': sodium,
+              'fiber_g': (nutriments['fiber_100g'] as num?)?.toDouble() ?? 1.5,
+              'protein_g': (nutriments['proteins_100g'] as num?)?.toDouble() ?? 3.0,
+              'fruit_veg_nut_pct': 0.0,
+            }),
+            'additives_json': jsonEncode(additivesList),
+            'ingredients_json': jsonEncode(
+              (p['ingredients_text'] ?? 'Wheat flour, Sugar, Vegetable fat')
+                  .toString()
+                  .split(RegExp(r'[,;]'))
+                  .map((e) => e.trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList(),
+            ),
+          };
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Resolve manual nutrition input (from Quick Macro Sliders)
@@ -150,9 +271,11 @@ class ProductScannerService {
     final servingSize = (raw['serving_size_g'] as num?)?.toDouble() ?? 30.0;
     final unitPieceWeight = (raw['piece_weight_g'] as num?)?.toDouble();
 
-    // Parse nutrition JSON
+    // Parse nutrition JSON or direct nutrition map
     Map<String, dynamic> nutritionMap = {};
-    if (raw['nutrition_json'] is String) {
+    if (raw['nutrition'] is Map) {
+      nutritionMap = Map<String, dynamic>.from(raw['nutrition'] as Map);
+    } else if (raw['nutrition_json'] is String) {
       try {
         nutritionMap = jsonDecode(raw['nutrition_json'] as String);
       } catch (_) {}
@@ -175,7 +298,6 @@ class ProductScannerService {
     } else if (nutritionMap['sodium_mg'] != null) {
       sodiumPer100 = (nutritionMap['sodium_mg'] as num).toDouble();
     } else if (nutritionMap['salt_g_per_100g'] != null) {
-      // 1g salt ≈ 400mg sodium
       sodiumPer100 = (nutritionMap['salt_g_per_100g'] as num).toDouble() * 400.0;
     } else if (nutritionMap['salt_g'] != null) {
       sodiumPer100 = (nutritionMap['salt_g'] as num).toDouble() * 400.0;
@@ -189,7 +311,9 @@ class ProductScannerService {
 
     // Parse additives
     List<Map<String, dynamic>> additivesList = [];
-    if (raw['additives_json'] is String) {
+    if (raw['additives'] is List) {
+      additivesList = (raw['additives'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } else if (raw['additives_json'] is String) {
       try {
         final decoded = jsonDecode(raw['additives_json'] as String);
         if (decoded is List) {
@@ -200,43 +324,63 @@ class ProductScannerService {
       additivesList = (raw['additives_json'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     }
 
-    // Check split sugars
-    final splitSugarsFound = <String>[];
-    if (raw['ingredients_json'] != null) {
-      List<String> ingredients = [];
-      if (raw['ingredients_json'] is String) {
-        try {
-          final decoded = jsonDecode(raw['ingredients_json'] as String);
-          if (decoded is List) ingredients = decoded.map((e) => e.toString()).toList();
-        } catch (_) {}
-      } else if (raw['ingredients_json'] is List) {
-        ingredients = (raw['ingredients_json'] as List).map((e) => e.toString()).toList();
-      }
+    // Parse ingredients to detect split sugars & whole food markers
+    List<String> ingredientsList = [];
+    if (raw['ingredients'] is List) {
+      ingredientsList = (raw['ingredients'] as List).map((e) => e.toString()).toList();
+    } else if (raw['ingredients_json'] is String) {
+      try {
+        final decoded = jsonDecode(raw['ingredients_json'] as String);
+        if (decoded is List) {
+          ingredientsList = decoded.map((e) => e.toString()).toList();
+        }
+      } catch (_) {}
+    } else if (raw['ingredients_json'] is List) {
+      ingredientsList = (raw['ingredients_json'] as List).map((e) => e.toString()).toList();
+    }
 
-      for (final ing in ingredients) {
-        final lower = ing.toLowerCase();
-        for (final kw in sweetenerKeywords) {
-          if (lower.contains(kw) && kw != 'sugar') {
-            splitSugarsFound.add(ing);
-            break;
-          }
+    // Check for split sugars
+    const knownSugarTerms = [
+      'sugar',
+      'invert sugar',
+      'glucose syrup',
+      'fructose',
+      'maltodextrin',
+      'corn syrup',
+      'dextrose',
+      'malt extract',
+      'honey',
+      'caramel',
+      'sucrose'
+    ];
+    final splitSugarsFound = <String>[];
+    for (final ing in ingredientsList) {
+      final lower = ing.toLowerCase();
+      for (final st in knownSugarTerms) {
+        if (lower.contains(st) && !splitSugarsFound.contains(st)) {
+          splitSugarsFound.add(st);
         }
       }
     }
 
-    // Calculate dosage ceiling
-    final dosage = calculatePrescribedDosage(
-      nutrition: nutritionMap,
+    // Dosage & Consumption Engine
+    final dosageResult = calculatePrescribedDosage(
+      nutrition: {
+        'sugar_g_per_100g': sugarPer100,
+        'sat_fat_g_per_100g': satFatPer100,
+        'sodium_mg_per_100g': sodiumPer100,
+      },
       additives: additivesList,
       userWeightKg: profile.weightKg,
       isChild: profile.isChild,
       unitPieceWeightG: unitPieceWeight,
     );
 
-    final safePortionGrams = (dosage['safe_portion_grams'] as num?)?.toInt() ?? 25;
-    final safePieces = dosage['safe_pieces'] as int?;
-    final limitingFactor = dosage['limiting_factor']?.toString() ?? 'Sugar';
-    final frequencySchedule = dosage['frequency_schedule']?.toString() ?? 'Moderate Intake';
+    final safePortionGrams = (dosageResult['safe_portion_grams'] as num?)?.toInt() ?? 30;
+    final limitingFactor = dosageResult['limiting_factor']?.toString() ?? 'Sugar';
+    final frequencySchedule = dosageResult['frequency_schedule']?.toString() ?? 'Max 2-3x per week';
+    int? safePieces = (dosageResult['safe_pieces'] as num?)?.toInt();
+    if (safePieces != null && safePieces < 1) safePieces = 1;
 
     // Health Score & Verdict
     int score = (raw['health_score'] as num?)?.toInt() ?? 65;
@@ -296,7 +440,7 @@ class ProductScannerService {
   }
 
   /// Built-in rich offline catalog for instant demo scans & offline fallback
-  Map<String, dynamic> _getFallbackProduct(String barcode) {
+  Map<String, dynamic>? _getCatalogProduct(String barcode) {
     final catalog = {
       // 1. Britannia Good Day Butter Cookies
       '8901063012117': {
@@ -401,13 +545,43 @@ class ProductScannerService {
         'additives_json': jsonEncode([]),
         'ingredients_json': jsonEncode(['Potato', 'Edible Vegetable Oil (Palmolein)', 'Iodized Salt']),
       },
+      // 5. Nutella Hazelnut Cocoa Spread
+      '3017620422003': {
+        'barcode': '3017620422003',
+        'product_name': 'Hazelnut Spread with Cocoa',
+        'brand_name': 'Nutella',
+        'category': 'Spreads',
+        'serving_size_g': 15.0,
+        'pack_weight_g': 350.0,
+        'piece_weight_g': null,
+        'health_score': 38,
+        'nova_grade': 4,
+        'red_cap_triggered': 1,
+        'nutrition_json': jsonEncode({
+          'energy_kj': 2252.0,
+          'sugar_g_per_100g': 56.3,
+          'sat_fat_g_per_100g': 10.6,
+          'sodium_mg_per_100g': 42.0,
+          'fiber_g': 3.0,
+          'protein_g': 6.3,
+          'fruit_veg_nut_pct': 13.0,
+        }),
+        'additives_json': jsonEncode([
+          {'ins_code': '322', 'primary_name': 'Lecithin (Soy)', 'risk_tier': 'GREEN'},
+          {'ins_code': 'vanillin', 'primary_name': 'Vanillin (Artificial Flavor)', 'risk_tier': 'CAUTION'},
+        ]),
+        'ingredients_json': jsonEncode(['Sugar', 'Palm Oil', 'Hazelnuts (13%)', 'Skimmed Milk Powder', 'Fat-Reduced Cocoa (7.4%)', 'Lecithin', 'Vanillin']),
+      },
     };
 
     if (catalog.containsKey(barcode)) {
-      return catalog[barcode]!;
+      return catalog[barcode];
     }
+    return null;
+  }
 
-    // Generic safe baseline product for unknown scanned barcode
+  /// Generic safe baseline product for unknown scanned barcode
+  Map<String, dynamic> _getGenericBaselineProduct(String barcode) {
     return {
       'barcode': barcode,
       'product_name': 'Packaged Snack Item',

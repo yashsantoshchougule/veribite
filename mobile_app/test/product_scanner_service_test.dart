@@ -1,0 +1,135 @@
+import 'dart:convert';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
+import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
+
+void main() {
+  group('ProductScannerService QR & Barcode Tests', () {
+    final defaultUser = UserProfileModel.defaults('test_user_1');
+    final childUser = UserProfileModel.defaults('child_user').copyWith(isChild: true, weightKg: 25.0);
+    final diabeticUser = UserProfileModel.defaults('diabetic_user').copyWith(isDiabetic: true);
+
+    test('resolves product from embedded JSON QR code with zero network latency', () async {
+      final service = ProductScannerService();
+
+      const qrPayload = '''
+{
+  "product_name": "Artisan Dark Chocolate",
+  "brand_name": "ChocoCraft",
+  "barcode": "8909999000111",
+  "category": "Confectionery",
+  "serving_size_g": 20.0,
+  "pack_weight_g": 100.0,
+  "piece_weight_g": 10.0,
+  "nutrition": {
+    "energy_kj": 2300.0,
+    "sugar_g_per_100g": 28.0,
+    "sat_fat_g_per_100g": 18.0,
+    "sodium_mg_per_100g": 15.0
+  },
+  "additives": [
+    {"ins_code": "322", "primary_name": "Soy Lecithin", "risk_tier": "GREEN"}
+  ],
+  "ingredients": ["Cocoa Mass", "Sugar", "Cocoa Butter", "Soy Lecithin"]
+}
+''';
+
+      final result = await service.resolveScanInput(
+        rawScan: qrPayload,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, 'Artisan Dark Chocolate');
+      expect(result.brandName, 'ChocoCraft');
+      expect(result.safePortionGrams, greaterThan(0));
+      expect(result.additives.length, 1);
+      expect(result.splitSugars, contains('sugar'));
+    });
+
+    test('resolves product from GS1 Digital Link QR URL', () async {
+      final service = ProductScannerService();
+
+      // Britannia Good Day Butter Cookies barcode in GS1 format
+      const gs1Qr = 'https://id.gs1.org/01/08901063012117?10=BATCH01';
+
+      final result = await service.resolveScanInput(
+        rawScan: gs1Qr,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, 'Good Day Butter Cookies');
+      expect(result.brandName, 'Britannia');
+      expect(result.healthScore, 48);
+      expect(result.safePieces, isNotNull);
+    });
+
+    test('resolves product from Open Food Facts QR URL with mock HTTP client', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('7622210408549')) {
+          return http.Response(
+            jsonEncode({
+              'status': 1,
+              'product': {
+                'product_name': 'Oreo Original Vanilla Cookies',
+                'brands': 'Mondelez',
+                'categories': 'Cookies',
+                'serving_quantity': 28.0,
+                'product_quantity': 154.0,
+                'nutriments': {
+                  'sugars_100g': 38.0,
+                  'saturated-fat_100g': 9.8,
+                  'sodium_100g': 0.19,
+                  'energy-kcal_100g': 471.0,
+                },
+                'additives_tags': ['en:e322', 'en:e500ii'],
+                'ingredients_text': 'Wheat flour, Sugar, Palm oil, Fat reduced cocoa powder',
+              }
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+
+      const offQrUrl = 'https://world.openfoodfacts.org/product/7622210408549';
+      final result = await service.resolveScanInput(
+        rawScan: offQrUrl,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, contains('Oreo'));
+      expect(result.brandName, 'Mondelez');
+      expect(result.sugarGPer100g, 38.0);
+      expect(result.safePortionGrams, lessThanOrEqualTo(150));
+    });
+
+    test('applies child safe limit constraints and flags high sugar budgets', () async {
+      final service = ProductScannerService();
+
+      // Maggi noodles (has Red-tier additive INS 635)
+      final result = await service.resolveScanInput(
+        rawScan: '8901058852339',
+        userProfile: childUser,
+      );
+
+      expect(result.redCapTriggered, isTrue);
+      expect(result.healthScore, lessThanOrEqualTo(39));
+      expect(result.verdictTag, contains('Toxic / Capped'));
+    });
+
+    test('evaluates diabetic profiles with stricter sugar threshold', () async {
+      final service = ProductScannerService();
+
+      final result = await service.resolveScanInput(
+        rawScan: '8901063012117',
+        userProfile: diabeticUser,
+      );
+
+      expect(result.isExceededBudget, isFalse);
+    });
+  });
+}

@@ -184,4 +184,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1000));
     expect(find.byIcon(Icons.zoom_in_rounded), findsNothing);
   });
+
+  testWidgets('SmartCameraScreen simulates product QR code scan and presents VerdictReportScreen with details', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true, disableResultSheet: false),
+        ),
+      ),
+    );
+
+    // Tap the QR simulation button
+    final qrButton = find.text('Simulate Product QR Scan');
+    expect(qrButton, findsOneWidget);
+
+    await tester.tap(qrButton);
+    await tester.pumpAndSettle();
+
+    // Verify VerdictReportScreen opens with parsed QR product details
+    expect(find.byType(VerdictReportScreen), findsOneWidget);
+    expect(find.text('Organic Almond Butter'), findsOneWidget);
+    expect(find.textContaining('NuttyCraft'), findsOneWidget);
+  });
 }

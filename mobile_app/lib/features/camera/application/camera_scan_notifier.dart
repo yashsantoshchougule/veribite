@@ -13,11 +13,11 @@ class CameraScanNotifier extends StateNotifier<CameraScanState> {
   CameraScanNotifier() : super(const CameraScanState());
 
   void onBarcodeScanned(String rawBarcode) {
-    final normalized = validateAndNormalizeBarcode(rawBarcode);
-    if (normalized != null) {
+    final parsed = parseQrOrBarcode(rawBarcode);
+    if (parsed.isValid) {
       state = state.copyWith(
         status: CameraScanStatus.barcodeLocked,
-        barcode: normalized,
+        barcode: parsed.barcode ?? parsed.rawInput,
       );
     }
   }

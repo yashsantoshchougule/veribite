@@ -130,19 +130,20 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
 
     try {
-      final resolvedProduct = await _productService.resolveBarcode(
-        barcode: rawBarcode,
+      unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
+      final resolvedProduct = await _productService.resolveScanInput(
+        rawScan: rawBarcode,
         userProfile: activeProfile,
       );
 
       if (!mounted) return;
       await _showScanResultReport(resolvedProduct, activeProfile);
-    } catch (e) {
-      debugPrint('Error resolving barcode $rawBarcode: $e');
+    } catch (e, st) {
+      debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not resolve product for barcode: $rawBarcode'),
+            content: Text('Could not resolve product for scan: $rawBarcode'),
             backgroundColor: AppColors.safetyRed,
           ),
         );
@@ -774,6 +775,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               label: const Text(
                 'Simulate Sample Scan (Good Day)',
                 style: TextStyle(color: AppColors.accentBronze, fontSize: 12.5),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _onBarcodeDetected('{"product_name": "Organic Almond Butter", "brand_name": "NuttyCraft", "serving_size_g": 32.0, "nutrition": {"sugar_g_per_100g": 4.0, "sat_fat_g_per_100g": 3.0, "sodium_mg_per_100g": 60.0}}'),
+              icon: const Icon(Icons.qr_code_2_rounded, size: 16, color: AppColors.safetyGreen),
+              label: const Text(
+                'Simulate Product QR Scan',
+                style: TextStyle(color: AppColors.safetyGreen, fontSize: 12.5),
               ),
             ),
           ],
