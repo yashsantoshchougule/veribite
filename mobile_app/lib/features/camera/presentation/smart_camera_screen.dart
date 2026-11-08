@@ -155,6 +155,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     } on ProductNotFoundException catch (e) {
       if (!mounted) return;
       await _showProductNotFoundDialog(e.barcode);
+    } on FoodWebExtractionException catch (e) {
+      if (!mounted) return;
+      await _showWebExtractionFailedDialog(e.url);
     } catch (e, st) {
       debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
@@ -403,6 +406,117 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
     } finally {
       _lastDismissedPayload = barcode;
+      _lastDismissedTime = DateTime.now();
+      _isSheetOpen = false;
+      ref.read(cameraScanNotifierProvider.notifier).reset();
+      if (mounted) {
+        try {
+          await _scannerController.start();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _showWebExtractionFailedDialog(String url) async {
+    if (_isSheetOpen) return;
+    _isSheetOpen = true;
+
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+
+    try {
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.sugarPeachBg,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.sugarPeachBorder),
+                ),
+                child: const Icon(Icons.link_off_rounded, color: AppColors.sugarPeachText, size: 32),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Web Link Found, Facts Missing',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textObsidian,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'We detected a food product link, but the webpage did not provide verifiable nutrition facts. You can snap a photo of the nutrition label or enter values manually.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: AppColors.textMutedMocha,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _openMacroSliderSheet();
+                      },
+                      icon: const Icon(Icons.tune_rounded, size: 18),
+                      label: const Text('Enter Macros', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textObsidian,
+                        side: const BorderSide(color: AppColors.cardBorder, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryObsidian,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: const Text('Back to Scanner', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      _lastDismissedPayload = url;
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();

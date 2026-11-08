@@ -93,6 +93,35 @@ void main() {
       expect(res3.isNonFood, isTrue);
       expect(res3.isValid, isFalse);
     });
+
+    test('classifies quick-commerce and brand food URLs as foodWebUrl', () {
+      const blinkitUrl = 'https://blinkit.com/prn/milky-mist-paneer-fresh/prid/12345';
+      final res1 = parseQrOrBarcode(blinkitUrl);
+      expect(res1.type, QrScanType.foodWebUrl);
+      expect(res1.isValid, isTrue);
+      expect(res1.isFoodWebUrl, isTrue);
+      expect(res1.isNonFood, isFalse);
+
+      const zeptoUrl = 'https://zeptonow.com/pn/amul-salted-butter-100g/p/456';
+      final res2 = parseQrOrBarcode(zeptoUrl);
+      expect(res2.type, QrScanType.foodWebUrl);
+      expect(res2.isValid, isTrue);
+
+      const bigBasketUrl = 'https://www.bigbasket.com/pd/12345/milky-mist-cooking-butter-500-g/';
+      final res3 = parseQrOrBarcode(bigBasketUrl);
+      expect(res3.type, QrScanType.foodWebUrl);
+      expect(res3.isValid, isTrue);
+
+      const brandUrl = 'https://www.thewholetruthfoods.com/products/dark-chocolate-peanut-butter';
+      final res4 = parseQrOrBarcode(brandUrl);
+      expect(res4.type, QrScanType.foodWebUrl);
+      expect(res4.isValid, isTrue);
+
+      const smartLabelUrl = 'https://smartlabel.org/products/heinz-tomato-ketchup';
+      final res5 = parseQrOrBarcode(smartLabelUrl);
+      expect(res5.type, QrScanType.foodWebUrl);
+      expect(res5.isValid, isTrue);
+    });
   });
 }
 

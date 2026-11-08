@@ -7,6 +7,7 @@ import 'dart:convert';
 enum QrScanType {
   barcode,
   productJson,
+  foodWebUrl,
   nonFood,
   unknown,
 }
@@ -27,8 +28,12 @@ class QrScanResult {
     required this.rawInput,
   });
 
-  bool get isValid => type == QrScanType.barcode || type == QrScanType.productJson;
+  bool get isValid =>
+      type == QrScanType.barcode ||
+      type == QrScanType.productJson ||
+      type == QrScanType.foodWebUrl;
   bool get isNonFood => type == QrScanType.nonFood;
+  bool get isFoodWebUrl => type == QrScanType.foodWebUrl;
 
   @override
   String toString() => 'QrScanResult(type: $type, barcode: $barcode, nonFoodReason: $nonFoodReason)';
@@ -130,6 +135,110 @@ String getNonFoodReason(String input) {
   return 'Non-Food Link / Service';
 }
 
+/// Detects if a scanned string or URL belongs to food e-commerce, quick-commerce, or brand food websites
+bool isFoodWebUrl(String input) {
+  final lower = input.toLowerCase().trim();
+  if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+    return false;
+  }
+
+  // If already identified as non-food hardware/support/payments, reject
+  if (isKnownNonFood(lower)) return false;
+
+  // 1. Quick-commerce, grocery platforms, and food delivery marketplaces
+  const foodCommerceDomains = [
+    'blinkit.com',
+    'zeptonow.com',
+    'bigbasket.com',
+    'instamart',
+    'swiggy.com/instamart',
+    'naturebasket.co.in',
+    'milkbasket.com',
+    'dmart.in',
+    'jiomart.com',
+    'countrydelight.in',
+    'freshtohome.com',
+    'licious.in',
+  ];
+
+  for (final domain in foodCommerceDomains) {
+    if (lower.contains(domain)) return true;
+  }
+
+  // 2. Verified Indian & Global Food & Beverage Brand Portals
+  const foodBrandDomains = [
+    'milkymist.com',
+    'amul.com',
+    'tataconsumerproducts.com',
+    'tatacommerce.com',
+    'thewholetruthfoods.com',
+    'yogabar.in',
+    'slurrpfarm.com',
+    'epigamia.com',
+    'trueelements.com',
+    'rawpressery.com',
+    'paperboatdrinks.com',
+    'motherdairy.com',
+    'akshayakalpa.org',
+    'dlecta.com',
+    'britannia.co.in',
+    'haldirams.com',
+    'itcportal.com',
+    'parleproducts.com',
+    'nestle.in',
+    'nestle.com',
+    'cadbury.com',
+    'mondelezinternational.com',
+    'kelloggs.com',
+    'unilever.com',
+  ];
+
+  for (final domain in foodBrandDomains) {
+    if (lower.contains(domain)) return true;
+  }
+
+  // 3. Nutrition disclosure and label standards
+  if (lower.contains('smartlabel.org') ||
+      lower.contains('smartlabel.labelinsight.com') ||
+      lower.contains('openfoodfacts.org')) {
+    return true;
+  }
+
+  // 4. Amazon & Flipkart grocery product links
+  if (lower.contains('amazon.') &&
+      (lower.contains('/dp/') ||
+          lower.contains('/gp/product/') ||
+          lower.contains('grocery') ||
+          lower.contains('pantry'))) {
+    return true;
+  }
+  if (lower.contains('flipkart.com') &&
+      (lower.contains('grocery') || lower.contains('food') || lower.contains('/p/'))) {
+    return true;
+  }
+
+  // 5. Product path indicators in URLs that mention food keywords
+  const foodKeywords = [
+    'food', 'snack', 'nutrition', 'grocery', 'biscuit', 'cookie',
+    'cheese', 'dairy', 'milk', 'paneer', 'butter', 'chocolate',
+    'chips', 'cereal', 'beverage', 'drink', 'sauce', 'noodle', 'oil'
+  ];
+
+  final hasProductPath = lower.contains('/product/') ||
+      lower.contains('/products/') ||
+      lower.contains('/prn/') ||
+      lower.contains('/pn/') ||
+      lower.contains('/pd/') ||
+      lower.contains('/item/') ||
+      lower.contains('/goods/');
+
+  if (hasProductPath && foodKeywords.any((kw) => lower.contains(kw))) {
+    return true;
+  }
+
+  return false;
+}
+
 /// Parses a scanned QR code or barcode string into a structured QrScanResult.
 QrScanResult parseQrOrBarcode(String? rawInput) {
   if (rawInput == null || rawInput.trim().isEmpty) {
@@ -224,6 +333,14 @@ QrScanResult parseQrOrBarcode(String? rawInput) {
         }
       }
     }
+  }
+
+  // Tier 4.5: Check for food e-commerce, quick-commerce, or brand food web URLs
+  if (isFoodWebUrl(trimmed)) {
+    return QrScanResult(
+      type: QrScanType.foodWebUrl,
+      rawInput: trimmed,
+    );
   }
 
   // If it's a web URL (http/https) that didn't match any food patterns, mark as non-food!

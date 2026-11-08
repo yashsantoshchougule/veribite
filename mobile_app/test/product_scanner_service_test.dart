@@ -172,5 +172,71 @@ void main() {
         )),
       );
     });
+
+    test('resolves food product from quick-commerce web URL with live HTML extraction', () async {
+      const mockHtml = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Milky Mist Cheddar Cheese Block 200g | Blinkit</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org/",
+    "@type": "Product",
+    "name": "Milky Mist Cheddar Cheese Block 200g",
+    "brand": {"@type": "Brand", "name": "Milky Mist"},
+    "category": "Cheese & Dairy",
+    "nutrition": {
+      "@type": "NutritionInformation",
+      "calories": "380 kcal",
+      "sugarContent": "0.5 g",
+      "saturatedFatContent": "21.0 g",
+      "sodiumContent": "650 mg",
+      "proteinContent": "24.0 g"
+    },
+    "ingredients": ["Pasteurised Cow Milk", "Active Cheese Culture", "Microbial Rennet", "Common Salt"]
+  }
+  </script>
+</head>
+<body><h1>Milky Mist Cheddar Cheese Block</h1></body>
+</html>
+''';
+
+      final mockClient = MockClient((request) async {
+        if (request.url.toString().contains('blinkit.com')) {
+          return http.Response(mockHtml, 200);
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      const blinkitUrl = 'https://blinkit.com/prn/milky-mist-cheddar-cheese-block-200g/prid/555';
+
+      final result = await service.resolveScanInput(
+        rawScan: blinkitUrl,
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, contains('Milky Mist Cheddar Cheese'));
+      expect(result.brandName, 'Milky Mist');
+      expect(result.category, 'Cheese & Dairy');
+      expect(result.sugarGPer100g, 0.5);
+      expect(result.satFatGPer100g, 21.0);
+      expect(result.healthScore, greaterThan(0));
+      expect(result.safePortionGrams, greaterThan(0));
+    });
+
+    test('throws FoodWebExtractionException when food web URL is unreachable', () async {
+      final mockClient = MockClient((request) async => http.Response('Network Error', 500));
+      final service = ProductScannerService(httpClient: mockClient);
+
+      expect(
+        () => service.resolveScanInput(
+          rawScan: 'https://zeptonow.com/pn/broken-link/p/111',
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<FoodWebExtractionException>()),
+      );
+    });
   });
 }

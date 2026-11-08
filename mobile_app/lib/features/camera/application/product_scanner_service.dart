@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/scoring/dosage_engine.dart';
 import '../../../core/vision/barcode_scanner_service.dart';
+import '../../../core/vision/food_web_extractor.dart';
 import '../../profile/domain/user_profile_model.dart';
 
 /// Thrown when a scanned QR code belongs to electronics, laptop support, or non-food services
@@ -25,6 +26,17 @@ class ProductNotFoundException implements Exception {
 
   @override
   String toString() => 'Product with barcode $barcode not found in food database';
+}
+
+/// Thrown when a food web URL could not be retrieved or parsed into verified nutrition facts
+class FoodWebExtractionException implements Exception {
+  final String url;
+  final String message;
+
+  FoodWebExtractionException(this.url, {this.message = 'Could not extract nutrition facts from this web link.'});
+
+  @override
+  String toString() => message;
 }
 
 /// Detailed result of a scanned food product resolved against databases and safety engines
@@ -104,8 +116,9 @@ class ProductScannerService {
   }
 
   http.Client get _httpClient => _injectedHttpClient ?? http.Client();
+  late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
 
-  /// Resolve product by any scanned QR code payload, GS1 link, or barcode string
+  /// Resolve product by any scanned QR code payload, GS1 link, food web URL, or barcode string
   Future<ScannedProductResult> resolveScanInput({
     required String rawScan,
     required UserProfileModel userProfile,
@@ -126,6 +139,11 @@ class ProductScannerService {
       return _evaluateProduct(parsed.jsonData!, userProfile, barcode);
     }
 
+    // Tier 0.5: Food E-Commerce or Brand Web URL
+    if (parsed.type == QrScanType.foodWebUrl) {
+      return resolveFoodWebUrl(url: parsed.rawInput, userProfile: userProfile);
+    }
+
     if (parsed.type != QrScanType.barcode || parsed.barcode == null) {
       throw NonFoodScanException(
         'This QR code does not contain a recognized packaged food barcode or nutrition profile.',
@@ -133,6 +151,54 @@ class ProductScannerService {
     }
 
     return resolveBarcode(barcode: parsed.barcode!, userProfile: userProfile);
+  }
+
+  /// Resolves a product directly from a food e-commerce or brand product web page
+  Future<ScannedProductResult> resolveFoodWebUrl({
+    required String url,
+    required UserProfileModel userProfile,
+  }) async {
+    Map<String, dynamic>? productData;
+
+    // 1. Try Supabase Cloud lookup (write-through cache hit)
+    try {
+      final client = _client;
+      if (client != null) {
+        final res = await client
+            .from('products')
+            .select('*')
+            .eq('barcode', url)
+            .maybeSingle();
+        if (res != null) {
+          productData = res;
+        }
+      }
+    } catch (e) {
+      debugPrint('ProductScannerService: Supabase query notice for web URL: $e');
+    }
+
+    // 2. Extract structured nutrition data from web page
+    if (productData == null) {
+      productData = await _webExtractor.extractProductFromUrl(url);
+      if (productData != null) {
+        _writeThroughCache(productData);
+      }
+    }
+
+    if (productData == null) {
+      throw FoodWebExtractionException(url);
+    }
+
+    return _evaluateProduct(productData, userProfile, url);
+  }
+
+  void _writeThroughCache(Map<String, dynamic> productData) {
+    try {
+      final client = _client;
+      if (client != null) {
+        client.from('products').upsert(productData).ignore();
+      }
+    } catch (_) {}
   }
 
   /// Resolve product by barcode string and evaluate against user biometrics
