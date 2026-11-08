@@ -132,6 +132,22 @@ void main() {
       expect(result.isExceededBudget, isFalse);
     });
 
+    test('resolves MTR Badam Drink Mix from built-in verified catalog barcode', () async {
+      final service = ProductScannerService();
+
+      final result = await service.resolveScanInput(
+        rawScan: '8901042951111',
+        userProfile: defaultUser,
+      );
+
+      expect(result.productName, 'MTR Badam Drink Mix');
+      expect(result.brandName, 'MTR');
+      expect(result.category, 'Beverages & Juices');
+      expect(result.sugarGPer100g, 58.0);
+      expect(result.caloriesPerServing, closeTo(102.0, 5.0));
+      expect(result.healthScore, 54);
+    });
+
     test('throws NonFoodScanException for non-food QR codes like laptop support or WhatsApp link', () async {
       final service = ProductScannerService();
 
