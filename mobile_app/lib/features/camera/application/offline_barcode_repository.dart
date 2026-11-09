@@ -363,6 +363,29 @@ class OfflineBarcodeRepository {
     return results;
   }
 
+  /// Searches Tier 1 seed and Tier 2 cache by product name, brand, or category
+  Future<List<Map<String, dynamic>>> searchByQuery(String query) async {
+    await ensureInitialized();
+    final clean = query.trim().toLowerCase();
+    if (clean.isEmpty) return [];
+
+    final matchedBarcodes = <String>{};
+    final allProducts = {..._tier1Seed, ..._tier2Cache};
+
+    for (final entry in allProducts.entries) {
+      final p = entry.value;
+      final name = (p['product_name'] ?? '').toString().toLowerCase();
+      final brand = (p['brand_name'] ?? '').toString().toLowerCase();
+      final cat = (p['category'] ?? '').toString().toLowerCase();
+
+      if (name.contains(clean) || brand.contains(clean) || cat.contains(clean)) {
+        matchedBarcodes.add(entry.key);
+      }
+    }
+
+    return matchedBarcodes.map((b) => Map<String, dynamic>.from(allProducts[b]!)).toList();
+  }
+
   /// Normalize product data to guarantee schema compliance for Tier 2 storage
   Map<String, dynamic> _normalizeProductData(
     String barcode,

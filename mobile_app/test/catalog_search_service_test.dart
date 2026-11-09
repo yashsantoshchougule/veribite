@@ -97,5 +97,129 @@ void main() {
       expect(results, isNotEmpty);
       expect(results.any((r) => r.isFood && r.title.contains('Maggi')), isTrue);
     });
+
+    test('IndianFoodQueryNormalizer normalizes phonetic typos to canonical Indian food names', () {
+      expect(IndianFoodQueryNormalizer.normalize('panner'), 'paneer');
+      expect(IndianFoodQueryNormalizer.normalize('paner'), 'paneer');
+      expect(IndianFoodQueryNormalizer.normalize('paneere'), 'paneer');
+      expect(IndianFoodQueryNormalizer.normalize('vadilal panner makhani'), 'vadilal paneer makhani');
+      expect(IndianFoodQueryNormalizer.normalize('bhujiya'), 'bhujia');
+      expect(IndianFoodQueryNormalizer.normalize('chavanprash'), 'chyawanprash');
+      expect(IndianFoodQueryNormalizer.normalize('masla'), 'masala');
+      expect(IndianFoodQueryNormalizer.normalize('biskut'), 'biscuit');
+      expect(IndianFoodQueryNormalizer.normalize('namkin'), 'namkeen');
+      expect(IndianFoodQueryNormalizer.normalize('dahi'), 'dahi curd');
+    });
+
+    test('searchFoodProducts ranks authentic Indian paneer dishes above foreign brand-only matches', () async {
+      final mockJson = jsonEncode({
+        'count': 3,
+        'products': [
+          {
+            'code': '4001234567890',
+            'product_name': 'Kranzwurst Sausage',
+            'brands': 'Panner',
+            'categories': 'Meats, Sausages',
+            'nova_group': 3,
+            'nutriments': {'fat_100g': 25.0, 'energy-kcal_100g': 310.0},
+          },
+          {
+            'code': '8901262010999',
+            'product_name': 'Vadilal Paneer Makhani',
+            'brands': 'Vadilal',
+            'categories': 'Indian Dishes, Paneer Gravy',
+            'nova_group': 3,
+            'nutriments': {
+              'sugars_100g': 2.5,
+              'saturated-fat_100g': 4.5,
+              'fat_100g': 10.0,
+              'carbohydrates_100g': 8.0,
+              'proteins_100g': 7.0,
+              'sodium_100g': 0.45,
+              'energy-kcal_100g': 160.0,
+            },
+          },
+          {
+            'code': '0012345678901',
+            'product_name': 'Grape Jelly & Peanut Butter',
+            'brands': 'Panner',
+            'categories': 'Spreads',
+            'nova_group': 4,
+            'nutriments': {
+              'sugars_100g': 34.0,
+              'saturated-fat_100g': 2.8,
+              'energy-kcal_100g': 340.0,
+            },
+          },
+        ]
+      });
+
+      final mockClient = MockClient((request) async {
+        return http.Response(mockJson, 200);
+      });
+
+      final service = CatalogSearchService(httpClient: mockClient);
+      final results = await service.searchFoodProducts('panner');
+
+      expect(results, isNotEmpty);
+      // The authentic Indian paneer dishes MUST be at the top!
+      expect(results.first.title.toLowerCase(), contains('paneer'));
+      expect(results.any((r) => r.title.contains('Vadilal Paneer Makhani')), isTrue);
+      // Foreign items where "Panner" was only a brand must NOT be at the top
+      expect(results.first.title, isNot(contains('Kranzwurst')));
+      expect(results.first.evaluatedProduct, isNotNull);
+      // Confirm the list card score matches the evaluated product score 100%
+      expect(results.first.healthScore, results.first.evaluatedProduct!.healthScore);
+    });
+
+    test('Evaluated search item enforces biochemical consistency floor rules (zero desync and no 0.0g fat/carbs)', () async {
+      // Simulates Grape Jelly with missing fat_100g and carbohydrates_100g in raw OFF payload
+      final mockJson = jsonEncode({
+        'count': 1,
+        'products': [
+          {
+            'code': '0012345678901',
+            'product_name': 'Grape Jelly & Peanut Butter',
+            'brands': 'Panner',
+            'categories': 'Spreads',
+            'nova_group': 4,
+            'nutriments': {
+              'sugars_100g': 34.0,
+              'saturated-fat_100g': 2.8,
+              'proteins_100g': 4.0,
+              'sodium_100g': 0.15,
+              'energy-kcal_100g': 250.0,
+            },
+            'additives_tags': ['en:e330', 'en:e440', 'en:e202', 'en:e150d', 'en:e471'],
+          }
+        ]
+      });
+
+      final mockClient = MockClient((request) async {
+        return http.Response(mockJson, 200);
+      });
+
+      final service = CatalogSearchService(httpClient: mockClient);
+      final results = await service.searchFoodProducts('grape jelly');
+
+      expect(results, isNotEmpty);
+      final item = results.first;
+      final evaluated = item.evaluatedProduct;
+      expect(evaluated, isNotNull);
+
+      // 1. Single Scoring Pipeline: card score equals evaluated score (exact 100% match)
+      expect(item.healthScore, evaluated!.healthScore);
+      expect(item.healthScore, inInclusiveRange(40, 60));
+
+      // 2. Biochemical floor rule 1: Total Fat MUST be >= Saturated Fat (2.8g), never 0.0g!
+      expect(evaluated.totalFatGPer100g, greaterThanOrEqualTo(2.8));
+
+      // 3. Biochemical floor rule 2: Carbohydrates MUST be >= Sugar (34.0g), never 0.0g!
+      expect(evaluated.carbsGPer100g, greaterThanOrEqualTo(34.0));
+
+      // 4. Biochemical floor rule 3: Calories MUST be >= Atwater macroeconomic sum
+      final atwaterMin = (evaluated.proteinGPer100g * 4.0) + (evaluated.carbsGPer100g * 4.0) + (evaluated.totalFatGPer100g * 9.0);
+      expect(evaluated.caloriesPer100g, greaterThanOrEqualTo(atwaterMin));
+    });
   });
 }

@@ -1130,16 +1130,64 @@ class ProductScannerService {
           }
 
           // Impute nutrition values
-          final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ?? 0.0;
-          final satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ?? 0.0;
+          final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ??
+              (nutriments['sugars'] as num?)?.toDouble() ?? 0.0;
+          final satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ??
+              (nutriments['saturated-fat'] as num?)?.toDouble() ?? 0.0;
           double sodium = 0.0;
           if (nutriments['sodium_100g'] != null) {
             sodium = (nutriments['sodium_100g'] as num).toDouble() * 1000.0;
           } else if (nutriments['salt_100g'] != null) {
             sodium = (nutriments['salt_100g'] as num).toDouble() * 400.0;
+          } else if (nutriments['sodium_mg'] != null) {
+            sodium = (nutriments['sodium_mg'] as num).toDouble();
           }
+
+          final totalFat = (nutriments['fat_100g'] as num?)?.toDouble() ??
+              (nutriments['total-fat_100g'] as num?)?.toDouble() ??
+              (nutriments['fat'] as num?)?.toDouble() ??
+              (nutriments['total_fat_g'] as num?)?.toDouble() ??
+              (nutriments['total_fat'] as num?)?.toDouble() ?? 0.0;
+
+          final carbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble() ??
+              (nutriments['carbohydrates'] as num?)?.toDouble() ??
+              (nutriments['carbs_100g'] as num?)?.toDouble() ??
+              (nutriments['carbs_g'] as num?)?.toDouble() ??
+              (nutriments['total_carbohydrates_g'] as num?)?.toDouble() ?? 0.0;
+
+          final protein = (nutriments['proteins_100g'] as num?)?.toDouble() ??
+              (nutriments['protein_100g'] as num?)?.toDouble() ??
+              (nutriments['proteins'] as num?)?.toDouble() ??
+              (nutriments['protein'] as num?)?.toDouble() ?? 0.0;
+
+          final fiber = (nutriments['fiber_100g'] as num?)?.toDouble() ??
+              (nutriments['fibre_100g'] as num?)?.toDouble() ??
+              (nutriments['dietary_fiber_g'] as num?)?.toDouble() ??
+              (nutriments['fiber'] as num?)?.toDouble() ?? 0.0;
+
+          final addedSugar = (nutriments['added-sugars_100g'] as num?)?.toDouble() ??
+              (nutriments['added-sugars'] as num?)?.toDouble() ??
+              (nutriments['added_sugars_g'] as num?)?.toDouble() ??
+              (nutriments['added_sugar'] as num?)?.toDouble() ?? 0.0;
+
+          final transFat = (nutriments['trans-fat_100g'] as num?)?.toDouble() ??
+              (nutriments['trans-fat'] as num?)?.toDouble() ??
+              (nutriments['trans_fat'] as num?)?.toDouble() ?? 0.0;
+
+          double chol = 0.0;
+          if (nutriments['cholesterol_100g'] != null) {
+            final rawChol = (nutriments['cholesterol_100g'] as num).toDouble();
+            chol = rawChol < 1.0 ? rawChol * 1000.0 : rawChol;
+          } else if (nutriments['cholesterol_mg'] != null) {
+            chol = (nutriments['cholesterol_mg'] as num).toDouble();
+          }
+
+          final energyKcal = (nutriments['energy-kcal_100g'] as num?)?.toDouble() ??
+              (nutriments['energy-kcal'] as num?)?.toDouble() ??
+              (((nutriments['energy-kj_100g'] as num?)?.toDouble() ?? 0.0) / 4.184);
+
           final energyKj = (nutriments['energy-kj_100g'] as num?)?.toDouble() ??
-              ((nutriments['energy-kcal_100g'] as num?)?.toDouble() ?? 100.0) * 4.184;
+              (energyKcal > 0 ? energyKcal * 4.184 : 0.0);
 
           final servingG = (p['serving_quantity'] as num?)?.toDouble() ?? 30.0;
           final packG = (p['product_quantity'] as num?)?.toDouble() ?? (servingG * 3.0);
@@ -1156,11 +1204,18 @@ class ProductScannerService {
             'red_cap_triggered': 0,
             'nutrition_json': jsonEncode({
               'energy_kj': energyKj,
+              'energy_kcal': energyKcal,
+              'calories': energyKcal,
               'sugar_g_per_100g': sugars,
               'sat_fat_g_per_100g': satFat,
               'sodium_mg_per_100g': sodium,
-              'fiber_g': (nutriments['fiber_100g'] as num?)?.toDouble() ?? 1.5,
-              'protein_g': (nutriments['proteins_100g'] as num?)?.toDouble() ?? 3.0,
+              'total_fat_g_per_100g': totalFat,
+              'carbohydrates_g_per_100g': carbs,
+              'protein_g': protein,
+              'fiber_g': fiber,
+              'added_sugar_g_per_100g': addedSugar,
+              'trans_fat_g_per_100g': transFat,
+              'cholesterol_mg_per_100g': chol,
               'fruit_veg_nut_pct': 0.0,
             }),
             'additives_json': jsonEncode(additivesList),
@@ -1222,6 +1277,16 @@ class ProductScannerService {
     return _evaluateProduct(productData, userProfile, code);
   }
 
+  /// Public deterministic evaluation of product with scoring & dosage engines
+  ScannedProductResult evaluateProduct(
+    Map<String, dynamic> raw,
+    UserProfileModel profile,
+    String barcode, {
+    String? analysisSource,
+  }) {
+    return _evaluateProduct(raw, profile, barcode, analysisSource: analysisSource);
+  }
+
   /// Internal deterministic evaluation of product with scoring & dosage engines
   ScannedProductResult _evaluateProduct(
     Map<String, dynamic> raw,
@@ -1277,8 +1342,8 @@ class ProductScannerService {
     final caloriesPerServing = double.parse((caloriesPer100 * (servingSize / 100.0)).toStringAsFixed(0));
 
     // Parse real saturated fat & sodium per 100g and calculate per-serving values
-    final satFatPer100 = (nutritionMap['sat_fat_g_per_100g'] ?? nutritionMap['sat_fat_g'] ?? 0.0 as num).toDouble();
-    final satFatPerServing = double.parse((satFatPer100 * (servingSize / 100.0)).toStringAsFixed(1));
+    var satFatPer100 = (nutritionMap['sat_fat_g_per_100g'] ?? nutritionMap['sat_fat_g'] ?? 0.0 as num).toDouble();
+    var satFatPerServing = double.parse((satFatPer100 * (servingSize / 100.0)).toStringAsFixed(1));
 
     double sodiumPer100 = 0.0;
     if (nutritionMap['sodium_mg_per_100g'] != null) {
@@ -1293,13 +1358,90 @@ class ProductScannerService {
     final sodiumPerServing = (sodiumPer100 * (servingSize / 100.0)).roundToDouble();
 
     // Secondary extracted nutrients per 100g
-    final proteinPer100 = (nutritionMap['protein_g'] ?? nutritionMap['proteins_100g'] ?? nutritionMap['protein'] ?? 0.0 as num).toDouble();
-    final carbsPer100 = (nutritionMap['carbohydrates_g_per_100g'] ?? nutritionMap['carbohydrate_g'] ?? nutritionMap['carbs_100g'] ?? nutritionMap['carbohydrates'] ?? 0.0 as num).toDouble();
-    final fiberPer100 = (nutritionMap['fiber_g'] ?? nutritionMap['fiber_100g'] ?? nutritionMap['dietary_fibre_g'] ?? 0.0 as num).toDouble();
-    final addedSugarPer100 = (nutritionMap['added_sugar_g_per_100g'] ?? nutritionMap['added_sugars_g'] ?? nutritionMap['added_sugar'] ?? 0.0 as num).toDouble();
-    final transFatPer100 = (nutritionMap['trans_fat_g_per_100g'] ?? nutritionMap['trans_fat_g'] ?? nutritionMap['trans_fat'] ?? 0.0 as num).toDouble();
-    final totalFatPer100 = (nutritionMap['total_fat_g_per_100g'] ?? nutritionMap['total_fat_g'] ?? nutritionMap['fat_100g'] ?? nutritionMap['total_fat'] ?? 0.0 as num).toDouble();
-    final cholesterolPer100 = (nutritionMap['cholesterol_mg_per_100g'] ?? nutritionMap['cholesterol_mg'] ?? nutritionMap['cholesterol'] ?? 0.0 as num).toDouble();
+    final proteinPer100 = (nutritionMap['protein_g'] ??
+            nutritionMap['proteins_100g'] ??
+            nutritionMap['protein'] ??
+            0.0 as num)
+        .toDouble();
+    var carbsPer100 = (nutritionMap['carbohydrates_g_per_100g'] ??
+            nutritionMap['carbohydrate_g'] ??
+            nutritionMap['carbs_100g'] ??
+            nutritionMap['carbohydrates'] ??
+            nutritionMap['carbs_g'] ??
+            nutritionMap['total_carbohydrates_g'] ??
+            0.0 as num)
+        .toDouble();
+    final fiberPer100 = (nutritionMap['fiber_g'] ??
+            nutritionMap['fiber_100g'] ??
+            nutritionMap['fibre_100g'] ??
+            nutritionMap['dietary_fibre_g'] ??
+            0.0 as num)
+        .toDouble();
+    final addedSugarPer100 = (nutritionMap['added_sugar_g_per_100g'] ??
+            nutritionMap['added_sugars_g'] ??
+            nutritionMap['added-sugars_100g'] ??
+            nutritionMap['added_sugar'] ??
+            0.0 as num)
+        .toDouble();
+    final transFatPer100 = (nutritionMap['trans_fat_g_per_100g'] ??
+            nutritionMap['trans_fat_g'] ??
+            nutritionMap['trans-fat_100g'] ??
+            nutritionMap['trans_fat'] ??
+            0.0 as num)
+        .toDouble();
+    var totalFatPer100 = (nutritionMap['total_fat_g_per_100g'] ??
+            nutritionMap['total_fat_g'] ??
+            nutritionMap['fat_100g'] ??
+            nutritionMap['total-fat_100g'] ??
+            nutritionMap['fat'] ??
+            nutritionMap['total_fat'] ??
+            0.0 as num)
+        .toDouble();
+    final cholesterolPer100 = (nutritionMap['cholesterol_mg_per_100g'] ??
+            nutritionMap['cholesterol_mg'] ??
+            nutritionMap['cholesterol_100g'] ??
+            nutritionMap['cholesterol'] ??
+            0.0 as num)
+        .toDouble();
+
+    // Biochemical Consistency Floor Rule 1: Total Fat >= Saturated Fat + Trans Fat
+    final minFatFloor = satFatPer100 + transFatPer100;
+    if (totalFatPer100 < minFatFloor) {
+      totalFatPer100 = minFatFloor;
+    }
+
+    // Biochemical Consistency Floor Rule 2: Carbohydrates >= Total Sugar + Dietary Fiber
+    final minCarbsFloor = sugarPer100 + fiberPer100;
+    if (carbsPer100 < minCarbsFloor) {
+      carbsPer100 = minCarbsFloor;
+    }
+
+    // Category Plausibility Guards: Paneer / Ready-to-Eat Paneer Makhani / Rich Dairy Gravies
+    final lowerName = productName.toLowerCase();
+    final lowerCat = category.toLowerCase();
+    final isPaneerOrMakhani = lowerName.contains('paneer') ||
+        lowerName.contains('panner') ||
+        lowerName.contains('makhani') ||
+        lowerCat.contains('paneer');
+
+    if (isPaneerOrMakhani) {
+      // In crowdsourced OFF entries, paneer gravies or blocks often omit total fat or calories.
+      // A paneer dish with < 4g fat and < 80 kcal is implausible; apply category baseline
+      if (totalFatPer100 < 4.0 && satFatPer100 < 2.0 && caloriesPer100 < 80.0) {
+        totalFatPer100 = 9.5;
+        satFatPer100 = 4.5;
+        satFatPerServing = double.parse((satFatPer100 * (servingSize / 100.0)).toStringAsFixed(1));
+        if (caloriesPer100 < 130.0) {
+          caloriesPer100 = 145.0;
+        }
+      }
+    }
+
+    // Biochemical Consistency Floor Rule 3: Energy Kcal >= Atwater macroeconomic sum
+    final atwaterMinKcal = (proteinPer100 * 4.0) + (carbsPer100 * 4.0) + (totalFatPer100 * 9.0);
+    if (caloriesPer100 < atwaterMinKcal && atwaterMinKcal > 0) {
+      caloriesPer100 = double.parse(atwaterMinKcal.toStringAsFixed(1));
+    }
 
     // Parse package net weight for dynamic whole pack calculations
     final packWeight = (raw['pack_weight_g'] as num?)?.toDouble() ??

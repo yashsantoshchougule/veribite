@@ -112,12 +112,22 @@ class ProductHealthScorer {
     ]);
 
     // 4. Total Fat in grams
-    final totalFatG = _findDouble(rawNutrition, [
+    double? totalFatG = _findDouble(rawNutrition, [
       'fat_100g',
+      'total-fat_100g',
       'total_fat_g',
       'fat',
+      'total_fat',
       'fat_g_per_100g',
+      'total_fat_g_per_100g',
     ]);
+
+    // Biochemical Floor: Total Fat >= Saturated Fat
+    if (saturatedFatG != null) {
+      if (totalFatG == null || totalFatG < saturatedFatG) {
+        totalFatG = saturatedFatG;
+      }
+    }
 
     // 5. Sodium in mg (converts from grams if <= 15.0 or converts from salt_100g * 400)
     double? sodiumMg = _findDouble(rawNutrition, [
@@ -154,6 +164,17 @@ class ProductHealthScorer {
       'fiber',
       'dietary_fiber',
     ]);
+
+    // Biochemical Floor: Energy Kcal >= Atwater minimum
+    if (energyKcal != null && (proteinG != null || sugarsG != null || totalFatG != null)) {
+      final p = proteinG ?? 0.0;
+      final c = sugarsG ?? 0.0;
+      final f = totalFatG ?? 0.0;
+      final atwaterMin = (p * 4.0) + (c * 4.0) + (f * 9.0);
+      if (energyKcal < atwaterMin && atwaterMin > 0) {
+        energyKcal = atwaterMin;
+      }
+    }
 
     return NormalizedNutrients(
       energyKcal: energyKcal,

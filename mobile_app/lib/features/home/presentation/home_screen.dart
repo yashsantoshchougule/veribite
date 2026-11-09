@@ -118,13 +118,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openProductVerdict(String barcode) async {
+  Future<void> _openProductVerdict(SearchCatalogItem item) async {
     final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId);
-    final scannerService = ProductScannerService();
-    final product = await scannerService.resolveBarcode(
-      barcode: barcode,
-      userProfile: activeProfile,
-    );
+    final ScannedProductResult product;
+    if (item.evaluatedProduct != null) {
+      product = item.evaluatedProduct!;
+    } else {
+      final scannerService = ProductScannerService();
+      product = await scannerService.resolveBarcode(
+        barcode: item.code,
+        userProfile: activeProfile,
+      );
+    }
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -134,6 +139,26 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+
+    // Sync any newly evaluated score or background enrichment back to search results
+    final index = _searchResults.indexWhere((i) => i.code == item.code);
+    if (index != -1 && mounted) {
+      final old = _searchResults[index];
+      setState(() {
+        _searchResults[index] = SearchCatalogItem.food(
+          barcode: old.code,
+          productName: product.productName,
+          brandName: product.brandName,
+          category: product.category,
+          score: product.healthScore,
+          novaGroup: product.novaGrade,
+          imageUrl: old.imageUrl,
+          isOffline: old.isOffline,
+          evaluatedProduct: product,
+        );
+      });
+    }
+
     await _loadAllData();
   }
 
@@ -1305,7 +1330,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () {
         if (item.isFood) {
-          _openProductVerdict(item.code);
+          _openProductVerdict(item);
         } else {
           _showAdditiveDetailsModal(item);
         }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../camera/application/product_scanner_service.dart';
 
 /// Type of catalog item: Food product or Chemical additive
 enum CatalogItemType {
@@ -26,6 +27,8 @@ class SearchCatalogItem {
   final String? bannedJurisdictions;
   final bool childHyperactivityFlag;
   final bool isOffline;
+  final ScannedProductResult? evaluatedProduct;
+  final Map<String, dynamic>? rawProductData;
 
   const SearchCatalogItem({
     required this.id,
@@ -43,6 +46,8 @@ class SearchCatalogItem {
     this.bannedJurisdictions,
     this.childHyperactivityFlag = false,
     this.isOffline = false,
+    this.evaluatedProduct,
+    this.rawProductData,
   });
 
   bool get isFood => type == CatalogItemType.food;
@@ -58,20 +63,33 @@ class SearchCatalogItem {
     int? novaGroup,
     String? imageUrl,
     bool isOffline = false,
+    ScannedProductResult? evaluatedProduct,
+    Map<String, dynamic>? rawProductData,
   }) {
-    final effectiveScore = score ?? (novaGroup == 4 ? 38 : (novaGroup == 3 ? 55 : 82));
+    final effectiveScore = evaluatedProduct?.healthScore ?? score ?? 82;
     final Color color;
     final String verdictTag;
 
-    if (effectiveScore < 40) {
-      color = AppColors.safetyRed;
-      verdictTag = 'Toxic / Capped 🔴';
-    } else if (effectiveScore < 70) {
-      color = AppColors.safetyAmber;
-      verdictTag = 'Caution 🟠';
+    if (evaluatedProduct != null) {
+      verdictTag = evaluatedProduct.verdictTag;
+      if (effectiveScore < 40 || evaluatedProduct.redCapTriggered) {
+        color = AppColors.safetyRed;
+      } else if (effectiveScore < 70) {
+        color = AppColors.safetyAmber;
+      } else {
+        color = AppColors.safetyGreen;
+      }
     } else {
-      color = AppColors.safetyGreen;
-      verdictTag = 'Nutri Safe 🟢';
+      if (effectiveScore < 40) {
+        color = AppColors.safetyRed;
+        verdictTag = 'Toxic / Capped 🔴';
+      } else if (effectiveScore < 70) {
+        color = AppColors.safetyAmber;
+        verdictTag = 'Caution 🟠';
+      } else {
+        color = AppColors.safetyGreen;
+        verdictTag = 'Nutri Safe 🟢';
+      }
     }
 
     final catText = category != null && category.isNotEmpty ? ' • $category' : '';
@@ -87,6 +105,8 @@ class SearchCatalogItem {
       color: color,
       imageUrl: imageUrl,
       isOffline: isOffline,
+      evaluatedProduct: evaluatedProduct,
+      rawProductData: rawProductData,
     );
   }
 
