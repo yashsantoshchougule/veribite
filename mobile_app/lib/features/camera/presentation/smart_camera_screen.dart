@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -625,6 +625,32 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     }
   }
 
+  Future<String?> _detectBarcodeFromFrames(List<List<int>> frames) async {
+    if (widget.useSimulatedFeed) return null;
+    for (final frame in frames) {
+      if (frame.length < 50) continue;
+      try {
+        final tempDir = Directory.systemTemp;
+        final tempFile = File('${tempDir.path}/bc_detect_${DateTime.now().millisecondsSinceEpoch}.jpg');
+        await tempFile.writeAsBytes(frame);
+        final inputImg = InputImage.fromFile(tempFile);
+        final barcodes = await _barcodeScanner.processImage(inputImg).timeout(const Duration(milliseconds: 600));
+        if (await tempFile.exists()) {
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+        }
+        if (barcodes.isNotEmpty && barcodes.first.rawValue != null && barcodes.first.rawValue!.isNotEmpty) {
+          debugPrint('[SmartCameraScreen] Detected embedded barcode from frame photo: ${barcodes.first.rawValue}');
+          return barcodes.first.rawValue;
+        }
+      } catch (e) {
+        debugPrint('[SmartCameraScreen] Notice detecting barcode from frame: $e');
+      }
+    }
+    return null;
+  }
+
   Future<void> _extractDataFromPreview(List<int> frameBytes) async {
     setState(() {
       _showCapturePreviewOverlay = false;
@@ -635,22 +661,27 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     try {
       final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
 
+      // Opportunistically detect any visible 1D/2D barcode directly on the photographed frame
+      String? targetBarcode = _pendingBindingBarcode;
+      if (targetBarcode == null || targetBarcode.isEmpty) {
+        targetBarcode = await _detectBarcodeFromFrames([frameBytes]);
+      }
+
       final resolvedProduct = await _productService.resolveMultiAngleScan(
         frames: [frameBytes],
         userProfile: activeProfile,
-        detectedBarcode: _pendingBindingBarcode,
+        detectedBarcode: targetBarcode,
       );
 
       if (!mounted) return;
 
-      // Offline OCR Barcode Binding: bind newly analyzed product to pending barcode in Tier 2 cache
-      if (_pendingBindingBarcode != null) {
-        final boundBarcode = _pendingBindingBarcode!;
+      // Offline OCR Barcode Binding: bind newly analyzed product to pending/detected barcode in Tier 2 cache
+      if (targetBarcode != null && targetBarcode.isNotEmpty) {
         _pendingBindingBarcode = null;
         unawaited(OfflineBarcodeRepository.instance.saveProduct(
-          barcode: boundBarcode,
+          barcode: targetBarcode,
           productData: {
-            'barcode': boundBarcode,
+            'barcode': targetBarcode,
             'product_name': resolvedProduct.productName,
             'brand_name': resolvedProduct.brandName,
             'category': resolvedProduct.category,
@@ -841,22 +872,27 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     try {
       unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
 
+      // Opportunistically detect any visible 1D/2D barcode directly on the photographed frames
+      String? targetBarcode = _pendingBindingBarcode;
+      if (targetBarcode == null || targetBarcode.isEmpty) {
+        targetBarcode = await _detectBarcodeFromFrames(frames);
+      }
+
       final resolvedProduct = await _productService.resolveMultiAngleScan(
         frames: frames,
         userProfile: activeProfile,
-        detectedBarcode: _pendingBindingBarcode,
+        detectedBarcode: targetBarcode,
       );
 
       if (!mounted) return;
 
-      // Offline OCR Barcode Binding: bind newly analyzed product to pending barcode in Tier 2 cache
-      if (_pendingBindingBarcode != null) {
-        final boundBarcode = _pendingBindingBarcode!;
+      // Offline OCR Barcode Binding: bind newly analyzed product to pending/detected barcode in Tier 2 cache
+      if (targetBarcode != null && targetBarcode.isNotEmpty) {
         _pendingBindingBarcode = null;
         unawaited(OfflineBarcodeRepository.instance.saveProduct(
-          barcode: boundBarcode,
+          barcode: targetBarcode,
           productData: {
-            'barcode': boundBarcode,
+            'barcode': targetBarcode,
             'product_name': resolvedProduct.productName,
             'brand_name': resolvedProduct.brandName,
             'category': resolvedProduct.category,
@@ -1953,14 +1989,29 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     ChoiceChip(
-                                      label: const Text('Auto Barcode / QR', style: TextStyle(fontSize: 11)),
+                                      label: const Text('Auto Barcode / QR'),
                                       selected: _scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode,
-                                      selectedColor: const Color(0xFF0F9D58),
+                                      selectedColor: const Color(0xFF10B981),
+                                      backgroundColor: const Color(0xD91E293B),
+                                      showCheckmark: false,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      side: BorderSide(
+                                        color: (_scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode)
+                                            ? const Color(0xFF10B981)
+                                            : Colors.white24,
+                                        width: 1.0,
+                                      ),
                                       visualDensity: VisualDensity.compact,
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                                       labelStyle: TextStyle(
-                                        color: (_scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode) ? Colors.white : Colors.white70,
+                                        fontSize: 11,
+                                        fontWeight: (_scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode)
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
+                                        color: (_scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode)
+                                            ? Colors.white
+                                            : const Color(0xE6FFFFFF),
                                       ),
                                       onSelected: (val) {
                                         if (val) {
@@ -1971,14 +2022,29 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                                     ),
                                     const SizedBox(width: 4),
                                     ChoiceChip(
-                                      label: const Text('Capture Nutrition Label', style: TextStyle(fontSize: 11)),
+                                      label: const Text('Capture Nutrition Label'),
                                       selected: _scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode,
-                                      selectedColor: const Color(0xFFEA4335),
+                                      selectedColor: const Color(0xFF10B981),
+                                      backgroundColor: const Color(0xD91E293B),
+                                      showCheckmark: false,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      side: BorderSide(
+                                        color: (_scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode)
+                                            ? const Color(0xFF10B981)
+                                            : Colors.white24,
+                                        width: 1.0,
+                                      ),
                                       visualDensity: VisualDensity.compact,
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                                       labelStyle: TextStyle(
-                                        color: (_scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode) ? Colors.white : Colors.white70,
+                                        fontSize: 11,
+                                        fontWeight: (_scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode)
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
+                                        color: (_scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode)
+                                            ? Colors.white
+                                            : const Color(0xE6FFFFFF),
                                       ),
                                       onSelected: (val) {
                                         if (val) {
@@ -1989,14 +2055,25 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                                     ),
                                     const SizedBox(width: 4),
                                     ChoiceChip(
-                                      label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
+                                      label: const Text('Curved Bottle'),
                                       selected: state.isMultiAngleMode,
                                       selectedColor: const Color(0xFF4285F4),
+                                      backgroundColor: const Color(0xD91E293B),
+                                      showCheckmark: false,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      side: BorderSide(
+                                        color: state.isMultiAngleMode
+                                            ? const Color(0xFF4285F4)
+                                            : Colors.white24,
+                                        width: 1.0,
+                                      ),
                                       visualDensity: VisualDensity.compact,
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                                       labelStyle: TextStyle(
-                                        color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                        fontSize: 11,
+                                        fontWeight: state.isMultiAngleMode ? FontWeight.w700 : FontWeight.w600,
+                                        color: state.isMultiAngleMode ? Colors.white : const Color(0xE6FFFFFF),
                                       ),
                                       onSelected: (val) {
                                         if (val) {

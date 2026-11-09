@@ -110,7 +110,7 @@ class OnDeviceNutritionParser {
   }
 
   static const String _sep =
-      r'(?:[ \t]*\(?[ \t]*(?:g|gm|gms|kcal|kj|mg|mcg|µg)(?:[ \t]*[\/\-][ \t]*(?:100g?|serve?|serving))?[ \t]*\)?)?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~]*(?:[ \t]*(?:provides\s+approx\.?|approx\.?|value))?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~]*(?:\r?\n)?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~]*[ \t]*(\d+(?:\.\d+)?)';
+      r'(?:[ \t]*\(?[ \t]*(?:in\s+)?(?:g|gm|gms|kcal|kj|mg|mcg|µg)(?:[ \t]*[\/\-][ \t]*(?:100g?|serve?|serving))?[ \t]*\)?)?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~*]*(?:[ \t]*(?:provides\s+approx\.?|approx\.?|value))?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~*]*(?:\r?\n)?[ \t]*[:\-\|\¦\!\[\]\/\=ilI~*]*[ \t]*(\d+(?:\.\d+)?)';
 
   /// Extracts standard nutrition table values from text (handles multi-column tables and OCR gridlines)
   static Map<String, double> parseNutritionTable(String text) {
@@ -123,6 +123,8 @@ class OnDeviceNutritionParser {
       'total_fat_g_per_100g': 0.0,
       'sat_fat_g_per_100g': 0.0,
       'trans_fat_g_per_100g': 0.0,
+      'mufa_g_per_100g': 0.0,
+      'pufa_g_per_100g': 0.0,
       'sodium_mg_per_100g': 0.0,
       'cholesterol_mg_per_100g': 0.0,
       'protein_g': 0.0,
@@ -148,19 +150,19 @@ class OnDeviceNutritionParser {
       }
     }
 
-    // Total Sugars & Added Sugars
+    // Total Sugars & Added Sugars (strictly avoid cross-matching)
     final addedSugarMatch = RegExp(r'added\s+sugars?' + _sep, caseSensitive: false).firstMatch(text);
     if (addedSugarMatch != null) {
       result['added_sugar_g_per_100g'] = double.tryParse(addedSugarMatch.group(1) ?? '') ?? 0.0;
     }
 
-    final sugarMatch = RegExp(r'(?:total\s+sugars?|sugars?|sugar)' + _sep, caseSensitive: false).firstMatch(text);
+    final sugarMatch = RegExp(r'(?:total\s+sugars?|(?<!added\s+)sugars?|sugar)' + _sep, caseSensitive: false).firstMatch(text);
     if (sugarMatch != null) {
       result['sugar_g_per_100g'] = double.tryParse(sugarMatch.group(1) ?? '') ?? 0.0;
     }
 
-    // Total Fat (strictly before saturated/trans fat)
-    final totalFatMatch = RegExp(r'(?:total\s+fat|fat(?!ty))' + _sep, caseSensitive: false).firstMatch(text);
+    // Total Fat (strictly avoid matching saturated or trans fat)
+    final totalFatMatch = RegExp(r'(?:total\s+fat|(?<!saturated\s+|sat\s+|trans\s+)fat(?!ty))' + _sep, caseSensitive: false).firstMatch(text);
     if (totalFatMatch != null) {
       result['total_fat_g_per_100g'] = double.tryParse(totalFatMatch.group(1) ?? '') ?? 0.0;
     }
@@ -177,8 +179,19 @@ class OnDeviceNutritionParser {
       result['trans_fat_g_per_100g'] = double.tryParse(transFatMatch.group(1) ?? '') ?? 0.0;
     }
 
+    // MUFA & PUFA
+    final mufaMatch = RegExp(r'(?:\*?\s*mufa|monounsaturated\s+fat)' + _sep, caseSensitive: false).firstMatch(text);
+    if (mufaMatch != null) {
+      result['mufa_g_per_100g'] = double.tryParse(mufaMatch.group(1) ?? '') ?? 0.0;
+    }
+
+    final pufaMatch = RegExp(r'(?:\*?\s*pufa|polyunsaturated\s+fat)' + _sep, caseSensitive: false).firstMatch(text);
+    if (pufaMatch != null) {
+      result['pufa_g_per_100g'] = double.tryParse(pufaMatch.group(1) ?? '') ?? 0.0;
+    }
+
     // Sodium
-    final sodiumMatch = RegExp(r'sodium' + _sep, caseSensitive: false).firstMatch(text);
+    final sodiumMatch = RegExp(r'(?:sodium|salt)' + _sep, caseSensitive: false).firstMatch(text);
     if (sodiumMatch != null) {
       final val = double.tryParse(sodiumMatch.group(1) ?? '') ?? 0.0;
       final fullMatch = sodiumMatch.group(0)?.toLowerCase() ?? '';
@@ -214,9 +227,18 @@ class OnDeviceNutritionParser {
     }
 
     // Serving Size
-    final servingMatch = RegExp(r'serving\s+size' + _sep, caseSensitive: false).firstMatch(text);
+    final servingMatch = RegExp(r'(?:1\s+)?serving\s+size\s*[:\-\|\=]*\s*(\d+(?:\.\d+)?)\s*(?:g|gm|ml)?', caseSensitive: false).firstMatch(text);
     if (servingMatch != null) {
       result['serving_size_g'] = double.tryParse(servingMatch.group(1) ?? '') ?? 30.0;
+    }
+
+    // Servings per pack & dynamic pack weight
+    final servingsPerPackMatch = RegExp(r'(\d+(?:\.\d+)?)\s*servings?\s+per\s+pack', caseSensitive: false).firstMatch(text);
+    if (servingsPerPackMatch != null) {
+      final sCount = double.tryParse(servingsPerPackMatch.group(1) ?? '') ?? 0.0;
+      if (sCount > 0) {
+        result['servings_per_pack'] = sCount;
+      }
     }
 
     // Pack Weight
@@ -226,6 +248,8 @@ class OnDeviceNutritionParser {
       final fullMatch = packMatch.group(0)?.toLowerCase() ?? '';
       final unit = fullMatch.contains('kg') ? 'kg' : 'g';
       result['pack_weight_g'] = unit == 'kg' ? val * 1000.0 : val;
+    } else if ((result['servings_per_pack'] ?? 0) > 1 && (result['serving_size_g'] ?? 0) > 0) {
+      result['pack_weight_g'] = (result['servings_per_pack']! * result['serving_size_g']!).roundToDouble();
     }
 
     // If inline regex missed majority of nutrients, apply column-split table fallback
@@ -262,81 +286,118 @@ class OnDeviceNutritionParser {
   static void _applyColumnSplitFallback(String text, Map<String, double> result) {
     final lines = text.split(RegExp(r'[\r\n]+')).map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
 
-    // Find sequence of nutrient keys
-    final keyIndices = <String, int>{};
+    // Map of lineIndex -> standard key
+    final keyPositions = <int, String>{};
+
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i].toLowerCase();
-      if (RegExp(r'^(?:energy|calories?|cal)\b').hasMatch(line) && !keyIndices.containsKey('energy')) {
-        keyIndices['energy'] = i;
-      } else if (RegExp(r'^(?:protein)\b').hasMatch(line) && !keyIndices.containsKey('protein')) {
-        keyIndices['protein'] = i;
-      } else if (RegExp(r'^(?:carbohydrate|carbs?)\b').hasMatch(line) && !keyIndices.containsKey('carbs')) {
-        keyIndices['carbs'] = i;
-      } else if (RegExp(r'^(?:total\s+sugars?|sugars?)\b').hasMatch(line) && !keyIndices.containsKey('sugar')) {
-        keyIndices['sugar'] = i;
-      } else if (RegExp(r'^(?:total\s+fat|fat)\b').hasMatch(line) && !keyIndices.containsKey('total_fat')) {
-        keyIndices['total_fat'] = i;
-      } else if (RegExp(r'^(?:saturated\s+fat|sat\s+fat)\b').hasMatch(line) && !keyIndices.containsKey('sat_fat')) {
-        keyIndices['sat_fat'] = i;
-      } else if (RegExp(r'^(?:trans\s+fat)\b').hasMatch(line) && !keyIndices.containsKey('trans_fat')) {
-        keyIndices['trans_fat'] = i;
-      } else if (RegExp(r'^(?:sodium)\b').hasMatch(line) && !keyIndices.containsKey('sodium')) {
-        keyIndices['sodium'] = i;
+      if (RegExp(r'^(?:energy|calories?|cal)\b').hasMatch(line) && !keyPositions.containsValue('energy')) {
+        keyPositions[i] = 'energy';
+      } else if (RegExp(r'^(?:protein)\b').hasMatch(line) && !keyPositions.containsValue('protein')) {
+        keyPositions[i] = 'protein';
+      } else if (RegExp(r'^(?:carbohydrates?|carbs?)\b').hasMatch(line) && !keyPositions.containsValue('carbs')) {
+        keyPositions[i] = 'carbs';
+      } else if (RegExp(r'^(?:added\s+sugars?)\b').hasMatch(line) && !keyPositions.containsValue('added_sugar')) {
+        keyPositions[i] = 'added_sugar';
+      } else if (RegExp(r'^(?:total\s+sugars?|sugars?|sugar)\b').hasMatch(line) && !keyPositions.containsValue('sugar')) {
+        keyPositions[i] = 'sugar';
+      } else if (RegExp(r'^(?:total\s+fat)\b').hasMatch(line) && !keyPositions.containsValue('total_fat')) {
+        keyPositions[i] = 'total_fat';
+      } else if (RegExp(r'^(?:saturated\s+fat|sat\s+fat)\b').hasMatch(line) && !keyPositions.containsValue('sat_fat')) {
+        keyPositions[i] = 'sat_fat';
+      } else if (RegExp(r'^(?:trans\s+fat)\b').hasMatch(line) && !keyPositions.containsValue('trans_fat')) {
+        keyPositions[i] = 'trans_fat';
+      } else if (RegExp(r'^\*?\s*(?:mufa|monounsaturated)\b').hasMatch(line) && !keyPositions.containsValue('mufa')) {
+        keyPositions[i] = 'mufa';
+      } else if (RegExp(r'^\*?\s*(?:pufa|polyunsaturated)\b').hasMatch(line) && !keyPositions.containsValue('pufa')) {
+        keyPositions[i] = 'pufa';
+      } else if (RegExp(r'^(?:cholesterol)\b').hasMatch(line) && !keyPositions.containsValue('cholesterol')) {
+        keyPositions[i] = 'cholesterol';
+      } else if (RegExp(r'^(?:sodium|salt)\b').hasMatch(line) && !keyPositions.containsValue('sodium')) {
+        keyPositions[i] = 'sodium';
+      } else if (RegExp(r'^(?:dietary\s+)?fib(?:er|re)\b').hasMatch(line) && !keyPositions.containsValue('fiber')) {
+        keyPositions[i] = 'fiber';
       }
     }
 
-    if (keyIndices.length < 3) return;
+    if (keyPositions.length < 2) return;
 
-    // Find pure number blocks
-    final numRegex = RegExp(r'^(\d+(?:\.\d+)?)');
+    // Keys sorted by appearance order in OCR
+    final sortedKeyEntries = keyPositions.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final orderedKeys = sortedKeyEntries.map((e) => e.value).toList();
+    final lastKeyIndex = sortedKeyEntries.last.key;
+
+    // Extract numbers that appear after keys or in dedicated numeric columns
     final numberLines = <double>[];
     for (int i = 0; i < lines.length; i++) {
-      // Skip if this line is in the keys region
-      final m = numRegex.firstMatch(lines[i]);
-      if (m != null) {
-        final val = double.tryParse(m.group(1)!);
-        if (val != null) {
-          numberLines.add(val);
+      final line = lines[i].trim();
+      final lower = line.toLowerCase();
+
+      // Skip column headers like "Per 100g Values", "Approx Value 100g", "Per Serve", etc.
+      if (RegExp(r'(?:per\s*100g?|approx|values?\s*per|serving|parameters|rda)', caseSensitive: false).hasMatch(lower)) {
+        continue;
+      }
+
+      final matches = RegExp(r'(\d+(?:\.\d+)?)').allMatches(line);
+      if (matches.isNotEmpty) {
+        if (i > lastKeyIndex || (matches.length == 1 && RegExp(r'^\d+(\.\d+)?$').hasMatch(line))) {
+          // In multi-column row (e.g. "153.11   22.97   1.15"), the FIRST number is per 100g
+          final firstVal = double.tryParse(matches.first.group(1)!);
+          if (firstVal != null) {
+            numberLines.add(firstVal);
+          }
         }
       }
     }
 
-    if (numberLines.length >= keyIndices.length) {
-      // Sort keys by their appearance order
-      final sortedKeys = keyIndices.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
-      for (int i = 0; i < sortedKeys.length && i < numberLines.length; i++) {
-        final key = sortedKeys[i].key;
-        final val = numberLines[i];
-        switch (key) {
-          case 'energy':
-            if ((result['energy_kcal'] ?? 0) == 0) {
-              result['energy_kcal'] = val;
-              result['calories'] = val;
-              result['energy_kj'] = val * 4.184;
-            }
-            break;
-          case 'protein':
-            if ((result['protein_g'] ?? 0) == 0) result['protein_g'] = val;
-            break;
-          case 'carbs':
-            if ((result['carbohydrates_g_per_100g'] ?? 0) == 0) result['carbohydrates_g_per_100g'] = val;
-            break;
-          case 'sugar':
-            if ((result['sugar_g_per_100g'] ?? 0) == 0) result['sugar_g_per_100g'] = val;
-            break;
-          case 'total_fat':
-            if ((result['total_fat_g_per_100g'] ?? 0) == 0) result['total_fat_g_per_100g'] = val;
-            break;
-          case 'sat_fat':
-            if ((result['sat_fat_g_per_100g'] ?? 0) == 0) result['sat_fat_g_per_100g'] = val;
-            break;
-          case 'trans_fat':
-            if ((result['trans_fat_g_per_100g'] ?? 0) == 0) result['trans_fat_g_per_100g'] = val;
-            break;
-          case 'sodium':
-            if ((result['sodium_mg_per_100g'] ?? 0) == 0) result['sodium_mg_per_100g'] = val;
-            break;
-        }
+    final countToMap = orderedKeys.length < numberLines.length ? orderedKeys.length : numberLines.length;
+    for (int i = 0; i < countToMap; i++) {
+      final key = orderedKeys[i];
+      final val = numberLines[i];
+      switch (key) {
+        case 'energy':
+          if ((result['energy_kcal'] ?? 0) == 0 && val > 0) {
+            result['energy_kcal'] = val;
+            result['calories'] = val;
+            result['energy_kj'] = val * 4.184;
+          }
+          break;
+        case 'protein':
+          if ((result['protein_g'] ?? 0) == 0) result['protein_g'] = val;
+          break;
+        case 'carbs':
+          if ((result['carbohydrates_g_per_100g'] ?? 0) == 0) result['carbohydrates_g_per_100g'] = val;
+          break;
+        case 'sugar':
+          if ((result['sugar_g_per_100g'] ?? 0) == 0) result['sugar_g_per_100g'] = val;
+          break;
+        case 'added_sugar':
+          if ((result['added_sugar_g_per_100g'] ?? 0) == 0) result['added_sugar_g_per_100g'] = val;
+          break;
+        case 'total_fat':
+          if ((result['total_fat_g_per_100g'] ?? 0) == 0) result['total_fat_g_per_100g'] = val;
+          break;
+        case 'sat_fat':
+          if ((result['sat_fat_g_per_100g'] ?? 0) == 0) result['sat_fat_g_per_100g'] = val;
+          break;
+        case 'trans_fat':
+          if ((result['trans_fat_g_per_100g'] ?? 0) == 0) result['trans_fat_g_per_100g'] = val;
+          break;
+        case 'mufa':
+          result['mufa_g_per_100g'] = val;
+          break;
+        case 'pufa':
+          result['pufa_g_per_100g'] = val;
+          break;
+        case 'cholesterol':
+          if ((result['cholesterol_mg_per_100g'] ?? 0) == 0) result['cholesterol_mg_per_100g'] = val;
+          break;
+        case 'sodium':
+          if ((result['sodium_mg_per_100g'] ?? 0) == 0) result['sodium_mg_per_100g'] = val;
+          break;
+        case 'fiber':
+          if ((result['fiber_g'] ?? 0) == 0) result['fiber_g'] = val;
+          break;
       }
     }
   }
@@ -399,11 +460,13 @@ class OnDeviceNutritionParser {
     String? foundBrand;
     String? foundProduct;
 
-    // Check against top brands
+    // Check against popular Indian food, dairy, pickle, spice, and snack brands
     const popularBrands = [
       'Britannia', 'Nestle', 'Parle', 'ITC', 'Sunfeast', 'Amul', 'Cadbury',
       'Haldiram', 'MDH', 'Everest', 'Catch', 'MTR', 'Dabur', 'Tata', 'Kissan',
-      'Bikaji', 'Balaji', 'Paper Boat', 'Mother Dairy', 'Patanjali', 'Ching'
+      'Bikaji', 'Balaji', 'Paper Boat', 'Mother Dairy', 'Patanjali', 'Ching',
+      'Siddhivinayak', 'Pravin', 'Bedekar', 'Priya', "Mother's Recipe", "Nilon's",
+      'Ruchi', 'Aachi', 'Kwality', 'Bambino', 'ACT II', 'Bikanervala'
     ];
 
     for (final line in lines.take(6)) {
@@ -420,14 +483,35 @@ class OnDeviceNutritionParser {
     if (foundProduct == null && lines.isNotEmpty) {
       // Filter out founding year marks, noise numbers, and non-product header tokens
       final candidates = lines.where((l) {
-        final lower = l.toLowerCase();
-        if (RegExp(r'^(?:since|estd|nce|est)\s*\d+$', caseSensitive: false).hasMatch(lower)) return false;
-        if (RegExp(r'(?:fssai|lic\b|batch\b|mfg\b|exp\b|net\s+wt|mrp\b|best\s+before|nutritional\s+information|approx\s+value|values?\s+per|servings?\s+per|serving\s+size|parameters\b)', caseSensitive: false).hasMatch(lower)) return false;
-        if (RegExp(r'(?:energy|protein|carbohydrate|carbs?|fat|sodium|sugar|cholesterol|fibre|fiber)\b', caseSensitive: false).hasMatch(lower)) return false;
+        final lower = l.toLowerCase().trim();
+
+        // 1. Heritage year marks: "SINCE 1936", "NCE 1836.", "ESTD 1947", "EST 1980" anywhere in line
+        if (RegExp(r'\b(?:since|estd?|nce|est|established|founded)[-:\s]*\d{4}\b', caseSensitive: false).hasMatch(lower)) return false;
+        if (RegExp(r'^\D*\d{4}\D*$').hasMatch(lower)) return false; // Pure 4-digit year like 1836 or 1936
+
+        // 2. Packaging, regulatory, batch, and manufacturer boilerplate
+        if (RegExp(r'(?:fssai|lic\b|batch\b|lot\b|mfg\b|exp\b|net\s+(?:wt|weight|qty)|mrp\b|best\s+before|use\s+by|pkg\b|cpcb|lami\s*print|empty\s*pouch|buy\s*back|recyc)', caseSensitive: false).hasMatch(lower)) return false;
+
+        // 3. Table headers, parameters, and serving info
+        if (RegExp(r'(?:nutritional\s+information|approx\s+value|values?\s+per|servings?\s+per|serving\s+size|parameters\b|per\s+100g|per\s+serve|rda)', caseSensitive: false).hasMatch(lower)) return false;
+
+        // 4. Nutrient parameter names
+        if (RegExp(r'(?:energy|protein|carbohydrate|carbs?|fat|sodium|sugar|cholesterol|fibre|fiber|mufa|pufa)\b', caseSensitive: false).hasMatch(lower)) return false;
+
+        // 5. Lines that are primarily numbers, units, or grid separators
+        if (RegExp(r'^\s*[\d\.\s\|\¦\!\[\]\/\:\-\*\~\,\(\)]+\s*$').hasMatch(lower)) return false;
         if (RegExp(r'\d+\s*(?:g|mg|kcal|kj)\b', caseSensitive: false).hasMatch(lower)) return false;
         if (lower.contains('|') || (lower.contains(':') && RegExp(r'\d').hasMatch(lower))) return false;
+
+        // 6. Ingredients lines
         if (lower.startsWith('ingredients') || lower.startsWith('contains')) return false;
-        if (lower.length < 3) return false;
+
+        // 7. Storage / usage instructions
+        if (RegExp(r'(?:store\s+in|cool\s+dry|direct\s+sunlight|keep\s+away|shelf\s+life|dry\s+spoon|consume\s+within)', caseSensitive: false).hasMatch(lower)) return false;
+
+        // 8. Trivial short lines or non-alphabet strings
+        if (lower.replaceAll(RegExp(r'[^a-z]'), '').length < 3) return false;
+
         return true;
       }).toList();
 
@@ -437,17 +521,23 @@ class OnDeviceNutritionParser {
     }
 
     // If still null or generic, infer food identity from ingredients or package text
-    if (foundProduct == null || foundProduct.isEmpty) {
+    if (foundProduct == null ||
+        foundProduct.isEmpty ||
+        foundProduct.length < 4 ||
+        RegExp(r'^\W*\d+').hasMatch(foundProduct) ||
+        RegExp(r'\b(?:mufa|pufa|cholesterol|approx|value|parameters)\b', caseSensitive: false).hasMatch(foundProduct)) {
       final lowerText = text.toLowerCase();
-      if (lowerText.contains('mango') && (lowerText.contains('pickle') || lowerText.contains('pieces'))) {
+      if (lowerText.contains('mango') && (lowerText.contains('pickle') || lowerText.contains('pieces') || lowerText.contains('lonche') || lowerText.contains('achar'))) {
         foundProduct = 'Mango Pickle';
       } else if (lowerText.contains('pickle') || lowerText.contains('achar') || lowerText.contains('lonche')) {
         foundProduct = 'Traditional Indian Pickle';
       } else if (lowerText.contains('cream pav') || lowerText.contains('pav')) {
         foundProduct = 'Cream Pav';
+      } else if (lowerText.contains('paneer') || lowerText.contains('malai paneer')) {
+        foundProduct = 'Fresh Malai Paneer';
       } else {
         // Check ingredients line for main food item (e.g. Ingredients: Mango Pieces (72%))
-        final ingMatch = RegExp(r'ingredients?\s*:\s*([A-Za-z\s]+)', caseSensitive: false).firstMatch(text);
+        final ingMatch = RegExp(r'ingredients?\s*:\s*([^,\(\[\r\n]+)', caseSensitive: false).firstMatch(text);
         if (ingMatch != null) {
           final mainIng = ingMatch.group(1)?.trim();
           if (mainIng != null && mainIng.isNotEmpty && mainIng.length < 30) {

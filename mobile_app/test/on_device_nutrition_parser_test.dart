@@ -237,5 +237,53 @@ Ingredients: Mango Pieces, Edible Vegetable Oil, Salt, Red Chilli Powder, Mustar
       expect(nut['sat_fat_g_per_100g'], 2.44);
       expect(nut['sodium_mg_per_100g'], 3580.0);
     });
+
+    test('Parses Siddhivinayak Mango Pickle jar with NCE 1836 noise, 33 servings, and multi-macro table', () {
+      const pickleJarFullOcr = '''
+NCE 1836.
+33 Servings per pack 1 Serving Size:15g (1tbsp)
+NUTRITIONAL INFORMATION
+Nutritional Parameters | Per 100g provides approx. | Per Serve provides approx. | Per Serve % RDA*
+Energy(kcal) | 153.11 | 22.97 | 1.15
+Protein(g) | 3.25 | 0.49 | *
+Carbohydrate(g) | 17.23 | 2.58 | *
+Total Sugar(g) | 2.57 | 0.39 | *
+Total Fat(g) | 7.91 | 1.19 | 1.77
+Saturated Fat(g) | 2.44 | 0.37 | 1.66
+Trans Fat(g) | 0 | 0.00 | 0.00
+*MUFA(g) | 1.85 | 0.28 | *
+*PUFA(g) | 3.6 | 0.54 | *
+Cholesterol(mg) | 0 | 0.00 | *
+Sodium(mg) | 3580 | 537.00 | 26.85
+*The Recommended Dietary Allowance (RDA) is calculated on the basis of 2000 calories requirement for an average adult per day.
+Ingredients : Mango Pieces (72%), Salt, Ground Spices (Red Chilli, Mustard, Turmeric, Fenugreek, Asafoetida), Cotton Seed Oil, Acidity Regulator - (INS 260), Preservative - (INS 211)
+CONTAINS PERMITTED CLASS II PRESERVATIVE
+''';
+
+      final result = OnDeviceNutritionParser.parseFromText(pickleJarFullOcr);
+      expect(result, isNotNull);
+
+      // Ensures NCE 1836. or table terms were filtered and product identity inferred
+      expect(result!['product_name'], 'Mango Pickle');
+      expect(result['serving_size_g'], 15.0);
+      expect(result['pack_weight_g'], 495.0); // 33 * 15g = 495g
+
+      final nut = jsonDecode(result['nutrition_json'] as String) as Map<String, dynamic>;
+      expect(nut['calories'], 153.11);
+      expect(nut['protein_g'], 3.25);
+      expect(nut['carbohydrates_g_per_100g'], 17.23);
+      expect(nut['sugar_g_per_100g'], 2.57);
+      expect(nut['total_fat_g_per_100g'], 7.91);
+      expect(nut['sat_fat_g_per_100g'], 2.44);
+      expect(nut['trans_fat_g_per_100g'], 0.0);
+      expect(nut['mufa_g_per_100g'], 1.85);
+      expect(nut['pufa_g_per_100g'], 3.6);
+      expect(nut['cholesterol_mg_per_100g'], 0.0);
+      expect(nut['sodium_mg_per_100g'], 3580.0);
+
+      final additives = jsonDecode(result['additives_json'] as String) as List;
+      expect(additives.any((a) => a['ins_code'].toString().contains('260')), isTrue);
+      expect(additives.any((a) => a['ins_code'].toString().contains('211')), isTrue);
+    });
   });
 }
