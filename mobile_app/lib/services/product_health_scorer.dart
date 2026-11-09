@@ -39,6 +39,7 @@ class HealthScoreResult {
   final String? redCapReason;
   final bool isIngredientOnlyScore;
   final bool hasSufficientData;
+  final bool isDataIncomplete;
   final String scoreBreakdownSummary;
   final Map<String, dynamic> breakdownDetails;
 
@@ -49,6 +50,7 @@ class HealthScoreResult {
     this.redCapReason,
     required this.isIngredientOnlyScore,
     required this.hasSufficientData,
+    this.isDataIncomplete = false,
     required this.scoreBreakdownSummary,
     required this.breakdownDetails,
   });
@@ -61,6 +63,7 @@ class HealthScoreResult {
       redCapReason: null,
       isIngredientOnlyScore: false,
       hasSufficientData: false,
+      isDataIncomplete: true,
       scoreBreakdownSummary: 'Insufficient Data — Capture Nutrition Label to score',
       breakdownDetails: {},
     );
@@ -195,12 +198,31 @@ class ProductHealthScorer {
     int? novaGrade,
     bool? redCapTriggered,
     HealthIntelligence? healthIntelligence,
+    String? productName,
+    String? category,
   }) {
     final normalized = normalizeNutrients(nutrition);
     final additiveList = _normalizeAdditives(additives);
     final ingredientList = _normalizeIngredients(ingredients);
 
-    final bool hasNutrition = normalized.hasNutritionalValues;
+    final bool hasMacroData = (normalized.energyKcal != null && normalized.energyKcal! > 0) ||
+        (normalized.totalFatG != null && normalized.totalFatG! > 0) ||
+        (normalized.sugarsG != null && normalized.sugarsG! > 0) ||
+        (normalized.proteinG != null && normalized.proteinG! > 0) ||
+        (normalized.sodiumMg != null && normalized.sodiumMg! > 0);
+
+    final nameLower = '${productName ?? ''} ${category ?? ''}'.toLowerCase();
+    final bool isZeroCalorieDrink = nameLower.contains('water') ||
+        nameLower.contains('sparkling water') ||
+        nameLower.contains('soda water') ||
+        nameLower.contains('green tea') ||
+        nameLower.contains('black tea') ||
+        nameLower.contains('herbal tea') ||
+        nameLower.contains('black coffee') ||
+        nameLower.contains('zero calorie') ||
+        nameLower.contains('diet');
+
+    final bool hasNutrition = normalized.hasNutritionalValues && (hasMacroData || isZeroCalorieDrink);
     final bool hasIngredientsOrAdditives = additiveList.isNotEmpty || ingredientList.isNotEmpty;
 
     // RULE 3: Handle completely missing data honestly
@@ -462,13 +484,13 @@ class ProductHealthScorer {
       tokens.add('Lengthy Ingredients: -5');
     }
 
-    int finalScore = score.round().clamp(10, 95);
+    int finalScore = score.round().clamp(10, 70);
     if (isRedCapped && finalScore > 39) {
       finalScore = 39;
       tokens.add('Red-Cap: Capped to 39');
     }
 
-    final summary = '${tokens.join(' | ')} | Final Score: $finalScore';
+    final summary = 'Scored from ingredients only — nutrition table not reported | ${tokens.join(' | ')} | Final Score: $finalScore';
 
     return HealthScoreResult(
       score: finalScore,

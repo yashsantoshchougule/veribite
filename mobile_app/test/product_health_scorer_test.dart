@@ -118,8 +118,83 @@ void main() {
 
       expect(result.score, isNull);
       expect(result.hasSufficientData, isFalse);
+      expect(result.isDataIncomplete, isTrue);
       expect(result.verdictTag, 'Insufficient Data');
       expect(result.scoreBreakdownSummary, contains('Insufficient Data'));
+    });
+
+    test('All-zero nutrients (0 kcal, 0g fat, 0g sugar, 0g protein, 0mg sodium) with NO ingredients returns insufficientData and NEVER 95', () {
+      final allZeroNutrition = {
+        'energy_kcal': 0.0,
+        'sugars_100g': 0.0,
+        'saturated-fat_100g': 0.0,
+        'total_fat_g': 0.0,
+        'sodium_mg': 0.0,
+        'proteins_100g': 0.0,
+        'fiber_100g': 0.0,
+      };
+
+      final result = ProductHealthScorer.calculate(
+        nutrition: allZeroNutrition,
+        additives: [],
+        ingredients: [],
+        novaGrade: 3,
+        productName: 'Chess',
+      );
+
+      // Must NEVER return 95 or Nutri Safe!
+      expect(result.score, isNull);
+      expect(result.hasSufficientData, isFalse);
+      expect(result.isDataIncomplete, isTrue);
+      expect(result.verdictTag, 'Insufficient Data');
+    });
+
+    test('All-zero nutrients with ingredients is strictly capped at 70 and labeled as ingredient-only', () {
+      final allZeroNutrition = {
+        'energy_kcal': 0.0,
+        'sugars_100g': 0.0,
+        'saturated-fat_100g': 0.0,
+        'total_fat_g': 0.0,
+        'sodium_mg': 0.0,
+        'proteins_100g': 0.0,
+      };
+
+      final result = ProductHealthScorer.calculate(
+        nutrition: allZeroNutrition,
+        additives: [],
+        ingredients: ['Milk Solids', 'Salt', 'Active Cultures'],
+        novaGrade: 3,
+        productName: 'Cheese Product',
+      );
+
+      // Must be capped at <= 70 and labeled appropriately
+      expect(result.isIngredientOnlyScore, isTrue);
+      expect(result.score, isNotNull);
+      expect(result.score!, lessThanOrEqualTo(70));
+      expect(result.scoreBreakdownSummary, contains('Scored from ingredients only — nutrition table not reported'));
+    });
+
+    test('Zero calorie drink (Water / Green Tea) is allowed with 0 macros', () {
+      final zeroCalNutrition = {
+        'energy_kcal': 0.0,
+        'sugars_100g': 0.0,
+        'saturated-fat_100g': 0.0,
+        'sodium_mg': 5.0,
+        'proteins_100g': 0.0,
+      };
+
+      final result = ProductHealthScorer.calculate(
+        nutrition: zeroCalNutrition,
+        additives: [],
+        ingredients: ['Purified Water'],
+        novaGrade: 1,
+        productName: 'Natural Spring Water',
+        category: 'Mineral Water',
+      );
+
+      expect(result.score, isNotNull);
+      expect(result.score!, greaterThanOrEqualTo(90));
+      expect(result.isIngredientOnlyScore, isFalse);
     });
 
     test('Key normalizer converts salt to sodium correctly (1.5g salt -> 600mg sodium)', () {

@@ -326,6 +326,8 @@ class ProductScannerService {
       novaGrade: product.novaGrade,
       redCapTriggered: product.redCapTriggered,
       healthIntelligence: enriched,
+      productName: product.productName,
+      category: product.category,
     );
 
     return product.copyWith(
@@ -621,7 +623,7 @@ class ProductScannerService {
 
           if (title != null && title.isNotEmpty) {
             return {
-              'brand': brand ?? 'Brand Verified',
+              'brand': brand ?? 'Brand Not Listed',
               'title': title.trim(),
             };
           }
@@ -737,7 +739,7 @@ class ProductScannerService {
         : fallbackQuery;
     final brand = p['brands']?.toString().trim().isNotEmpty == true
         ? p['brands'].toString().trim()
-        : 'Brand Verified';
+        : 'Brand Not Listed';
     final category = p['categories']?.toString().split(',').first.trim().isNotEmpty == true
         ? p['categories'].toString().split(',').first.trim()
         : 'Packaged Food';
@@ -1195,7 +1197,7 @@ class ProductScannerService {
           return {
             'barcode': barcode,
             'product_name': p['product_name'] ?? p['product_name_en'] ?? 'Packaged Food Item',
-            'brand_name': p['brands'] ?? 'Brand Verified',
+            'brand_name': p['brands'] ?? 'Brand Not Listed',
             'category': p['categories'] ?? 'Packaged Food',
             'serving_size_g': servingG,
             'pack_weight_g': packG,
@@ -1295,7 +1297,7 @@ class ProductScannerService {
     String? analysisSource,
   }) {
     final productName = raw['product_name']?.toString() ?? 'Packaged Food';
-    final brandName = raw['brand_name']?.toString() ?? 'Brand Verified';
+    final brandName = raw['brand_name']?.toString() ?? 'Brand Not Listed';
     final category = raw['category']?.toString() ?? 'Packaged Food';
     final unitPieceWeight = (raw['piece_weight_g'] as num?)?.toDouble();
 
@@ -1556,6 +1558,8 @@ class ProductScannerService {
       novaGrade: (raw['nova_grade'] as num?)?.toInt(),
       redCapTriggered: raw['red_cap_triggered'] == 1 || raw['red_cap_triggered'] == true,
       healthIntelligence: healthIntelligence,
+      productName: productName,
+      category: category,
     );
 
     int? finalScore;
@@ -1564,8 +1568,12 @@ class ProductScannerService {
     final bool isIngredientOnly = scoreResult.isIngredientOnlyScore;
 
     // Honor explicit verified scores (e.g. curated offline catalog) only if NOT the fake 65 fallback
+    // and ONLY if the product has sufficient data (never award a score to an all-zero empty stub)
     final explicitScore = (raw['health_score'] as num?)?.toInt();
-    if (explicitScore != null && explicitScore != 65) {
+    if (!scoreResult.hasSufficientData) {
+      finalScore = null;
+      verdictTag = scoreResult.verdictTag;
+    } else if (explicitScore != null && explicitScore != 65) {
       finalScore = explicitScore;
       if (scoreResult.isRedCapped && finalScore > 39) {
         finalScore = 39;

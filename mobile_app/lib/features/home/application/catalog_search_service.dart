@@ -12,10 +12,26 @@ import '../../profile/domain/user_profile_model.dart';
 /// Normalizes Indian food search terms, phonetic spelling variants, and colloquial typos.
 class IndianFoodQueryNormalizer {
   static const Map<String, String> _dictionary = {
+    'chess': 'cheese',
+    'chees': 'cheese',
+    'cheez': 'cheese',
+    'chiz': 'cheese',
     'panner': 'paneer',
     'paner': 'paneer',
+    'panir': 'paneer',
     'paneere': 'paneer',
     'paneeer': 'paneer',
+    'bater': 'butter',
+    'buter': 'butter',
+    'ghee': 'ghee',
+    'ghi': 'ghee',
+    'choklet': 'chocolate',
+    'choclate': 'chocolate',
+    'ketchap': 'ketchup',
+    'kechup': 'ketchup',
+    'mayo': 'mayonnaise',
+    'mayonese': 'mayonnaise',
+    'oates': 'oats',
     'bhujiya': 'bhujia',
     'bhujya': 'bhujia',
     'bhoojia': 'bhujia',
@@ -222,17 +238,32 @@ class CatalogSearchService {
     }).toList();
   }
 
-  /// Parses raw Open Food Facts search hit or product JSON into a structured product map
-  Map<String, dynamic> _parseOffHitToProductData(Map<dynamic, dynamic> raw) {
+  /// Parses raw Open Food Facts search hit or product JSON into a structured product map.
+  /// Drops corrupted / empty rows with zero macros and zero ingredients.
+  Map<String, dynamic>? _parseOffHitToProductData(Map<dynamic, dynamic> raw) {
     final code = (raw['code'] ?? raw['_id'] ?? '').toString();
     final name = (raw['product_name'] ?? raw['product_name_en'] ?? raw['generic_name'] ?? 'Packaged Food').toString();
 
     final brands = raw['brands'];
-    String brandText = 'Verified Brand';
+    String brandText = 'Brand Not Listed';
     if (brands is List && brands.isNotEmpty) {
       brandText = brands.first.toString();
     } else if (brands is String && brands.isNotEmpty) {
       brandText = brands;
+    }
+
+    if (brandText == 'Brand Not Listed' && name.isNotEmpty) {
+      final firstWord = name.split(' ').first.trim();
+      const knownBrands = [
+        'Amul', 'Britannia', 'Mother Dairy', 'Nestle', 'Vadilal',
+        'MTR', 'Haldiram', 'Bikaji', 'Balaji', 'Kwality', 'Go', 'Milky Mist'
+      ];
+      for (final kb in knownBrands) {
+        if (firstWord.toLowerCase() == kb.toLowerCase()) {
+          brandText = kb;
+          break;
+        }
+      }
     }
 
     final categories = (raw['categories'] ?? '').toString();
@@ -250,9 +281,9 @@ class CatalogSearchService {
       });
     }
 
-    final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ??
+    double sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ??
         (nutriments['sugars'] as num?)?.toDouble() ?? 0.0;
-    final satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ??
+    double satFat = (nutriments['saturated-fat_100g'] as num?)?.toDouble() ??
         (nutriments['saturated-fat'] as num?)?.toDouble() ?? 0.0;
     double sodium = 0.0;
     if (nutriments['sodium_100g'] != null) {
@@ -263,34 +294,34 @@ class CatalogSearchService {
       sodium = (nutriments['sodium_mg'] as num).toDouble();
     }
 
-    final totalFat = (nutriments['fat_100g'] as num?)?.toDouble() ??
+    double totalFat = (nutriments['fat_100g'] as num?)?.toDouble() ??
         (nutriments['total-fat_100g'] as num?)?.toDouble() ??
         (nutriments['fat'] as num?)?.toDouble() ??
         (nutriments['total_fat_g'] as num?)?.toDouble() ??
         (nutriments['total_fat'] as num?)?.toDouble() ?? 0.0;
 
-    final carbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble() ??
+    double carbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble() ??
         (nutriments['carbohydrates'] as num?)?.toDouble() ??
         (nutriments['carbs_100g'] as num?)?.toDouble() ??
         (nutriments['carbs_g'] as num?)?.toDouble() ??
         (nutriments['total_carbohydrates_g'] as num?)?.toDouble() ?? 0.0;
 
-    final protein = (nutriments['proteins_100g'] as num?)?.toDouble() ??
+    double protein = (nutriments['proteins_100g'] as num?)?.toDouble() ??
         (nutriments['protein_100g'] as num?)?.toDouble() ??
         (nutriments['proteins'] as num?)?.toDouble() ??
         (nutriments['protein'] as num?)?.toDouble() ?? 0.0;
 
-    final fiber = (nutriments['fiber_100g'] as num?)?.toDouble() ??
+    double fiber = (nutriments['fiber_100g'] as num?)?.toDouble() ??
         (nutriments['fibre_100g'] as num?)?.toDouble() ??
         (nutriments['dietary_fiber_g'] as num?)?.toDouble() ??
         (nutriments['fiber'] as num?)?.toDouble() ?? 0.0;
 
-    final addedSugar = (nutriments['added-sugars_100g'] as num?)?.toDouble() ??
+    double addedSugar = (nutriments['added-sugars_100g'] as num?)?.toDouble() ??
         (nutriments['added-sugars'] as num?)?.toDouble() ??
         (nutriments['added_sugars_g'] as num?)?.toDouble() ??
         (nutriments['added_sugar'] as num?)?.toDouble() ?? 0.0;
 
-    final transFat = (nutriments['trans-fat_100g'] as num?)?.toDouble() ??
+    double transFat = (nutriments['trans-fat_100g'] as num?)?.toDouble() ??
         (nutriments['trans-fat'] as num?)?.toDouble() ??
         (nutriments['trans_fat'] as num?)?.toDouble() ?? 0.0;
 
@@ -302,11 +333,11 @@ class CatalogSearchService {
       chol = (nutriments['cholesterol_mg'] as num).toDouble();
     }
 
-    final energyKcal = (nutriments['energy-kcal_100g'] as num?)?.toDouble() ??
+    double energyKcal = (nutriments['energy-kcal_100g'] as num?)?.toDouble() ??
         (nutriments['energy-kcal'] as num?)?.toDouble() ??
         (((nutriments['energy-kj_100g'] as num?)?.toDouble() ?? 0.0) / 4.184);
 
-    final energyKj = (nutriments['energy-kj_100g'] as num?)?.toDouble() ??
+    double energyKj = (nutriments['energy-kj_100g'] as num?)?.toDouble() ??
         (energyKcal > 0 ? energyKcal * 4.184 : 0.0);
 
     final servingG = (raw['serving_quantity'] as num?)?.toDouble() ?? 30.0;
@@ -316,6 +347,53 @@ class CatalogSearchService {
     final ingredientsList = ingText.isNotEmpty
         ? ingText.split(RegExp(r'[,;]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
         : <String>[];
+
+    // Nutritional Completeness & Category Baseline Macro Estimation
+    final bool hasMacroData = (energyKcal > 0) || (totalFat > 0) || (carbs > 0) || (protein > 0);
+    final String fullTextLower = '$name $categories'.toLowerCase();
+    final bool isZeroCalDrink = fullTextLower.contains('water') ||
+        fullTextLower.contains('sparkling water') ||
+        fullTextLower.contains('soda water') ||
+        fullTextLower.contains('green tea') ||
+        fullTextLower.contains('black tea') ||
+        fullTextLower.contains('herbal tea') ||
+        fullTextLower.contains('black coffee') ||
+        fullTextLower.contains('zero calorie') ||
+        fullTextLower.contains('diet');
+
+    if (!hasMacroData && !isZeroCalDrink) {
+      if (fullTextLower.contains('cheese') || fullTextLower.contains('fromage') || fullTextLower.contains('cheddar')) {
+        energyKcal = 310.0;
+        energyKj = 310.0 * 4.184;
+        protein = 20.0;
+        totalFat = 25.0;
+        satFat = 16.0;
+        carbs = 1.5;
+        sugars = 1.0;
+        sodium = 650.0;
+      } else if (fullTextLower.contains('butter') || fullTextLower.contains('beurre')) {
+        energyKcal = 717.0;
+        energyKj = 717.0 * 4.184;
+        protein = 0.9;
+        totalFat = 81.0;
+        satFat = 51.0;
+        carbs = 0.1;
+        sugars = 0.1;
+        sodium = 650.0;
+      } else if (fullTextLower.contains('paneer')) {
+        energyKcal = 265.0;
+        energyKj = 265.0 * 4.184;
+        protein = 18.0;
+        totalFat = 20.0;
+        satFat = 12.0;
+        carbs = 3.5;
+        sugars = 2.0;
+        sodium = 20.0;
+      } else if (ingredientsList.isEmpty && additivesList.isEmpty) {
+        // Drop corrupted empty stubs with zero macros and zero ingredients
+        return null;
+      }
+    }
 
     // Check if test provided an explicit nutriscore_score or health_score
     final explicitScore = (raw['health_score'] as num?)?.toInt() ??
@@ -383,7 +461,10 @@ class CatalogSearchService {
         normWord == 'masala' ||
         normWord == 'chyawanprash' ||
         normWord == 'namkeen' ||
-        normWord == 'dahi curd';
+        normWord == 'dahi curd' ||
+        normWord == 'cheese' ||
+        normWord == 'butter' ||
+        normWord == 'ghee';
     if (isIndianFoodQuery && !hasTitleNorm && !hasSubNorm) {
       score -= 150;
     }
@@ -494,6 +575,7 @@ class CatalogSearchService {
               if (code.isEmpty || name.isEmpty || seenCodes.contains(code)) continue;
 
               final productMap = _parseOffHitToProductData(hit);
+              if (productMap == null) continue;
               final scanned = _scannerService.evaluateProduct(productMap, defaultProfile, code);
 
               seenCodes.add(code);
@@ -544,6 +626,7 @@ class CatalogSearchService {
                   if (code.isEmpty || name.isEmpty || seenCodes.contains(code)) continue;
 
                   final productMap = _parseOffHitToProductData(p);
+                  if (productMap == null) continue;
                   final scanned = _scannerService.evaluateProduct(productMap, defaultProfile, code);
 
                   seenCodes.add(code);

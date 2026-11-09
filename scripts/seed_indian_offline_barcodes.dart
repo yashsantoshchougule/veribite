@@ -378,6 +378,31 @@ void main() {
     ],
     ingredients: ['Standardised Milk (85%)', 'Sugar', 'Cocoa Solids (1.5%)', 'Stabilizers (INS 407, INS 412)'],
   );
+  addP(
+    barcode: '8901063024509',
+    name: 'Britannia Cheese Slices',
+    brand: 'Britannia',
+    category: 'Dairy & Cheese',
+    serving: 20.0,
+    pack: 200.0,
+    piece: 20.0,
+    score: 58,
+    nova: 4,
+    energyKcal: 308.0,
+    sugar: 1.6,
+    satFat: 15.5,
+    totalFat: 24.5,
+    sodium: 740.0,
+    protein: 20.0,
+    carbs: 2.0,
+    fiber: 0.0,
+    additives: [
+      {'ins_code': '331', 'name': 'Sodium Citrate', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+      {'ins_code': '339', 'name': 'Sodium Phosphates', 'risk_tier': 'CAUTION', 'triggers_red_cap': 0},
+      {'ins_code': '200', 'name': 'Sorbic Acid', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+    ],
+    ingredients: ['Cheddar Cheese (Pasteurised Cow Milk, Microbial Enzymes)', 'Water', 'Butter', 'Milk Solids', 'Emulsifying Salts (INS 331, INS 339)', 'Iodised Salt', 'Preservative (INS 200)'],
+  );
 
   // 2. NESTLÉ INDIA (Prefix: 8901058)
   addP(
@@ -1361,6 +1386,31 @@ void main() {
       {'ins_code': '160a', 'name': 'Beta-Carotene', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
     ],
     ingredients: ['Butter (Pasteurised Cream from Milk)', 'Common Salt'],
+  );
+  addP(
+    barcode: '8901262010450',
+    name: 'Amul Processed Cheese Cubes',
+    brand: 'Amul',
+    category: 'Dairy & Cheese',
+    serving: 20.0,
+    pack: 200.0,
+    piece: 25.0,
+    score: 58,
+    nova: 4,
+    energyKcal: 314.0,
+    sugar: 1.5,
+    satFat: 16.0,
+    totalFat: 25.0,
+    sodium: 720.0,
+    protein: 20.0,
+    carbs: 2.0,
+    fiber: 0.0,
+    additives: [
+      {'ins_code': '331', 'name': 'Sodium Citrate', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+      {'ins_code': '339', 'name': 'Sodium Phosphates', 'risk_tier': 'CAUTION', 'triggers_red_cap': 0},
+      {'ins_code': '200', 'name': 'Sorbic Acid', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+    ],
+    ingredients: ['Cheese (Milk Solids, Microbial Rennet, Ferment Cultures)', 'Water', 'Butter', 'Milk Solids', 'Emulsifiers (INS 331, INS 339)', 'Common Salt', 'Class II Preservative (INS 200)'],
   );
   addP(
     barcode: '8901262010104',
@@ -2373,6 +2423,50 @@ void main() {
     protein: 4.0,
     additives: [],
     ingredients: ['Pasteurised Milk', 'Sugar (16.5%)', 'Caramelised Sugar', 'Lactic Culture'],
+  );
+  addP(
+    barcode: '8901648002345',
+    name: 'Mother Dairy Cheese Slices',
+    brand: 'Mother Dairy',
+    category: 'Dairy & Cheese',
+    serving: 20.0,
+    pack: 200.0,
+    piece: 20.0,
+    score: 60,
+    nova: 4,
+    energyKcal: 310.0,
+    sugar: 1.4,
+    satFat: 15.8,
+    totalFat: 24.8,
+    sodium: 700.0,
+    protein: 20.5,
+    carbs: 1.8,
+    fiber: 0.0,
+    additives: [
+      {'ins_code': '331', 'name': 'Sodium Citrate', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+      {'ins_code': '339', 'name': 'Sodium Phosphates', 'risk_tier': 'CAUTION', 'triggers_red_cap': 0},
+    ],
+    ingredients: ['Cheddar Cheese (Milk, Salt, Active Culture, Microbial Rennet)', 'Water', 'Butter', 'Milk Solids', 'Emulsifying Salts (INS 331, INS 339)', 'Iodised Salt'],
+  );
+  addP(
+    barcode: '8906001021234',
+    name: 'Go Pizza Cheese Shredded Mozzarella',
+    brand: 'Go Cheese',
+    category: 'Dairy & Cheese',
+    serving: 25.0,
+    pack: 200.0,
+    score: 64,
+    nova: 3,
+    energyKcal: 290.0,
+    sugar: 1.0,
+    satFat: 14.0,
+    totalFat: 22.0,
+    sodium: 580.0,
+    protein: 22.0,
+    carbs: 1.5,
+    fiber: 0.0,
+    additives: [],
+    ingredients: ['Pasteurised Cow Milk', 'Common Salt', 'Active Microbial Cultures', 'Microbial Rennet'],
   );
 
   // 20. PATANJALI AYURVED (Prefix: 8904063)

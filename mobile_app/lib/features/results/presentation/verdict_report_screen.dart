@@ -577,7 +577,13 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     } else if (widget.product.isIngredientOnlyScore) {
       scoreAdvice = 'Score calculated from verified ingredients & additives (Nutrition table not detected).';
     } else if (score >= 70 && !widget.product.redCapTriggered) {
-      scoreAdvice = 'Nutrient-dense formulation with minimal industrial additives.';
+      final bool hasNutrientDensity = (widget.product.proteinGPer100g >= 5.0 || widget.product.fiberGPer100g >= 3.0) &&
+          widget.product.caloriesPer100g > 0;
+      if (hasNutrientDensity) {
+        scoreAdvice = 'Nutrient-dense formulation with minimal industrial additives.';
+      } else {
+        scoreAdvice = 'Low-additive formulation. Balanced profile with controlled processing.';
+      }
     } else if (score >= 40 && !widget.product.redCapTriggered) {
       scoreAdvice = 'Moderate nutritional quality. Consume in controlled moderation.';
     } else {

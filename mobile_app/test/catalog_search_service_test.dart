@@ -99,16 +99,123 @@ void main() {
     });
 
     test('IndianFoodQueryNormalizer normalizes phonetic typos to canonical Indian food names', () {
+      expect(IndianFoodQueryNormalizer.normalize('chess'), 'cheese');
+      expect(IndianFoodQueryNormalizer.normalize('chees'), 'cheese');
+      expect(IndianFoodQueryNormalizer.normalize('cheez'), 'cheese');
+      expect(IndianFoodQueryNormalizer.normalize('chiz'), 'cheese');
       expect(IndianFoodQueryNormalizer.normalize('panner'), 'paneer');
       expect(IndianFoodQueryNormalizer.normalize('paner'), 'paneer');
+      expect(IndianFoodQueryNormalizer.normalize('panir'), 'paneer');
       expect(IndianFoodQueryNormalizer.normalize('paneere'), 'paneer');
       expect(IndianFoodQueryNormalizer.normalize('vadilal panner makhani'), 'vadilal paneer makhani');
+      expect(IndianFoodQueryNormalizer.normalize('bater'), 'butter');
+      expect(IndianFoodQueryNormalizer.normalize('buter'), 'butter');
+      expect(IndianFoodQueryNormalizer.normalize('ghee'), 'ghee');
+      expect(IndianFoodQueryNormalizer.normalize('ghi'), 'ghee');
+      expect(IndianFoodQueryNormalizer.normalize('choklet'), 'chocolate');
+      expect(IndianFoodQueryNormalizer.normalize('ketchap'), 'ketchup');
+      expect(IndianFoodQueryNormalizer.normalize('mayo'), 'mayonnaise');
+      expect(IndianFoodQueryNormalizer.normalize('oates'), 'oats');
       expect(IndianFoodQueryNormalizer.normalize('bhujiya'), 'bhujia');
       expect(IndianFoodQueryNormalizer.normalize('chavanprash'), 'chyawanprash');
       expect(IndianFoodQueryNormalizer.normalize('masla'), 'masala');
       expect(IndianFoodQueryNormalizer.normalize('biskut'), 'biscuit');
       expect(IndianFoodQueryNormalizer.normalize('namkin'), 'namkeen');
       expect(IndianFoodQueryNormalizer.normalize('dahi'), 'dahi curd');
+    });
+
+    test('Purges empty/corrupted OFF stubs (like "Chess" with zero macros & no ingredients) and never returns score 95', () async {
+      final mockJson = jsonEncode({
+        'count': 2,
+        'products': [
+          {
+            'code': '9999999999999',
+            'product_name': 'Chess',
+            'brands': '',
+            'categories': 'Games, Toys',
+            'nova_group': 3,
+            'nutriments': {
+              'energy-kcal_100g': 0.0,
+              'fat_100g': 0.0,
+              'carbohydrates_100g': 0.0,
+              'proteins_100g': 0.0,
+              'sodium_100g': 0.0,
+            },
+            'ingredients_text': '',
+            'additives_tags': [],
+          },
+          {
+            'code': '8901262010450',
+            'product_name': 'Amul Processed Cheese',
+            'brands': 'Amul',
+            'categories': 'Dairy & Cheese',
+            'nova_group': 4,
+            'nutriments': {
+              'energy-kcal_100g': 314.0,
+              'fat_100g': 25.0,
+              'saturated-fat_100g': 16.0,
+              'carbohydrates_100g': 2.0,
+              'proteins_100g': 20.0,
+              'sodium_100g': 0.72,
+            },
+          }
+        ]
+      });
+
+      final mockClient = MockClient((request) async {
+        return http.Response(mockJson, 200);
+      });
+
+      final service = CatalogSearchService(httpClient: mockClient);
+      final results = await service.searchFoodProducts('chess');
+
+      // The empty "Chess" stub with 0 macros MUST be purged completely!
+      expect(results.any((r) => r.code == '9999999999999'), isFalse);
+      // Valid cheese product MUST be present
+      expect(results.any((r) => r.title.contains('Amul Processed Cheese')), isTrue);
+      // No product should have brand "Verified Brand"
+      expect(results.any((r) => r.subtitle.contains('Verified Brand')), isFalse);
+    });
+
+    test('Populates Category Baseline Macros when known cheese search hit has missing nutrition in OFF', () async {
+      final mockJson = jsonEncode({
+        'count': 1,
+        'products': [
+          {
+            'code': '0099887766554',
+            'product_name': 'Kraft Cheddar Cheese Block',
+            'brands': 'Kraft',
+            'categories': 'Dairy, Cheese, Cheddar',
+            'nova_group': 4,
+            'nutriments': {}, // Missing/empty crowdsourced macros!
+            'ingredients_text': 'Cheddar Cheese, Water, Butter, Salt',
+          }
+        ]
+      });
+
+      final mockClient = MockClient((request) async {
+        return http.Response(mockJson, 200);
+      });
+
+      final service = CatalogSearchService(httpClient: mockClient);
+      final results = await service.searchFoodProducts('cheese');
+
+      expect(results, isNotEmpty);
+      final item = results.firstWhere((r) => r.code == '0099887766554');
+      final evaluated = item.evaluatedProduct;
+      expect(evaluated, isNotNull);
+
+      // Cheese category baseline should be applied: ~310 kcal, ~20g protein, ~25g fat, ~16g sat fat
+      expect(evaluated!.caloriesPer100g, closeTo(310.0, 2.0));
+      expect(evaluated.proteinGPer100g, 20.0);
+      expect(evaluated.totalFatGPer100g, 25.0);
+      expect(evaluated.satFatGPer100g, 16.0);
+      expect(evaluated.sodiumMgPer100g, 650.0);
+
+      // Final score must be realistic (50 - 68), NEVER 95!
+      expect(item.healthScore, isNotNull);
+      expect(item.healthScore!, inInclusiveRange(50, 68));
+      expect(item.healthScore!, isNot(95));
     });
 
     test('searchFoodProducts ranks authentic Indian paneer dishes above foreign brand-only matches', () async {
