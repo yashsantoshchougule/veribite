@@ -9,6 +9,8 @@ import '../../../core/vision/barcode_scanner_service.dart';
 import '../../../core/vision/food_web_extractor.dart';
 import '../../../core/vision/gemini_vision_service.dart';
 import '../../../core/vision/on_device_vision_service.dart';
+import '../../../core/intelligence/web_health_intelligence_enricher.dart';
+import '../../health_intelligence/domain/health_intelligence_model.dart';
 import '../../../services/product_health_scorer.dart';
 import '../../profile/domain/user_profile_model.dart';
 import 'offline_barcode_repository.dart';
@@ -115,6 +117,7 @@ class ScannedProductResult {
   final String? analysisSource;
   final String? scoreBreakdown;
   final bool isIngredientOnlyScore;
+  final HealthIntelligence? healthIntelligence;
 
   double get effectiveCaloriesPer100g {
     if (caloriesPer100g > 0.0) return caloriesPer100g;
@@ -159,6 +162,7 @@ class ScannedProductResult {
     this.analysisSource,
     this.scoreBreakdown,
     this.isIngredientOnlyScore = false,
+    this.healthIntelligence,
   });
 
   ScannedProductResult copyWith({
@@ -198,6 +202,7 @@ class ScannedProductResult {
     String? analysisSource,
     String? scoreBreakdown,
     bool? isIngredientOnlyScore,
+    HealthIntelligence? healthIntelligence,
   }) {
     return ScannedProductResult(
       barcode: barcode ?? this.barcode,
@@ -236,6 +241,7 @@ class ScannedProductResult {
       analysisSource: analysisSource ?? this.analysisSource,
       scoreBreakdown: scoreBreakdown ?? this.scoreBreakdown,
       isIngredientOnlyScore: isIngredientOnlyScore ?? this.isIngredientOnlyScore,
+      healthIntelligence: healthIntelligence ?? this.healthIntelligence,
     );
   }
 }
@@ -283,6 +289,53 @@ class ProductScannerService {
   late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
   late final GeminiVisionService _visionService =
       _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
+  late final WebHealthIntelligenceEnricher _intelligenceEnricher =
+      WebHealthIntelligenceEnricher(httpClient: _httpClient);
+
+  /// Enriches a scanned product result with live internet grounding or offline knowledge
+  Future<ScannedProductResult> enrichProductWithWebIntelligence({
+    required ScannedProductResult product,
+    bool forceRefresh = false,
+  }) async {
+    final enriched = await _intelligenceEnricher.enrichProduct(
+      productName: product.productName,
+      brandName: product.brandName,
+      category: product.category,
+      barcode: product.barcode,
+      calories: product.caloriesPer100g,
+      sugarsG: product.sugarGPer100g,
+      satFatG: product.satFatGPer100g,
+      sodiumMg: product.sodiumMgPer100g,
+      proteinG: product.proteinGPer100g,
+      carbsG: product.carbsGPer100g,
+      totalFatG: product.totalFatGPer100g,
+      forceRefresh: forceRefresh,
+    );
+
+    final recalculated = ProductHealthScorer.calculate(
+      nutrition: {
+        'energy_kcal': product.caloriesPer100g,
+        'sugars_100g': product.sugarGPer100g,
+        'saturated-fat_100g': product.satFatGPer100g,
+        'total_fat_g': product.totalFatGPer100g,
+        'sodium_mg': product.sodiumMgPer100g,
+        'proteins_100g': product.proteinGPer100g,
+        'fiber_100g': product.fiberGPer100g,
+      },
+      additives: product.additives,
+      novaGrade: product.novaGrade,
+      redCapTriggered: product.redCapTriggered,
+      healthIntelligence: enriched,
+    );
+
+    return product.copyWith(
+      healthIntelligence: enriched,
+      healthScore: recalculated.score,
+      verdictTag: recalculated.verdictTag,
+      redCapTriggered: recalculated.isRedCapped,
+      scoreBreakdown: recalculated.scoreBreakdownSummary,
+    );
+  }
 
   /// Resolve product by any scanned QR code payload, GS1 link, food web URL, or barcode string.
   /// Supports optional camera [frameImage] and intermediate [onStatusUpdate] callbacks.
@@ -1239,6 +1292,28 @@ class ProductScannerService {
     int? safePieces = (dosageResult['safe_pieces'] as num?)?.toInt();
     if (safePieces != null && safePieces < 1) safePieces = 1;
 
+    // Parse or resolve rich HealthIntelligence
+    HealthIntelligence? healthIntelligence;
+    if (raw['health_intelligence'] is Map) {
+      healthIntelligence = HealthIntelligence.fromJson(
+        Map<String, dynamic>.from(raw['health_intelligence'] as Map),
+      );
+    } else if (raw['health_intelligence_json'] is String) {
+      healthIntelligence = HealthIntelligence.fromJsonString(raw['health_intelligence_json'] as String);
+    } else {
+      healthIntelligence = WebHealthIntelligenceEnricher.resolveOfflineKnowledge(
+        productName: productName,
+        brandName: brandName,
+        category: category,
+        ingredients: ingredientsList,
+        sugarsG: sugarPer100,
+        sodiumMg: sodiumPer100,
+        proteinG: proteinPer100,
+        carbsG: carbsPer100,
+        totalFatG: totalFatPer100,
+      );
+    }
+
     // Dynamic Scientific Health Score & Verdict via ProductHealthScorer
     final scoreResult = ProductHealthScorer.calculate(
       nutrition: nutritionMap.isNotEmpty ? nutritionMap : {
@@ -1251,6 +1326,7 @@ class ProductScannerService {
       ingredients: ingredientsList,
       novaGrade: (raw['nova_grade'] as num?)?.toInt(),
       redCapTriggered: raw['red_cap_triggered'] == 1 || raw['red_cap_triggered'] == true,
+      healthIntelligence: healthIntelligence,
     );
 
     int? finalScore;
@@ -1325,6 +1401,7 @@ class ProductScannerService {
       analysisSource: analysisSource ?? raw['source']?.toString(),
       scoreBreakdown: scoreBreakdown,
       isIngredientOnlyScore: isIngredientOnly,
+      healthIntelligence: healthIntelligence,
     );
   }
 

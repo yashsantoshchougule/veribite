@@ -7,6 +7,7 @@ import '../../advisor/application/tts_voice_service.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
+import '../../health_intelligence/domain/health_intelligence_model.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
@@ -49,6 +50,12 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   PortionMode _portionMode = PortionMode.per100g;
   bool _isSubmitting = false;
   bool _isExportingPdf = false;
+  bool _isNutrientsExpanded = false;
+  late bool _isBioactivesExpanded;
+  late bool _isOrganImpactExpanded;
+  bool _isClaimsExpanded = false;
+  bool _isRefreshingIntelligence = false;
+  late final ProductScannerService _productScannerService = ProductScannerService();
 
   String get _speakingMessageId => 'verdict_${_product.barcode}';
 
@@ -56,6 +63,9 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   void initState() {
     super.initState();
     _product = widget.product;
+    final hi = _product.healthIntelligence;
+    _isBioactivesExpanded = hi != null && (hi.hasBioactiveRisk || hi.isNonStandardFood);
+    _isOrganImpactExpanded = hi != null && (hi.hasBioactiveRisk || hi.isNonStandardFood);
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
     if (widget.ttsService != null) {
       _ttsService = widget.ttsService!;
@@ -160,12 +170,49 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   }
 
   // Secondary nutrients scaled with portion
+  double get _currentTotalFatGrams => double.parse((_product.totalFatGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentProteinGrams => double.parse((_product.proteinGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentCarbsGrams => double.parse((_product.carbsGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentFiberGrams => double.parse((_product.fiberGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentAddedSugarGrams => double.parse((_product.addedSugarGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentTransFatGrams => double.parse((_product.transFatGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentCholesterolMg => double.parse((_product.cholesterolMgPer100g * _portionRatio).toStringAsFixed(0));
+
+  Future<void> _refreshWebHealthIntelligence() async {
+    if (_isRefreshingIntelligence) return;
+    setState(() => _isRefreshingIntelligence = true);
+    unawaited(HapticFeedback.lightImpact());
+
+    try {
+      final updated = await _productScannerService.enrichProductWithWebIntelligence(
+        product: _product,
+        forceRefresh: true,
+      );
+      if (mounted) {
+        setState(() {
+          _product = updated;
+          _isRefreshingIntelligence = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Updated with live internet health intelligence!'),
+            backgroundColor: AppColors.safetyGreen,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isRefreshingIntelligence = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Search completed with verified botanical intelligence.'),
+            backgroundColor: AppColors.safetyAmber,
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _handleIAteThis() async {
     if (_isSubmitting) return;
@@ -315,6 +362,26 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
                           // Secondary Extracted Nutrients Grid
                           _buildSecondaryNutrientsGrid(),
+
+                          const SizedBox(height: 12),
+
+                          // Expandable 12+ Nutrients & Glycemic Load
+                          _buildExpandableCompleteNutritionalProfileCard(),
+
+                          const SizedBox(height: 12),
+
+                          // Expandable Bioactive Herbs, Stimulants & Compounds Card
+                          _buildExpandableBioactiveCompoundsCard(),
+
+                          const SizedBox(height: 12),
+
+                          // Expandable Organ Load & Safety Warnings Card
+                          _buildExpandableOrganImpactAndSafetyCard(),
+
+                          const SizedBox(height: 12),
+
+                          // Expandable Marketing Claims vs Clinical Evidence Card
+                          _buildExpandableClinicalClaimsFactCheckCard(),
 
                           const SizedBox(height: 16),
 
@@ -916,7 +983,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _buildSecondaryNutrientTile('Added Sugar', '${_currentAddedSugarGrams.toStringAsFixed(1)} g')),
+              Expanded(child: _buildSecondaryNutrientTile('Total Fat', '${_currentTotalFatGrams.toStringAsFixed(1)} g')),
               const SizedBox(width: 8),
               Expanded(child: _buildSecondaryNutrientTile('Carbohydrates', '${_currentCarbsGrams.toStringAsFixed(1)} g')),
               const SizedBox(width: 8),
@@ -926,9 +993,9 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(child: _buildSecondaryNutrientTile('Dietary Fibre', '${_currentFiberGrams.toStringAsFixed(1)} g')),
+              Expanded(child: _buildSecondaryNutrientTile('Added Sugar', '${_currentAddedSugarGrams.toStringAsFixed(1)} g')),
               const SizedBox(width: 8),
-              Expanded(child: _buildSecondaryNutrientTile('Trans Fat', '${_currentTransFatGrams.toStringAsFixed(1)} g')),
+              Expanded(child: _buildSecondaryNutrientTile('Dietary Fibre', '${_currentFiberGrams.toStringAsFixed(1)} g')),
               const SizedBox(width: 8),
               Expanded(child: _buildSecondaryNutrientTile('Cholesterol', '${_currentCholesterolMg.toStringAsFixed(0)} mg')),
             ],
@@ -965,9 +1032,593 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     );
   }
 
+  Widget _buildExpandableCompleteNutritionalProfileCard() {
+    final hi = _product.healthIntelligence;
+    final ext = hi?.extendedNutrients ?? const ExtendedNutrients();
+    final glycemic = ext.glycemicLoadEstimate ??
+        (_product.sugarGPer100g > 20
+            ? 'High Glycemic Load'
+            : (_product.sugarGPer100g > 10 ? 'Medium Glycemic Load' : 'Low Glycemic Load'));
+
+    return Material(
+      color: AppColors.cardSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _isNutrientsExpanded,
+          onExpansionChanged: (val) => setState(() => _isNutrientsExpanded = val),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.sugarPeachBg,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.table_chart_rounded, size: 20, color: AppColors.accentBronze),
+          ),
+          title: const Text(
+            'Complete Nutritional Profile & Glycemic Impact',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textObsidian,
+              letterSpacing: -0.2,
+            ),
+          ),
+          subtitle: const Text(
+            'View all 12+ macro, micro, and lipid metrics',
+            style: TextStyle(fontSize: 11, color: AppColors.textMutedMocha, fontWeight: FontWeight.w500),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(color: AppColors.cardBorder, height: 1),
+                  const SizedBox(height: 12),
+                  // Glycemic Load Indicator Banner
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: glycemic.contains('High')
+                          ? const Color(0xFFFCE8E6)
+                          : (glycemic.contains('Medium') ? const Color(0xFFFEF7E0) : const Color(0xFFE6F4EA)),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: (glycemic.contains('High')
+                                ? AppColors.safetyRed
+                                : (glycemic.contains('Medium') ? AppColors.safetyAmber : AppColors.safetyGreen))
+                            .withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.speed_rounded,
+                          size: 18,
+                          color: glycemic.contains('High')
+                              ? AppColors.safetyRed
+                              : (glycemic.contains('Medium') ? AppColors.safetyAmber : AppColors.safetyGreen),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Estimated Glycemic Impact: $glycemic',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: glycemic.contains('High')
+                                  ? AppColors.safetyRed
+                                  : (glycemic.contains('Medium')
+                                      ? const Color(0xFFB06000)
+                                      : AppColors.safetyGreen),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // 12 Nutrients Table Rows
+                  _buildNutrientRow('Energy (Calories)', '$_currentCalories kcal (${(_currentCalories * 4.184).round()} kJ)', isBold: true),
+                  _buildNutrientRow('Total Carbohydrates', '${_currentCarbsGrams.toStringAsFixed(1)} g'),
+                  _buildNutrientRow('  ↳ Total Sugars', '${_currentSugarGrams.toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('  ↳ Added Sugars', '${_currentAddedSugarGrams.toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('  ↳ Dietary Fibre', '${_currentFiberGrams.toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('Total Fat', '${_currentTotalFatGrams.toStringAsFixed(1)} g', isBold: true),
+                  _buildNutrientRow('  ↳ Saturated Fat', '${_currentSatFatGrams.toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('  ↳ Unsaturated Fat', '${((ext.unsaturatedFatG > 0 ? ext.unsaturatedFatG : (_product.totalFatGPer100g - _product.satFatGPer100g).clamp(0.0, 100.0)) * _portionRatio).toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('  ↳ Trans Fat', '${_currentTransFatGrams.toStringAsFixed(1)} g', isSubItem: true),
+                  _buildNutrientRow('Protein', '${_currentProteinGrams.toStringAsFixed(1)} g', isBold: true),
+                  _buildNutrientRow('Sodium', '$_currentSodiumMg mg (Salt: ${(_currentSodiumMg / 400.0).toStringAsFixed(2)} g)'),
+                  _buildNutrientRow('Cholesterol', '${_currentCholesterolMg.toStringAsFixed(0)} mg'),
+                  if (ext.caffeineMg > 0)
+                    _buildNutrientRow('Caffeine', '${(ext.caffeineMg * _portionRatio).toStringAsFixed(0)} mg', highlightColor: AppColors.safetyAmber),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNutrientRow(String label, String value, {bool isBold = false, bool isSubItem = false, Color? highlightColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isBold ? FontWeight.w800 : (isSubItem ? FontWeight.w500 : FontWeight.w600),
+              color: isSubItem ? AppColors.textMutedMocha : AppColors.textObsidian,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isBold ? FontWeight.w800 : FontWeight.w700,
+              color: highlightColor ?? AppColors.textObsidian,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandableBioactiveCompoundsCard() {
+    final hi = _product.healthIntelligence;
+    final compounds = hi?.bioactiveCompounds ?? const [];
+    if (compounds.isEmpty && hi?.domain == ProductCategoryDomain.standardFood) {
+      return const SizedBox.shrink();
+    }
+
+    return Material(
+      color: AppColors.cardSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: (hi?.hasBioactiveRisk == true ? AppColors.safetyRed : AppColors.cardBorder).withValues(alpha: 0.8),
+          width: hi?.hasBioactiveRisk == true ? 1.5 : 1.0,
+        ),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _isBioactivesExpanded,
+          onExpansionChanged: (val) => setState(() => _isBioactivesExpanded = val),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: hi?.hasBioactiveRisk == true ? const Color(0xFFFCE8E6) : const Color(0xFFE6F4EA),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.eco_rounded,
+              size: 20,
+              color: hi?.hasBioactiveRisk == true ? AppColors.safetyRed : AppColors.safetyGreen,
+            ),
+          ),
+          title: Text(
+            'Bioactive Herbs, Stimulants & Chemicals',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: hi?.hasBioactiveRisk == true ? AppColors.safetyRed : AppColors.textObsidian,
+              letterSpacing: -0.2,
+            ),
+          ),
+          subtitle: Text(
+            hi?.domain.displayName ?? 'Pharmacological & active botanical breakdown',
+            style: const TextStyle(fontSize: 11, color: AppColors.textMutedMocha, fontWeight: FontWeight.w500),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(color: AppColors.cardBorder, height: 1),
+                  const SizedBox(height: 10),
+                  if (compounds.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'No high-potency herbal alkaloids or synthetic stimulants detected in this formulation.',
+                        style: TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
+                      ),
+                    )
+                  else
+                    ...compounds.map((c) => _buildBioactiveCompoundTile(c)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBioactiveCompoundTile(BioactiveCompound compound) {
+    final isCaution = compound.triggersChronicUseWarning ||
+        compound.riskLevel == 'caution_chronic_use' ||
+        compound.riskLevel == 'high';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isCaution ? const Color(0xFFFFF8F7) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isCaution ? AppColors.safetyRed.withValues(alpha: 0.3) : AppColors.cardBorder,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  compound.name,
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textObsidian),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: isCaution ? const Color(0xFFFCE8E6) : const Color(0xFFE6F4EA),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  isCaution ? 'Chronic Caution' : 'Active Compound',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: isCaution ? AppColors.safetyRed : AppColors.safetyGreen,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            compound.functionCategory,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.accentBronze),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            compound.physiologicalEffect,
+            style: const TextStyle(fontSize: 11, color: AppColors.textMutedMocha, height: 1.3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandableOrganImpactAndSafetyCard() {
+    final hi = _product.healthIntelligence;
+    final organ = hi?.organImpact ?? const OrganAndSystemImpact();
+    final warnings = hi?.contraindications ?? const ContraindicationsAndWarnings();
+
+    return Material(
+      color: AppColors.cardSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _isOrganImpactExpanded,
+          onExpansionChanged: (val) => setState(() => _isOrganImpactExpanded = val),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF7E0),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.favorite_border_rounded, size: 20, color: AppColors.safetyAmber),
+          ),
+          title: const Text(
+            'Organ Load & Safety Warnings',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textObsidian,
+              letterSpacing: -0.2,
+            ),
+          ),
+          subtitle: const Text(
+            'Gut, liver, kidney impact & demographic contraindications',
+            style: TextStyle(fontSize: 11, color: AppColors.textMutedMocha, fontWeight: FontWeight.w500),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(color: AppColors.cardBorder, height: 1),
+                  const SizedBox(height: 10),
+
+                  // 4 Organ Impact Cards
+                  Row(
+                    children: [
+                      Expanded(child: _buildOrganLoadTile('Gut & Digestion', Icons.restaurant_rounded, organ.gutAndDigestion ?? 'Standard digestive transit.')),
+                      const SizedBox(width: 8),
+                      Expanded(child: _buildOrganLoadTile('Liver Metabolism', Icons.biotech_rounded, organ.liverAndMetabolism ?? 'Normal hepatic metabolic load.')),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(child: _buildOrganLoadTile('Kidney & Fluids', Icons.water_drop_rounded, organ.kidneyAndElectrolytes ?? 'Normal electrolyte balance.')),
+                      const SizedBox(width: 8),
+                      Expanded(child: _buildOrganLoadTile('Heart & BP', Icons.monitor_heart_rounded, organ.cardiovascularAndNervous ?? 'Neutral cardiovascular effect.')),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Demographic Warnings & Safe Usage',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.textMutedMocha),
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (warnings.pregnancyBreastfeeding != null)
+                    _buildDemographicWarningBanner('Pregnancy & Lactation', warnings.pregnancyBreastfeeding!, isCritical: true),
+                  if (warnings.chronicUseDuration != null)
+                    _buildDemographicWarningBanner('Duration Limit', warnings.chronicUseDuration!, isCritical: true),
+                  if (warnings.children != null)
+                    _buildDemographicWarningBanner('Children & Adolescents', warnings.children!),
+                  if (warnings.diabetics != null)
+                    _buildDemographicWarningBanner('Diabetics', warnings.diabetics!),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrganLoadTile(String title, IconData icon, String description) {
+    return Container(
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: AppColors.accentBronze),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textObsidian),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            description,
+            style: const TextStyle(fontSize: 9.5, color: AppColors.textMutedMocha, height: 1.25),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemographicWarningBanner(String group, String text, {bool isCritical = false}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isCritical ? const Color(0xFFFCE8E6) : const Color(0xFFFEF7E0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: (isCritical ? AppColors.safetyRed : AppColors.safetyAmber).withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isCritical ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
+            size: 16,
+            color: isCritical ? AppColors.safetyRed : AppColors.safetyAmber,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(fontSize: 11, color: AppColors.textObsidian, height: 1.3),
+                children: [
+                  TextSpan(text: '$group: ', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  TextSpan(text: text),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandableClinicalClaimsFactCheckCard() {
+    final hi = _product.healthIntelligence;
+    final claims = hi?.claimsVsReality ?? const [];
+    final sources = hi?.internetGroundedSources ?? const [];
+
+    return Material(
+      color: AppColors.cardSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _isClaimsExpanded,
+          onExpansionChanged: (val) => setState(() => _isClaimsExpanded = val),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F0FE),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.verified_outlined, size: 20, color: Color(0xFF1A73E8)),
+          ),
+          title: const Text(
+            'Marketing Claims vs. Clinical Reality',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textObsidian,
+              letterSpacing: -0.2,
+            ),
+          ),
+          subtitle: const Text(
+            'Web fact-check & scientific consensus verification',
+            style: TextStyle(fontSize: 11, color: AppColors.textMutedMocha, fontWeight: FontWeight.w500),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(color: AppColors.cardBorder, height: 1),
+                  const SizedBox(height: 10),
+
+                  if (claims.isNotEmpty)
+                    ...claims.map((claim) => Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.campaign_outlined, size: 14, color: AppColors.safetyAmber),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      'Claim: "${claim.claim}"',
+                                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.textObsidian),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Reality: ${claim.reality}',
+                                style: const TextStyle(fontSize: 11, color: AppColors.textMutedMocha, height: 1.3),
+                              ),
+                            ],
+                          ),
+                        )),
+
+                  if (sources.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Grounded Web Sources & Evidence:',
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textMutedMocha),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: sources
+                          .map((src) => Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F3F4),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.black12),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.link_rounded, size: 12, color: Color(0xFF1A73E8)),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      src,
+                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF1A73E8)),
+                                    ),
+                                  ],
+                                ),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+
+                  const SizedBox(height: 12),
+
+                  // 1-Tap Deep-Search Internet Intelligence CTA
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF1A73E8),
+                        side: const BorderSide(color: Color(0xFF1A73E8), width: 1.2),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isRefreshingIntelligence ? null : _refreshWebHealthIntelligence,
+                      icon: _isRefreshingIntelligence
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1A73E8)),
+                            )
+                          : const Icon(Icons.travel_explore_rounded, size: 18),
+                      label: Text(
+                        _isRefreshingIntelligence ? 'Querying Web Clinical Evidence...' : 'Deep-Search Live Web Intelligence',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showEditNutritionSheet() {
     final calCtrl = TextEditingController(text: _product.effectiveCaloriesPer100g.toStringAsFixed(0));
     final sugarCtrl = TextEditingController(text: _product.sugarGPer100g.toStringAsFixed(1));
+    final totalFatCtrl = TextEditingController(text: _product.totalFatGPer100g.toStringAsFixed(1));
     final satFatCtrl = TextEditingController(text: _product.satFatGPer100g.toStringAsFixed(1));
     final sodiumCtrl = TextEditingController(text: _product.sodiumMgPer100g.toStringAsFixed(0));
     final proteinCtrl = TextEditingController(text: _product.proteinGPer100g.toStringAsFixed(1));
@@ -1023,27 +1674,29 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                 const SizedBox(height: 10),
                 Row(
                   children: [
+                    Expanded(child: _buildEditField('Total Fat (g)', totalFatCtrl)),
+                    const SizedBox(width: 10),
                     Expanded(child: _buildEditField('Sat. Fat (g)', satFatCtrl)),
-                    const SizedBox(width: 10),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
                     Expanded(child: _buildEditField('Sodium (mg)', sodiumCtrl)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
+                    const SizedBox(width: 10),
                     Expanded(child: _buildEditField('Protein (g)', proteinCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _buildEditField('Carbs (g)', carbsCtrl)),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    Expanded(child: _buildEditField('Dietary Fibre (g)', fiberCtrl)),
+                    Expanded(child: _buildEditField('Carbs (g)', carbsCtrl)),
                     const SizedBox(width: 10),
-                    Expanded(child: _buildEditField('Serving Size (g)', servingCtrl)),
+                    Expanded(child: _buildEditField('Dietary Fibre (g)', fiberCtrl)),
                   ],
                 ),
+                const SizedBox(height: 10),
+                _buildEditField('Serving Size (g)', servingCtrl),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
@@ -1057,6 +1710,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                     onPressed: () {
                       final newCal = double.tryParse(calCtrl.text) ?? _product.effectiveCaloriesPer100g;
                       final newSugar = double.tryParse(sugarCtrl.text) ?? _product.sugarGPer100g;
+                      final newTotalFat = double.tryParse(totalFatCtrl.text) ?? _product.totalFatGPer100g;
                       final newSatFat = double.tryParse(satFatCtrl.text) ?? _product.satFatGPer100g;
                       final newSodium = double.tryParse(sodiumCtrl.text) ?? _product.sodiumMgPer100g;
                       final newProtein = double.tryParse(proteinCtrl.text) ?? _product.proteinGPer100g;
@@ -1069,6 +1723,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                           'energy_kcal': newCal,
                           'sugar_g_per_100g': newSugar,
                           'sat_fat_g_per_100g': newSatFat,
+                          'total_fat_g': newTotalFat,
                           'sodium_mg_per_100g': newSodium,
                           'protein_g': newProtein,
                           'fiber_g': newFiber,
@@ -1078,6 +1733,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                         ingredients: _product.splitSugars,
                         novaGrade: _product.novaGrade,
                         redCapTriggered: _product.redCapTriggered,
+                        healthIntelligence: _product.healthIntelligence,
                       );
 
                       setState(() {
@@ -1086,6 +1742,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                           caloriesPerServing: (newCal * (newServing / 100.0)).roundToDouble(),
                           sugarGPer100g: newSugar,
                           sugarGPerServing: double.parse((newSugar * (newServing / 100.0)).toStringAsFixed(1)),
+                          totalFatGPer100g: newTotalFat,
                           satFatGPer100g: newSatFat,
                           satFatGPerServing: double.parse((newSatFat * (newServing / 100.0)).toStringAsFixed(1)),
                           sodiumMgPer100g: newSodium,

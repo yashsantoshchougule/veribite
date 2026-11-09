@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../features/health_intelligence/domain/health_intelligence_model.dart';
 
 /// Normalized nutritional values per 100g / 100ml
 class NormalizedNutrients {
@@ -172,6 +173,7 @@ class ProductHealthScorer {
     List<dynamic>? ingredients,
     int? novaGrade,
     bool? redCapTriggered,
+    HealthIntelligence? healthIntelligence,
   }) {
     final normalized = normalizeNutrients(nutrition);
     final additiveList = _normalizeAdditives(additives);
@@ -192,10 +194,29 @@ class ProductHealthScorer {
       return tier == 'RED' || redCap == 1 || redCap == true;
     });
 
-    final bool isRedCapped = (redCapTriggered == true) || hasRedAdditive;
-    final String? redCapReason = hasRedAdditive
-        ? 'High-Risk Synthetic Additive Detected'
-        : (isRedCapped ? 'Strict Toxicology Red-Cap Triggered' : null);
+    // Check bioactive pharmacological risks & chronic stimulant/laxative warnings
+    bool hasBioactiveRisk = false;
+    String? bioactiveReason;
+    int bioactivePenalty = 0;
+
+    if (healthIntelligence != null) {
+      for (final compound in healthIntelligence.bioactiveCompounds) {
+        if (compound.triggersChronicUseWarning ||
+            compound.riskLevel == 'caution_chronic_use' ||
+            compound.riskLevel == 'high') {
+          hasBioactiveRisk = true;
+          bioactivePenalty = math.max(bioactivePenalty, 25);
+          bioactiveReason = 'Clinical Caution: ${compound.name} (${compound.functionCategory})';
+        }
+      }
+    }
+
+    final bool isRedCapped = (redCapTriggered == true) || hasRedAdditive || hasBioactiveRisk;
+    final String? redCapReason = hasBioactiveRisk
+        ? bioactiveReason
+        : (hasRedAdditive
+            ? 'High-Risk Synthetic Additive Detected'
+            : (isRedCapped ? 'Strict Toxicology Red-Cap Triggered' : null));
 
     // RULE 3b: If nutrition table is missing but ingredients/additives exist
     if (!hasNutrition && hasIngredientsOrAdditives) {
@@ -205,6 +226,7 @@ class ProductHealthScorer {
         novaGrade: novaGrade ?? (additiveList.isNotEmpty ? 4 : 3),
         isRedCapped: isRedCapped,
         redCapReason: redCapReason,
+        bioactivePenalty: bioactivePenalty,
       );
     }
 
@@ -331,13 +353,20 @@ class ProductHealthScorer {
     }
     summaryTokens.add('NOVA $resolvedNova: ${novaAdjustment >= 0 ? "+$novaAdjustment" : "$novaAdjustment"}');
 
+    // 4b. Bioactive & Chronic Pharmacological Risks (e.g. Senna, High Stimulants)
+    if (bioactivePenalty > 0) {
+      currentScore -= bioactivePenalty;
+      breakdown['bioactive_penalty'] = -bioactivePenalty;
+      summaryTokens.add('Bioactive Risk: -$bioactivePenalty');
+    }
+
     // 5. CLAMPING & RED-CAP ENFORCEMENT (Clamp 5 to 98)
     int finalScore = currentScore.round().clamp(5, 98);
 
     if (isRedCapped && finalScore > 39) {
       finalScore = 39;
       breakdown['red_cap_enforced'] = true;
-      summaryTokens.add('Red-Cap: Capped to 39');
+      summaryTokens.add(hasBioactiveRisk ? 'Chronic Caution: Capped to 39' : 'Red-Cap: Capped to 39');
     }
 
     final String verdictTag = _deriveVerdictTag(finalScore, isRedCapped);
@@ -362,9 +391,15 @@ class ProductHealthScorer {
     required int novaGrade,
     required bool isRedCapped,
     String? redCapReason,
+    int bioactivePenalty = 0,
   }) {
     double score = 100.0;
     final tokens = <String>['Base 100 (Ingredient-Based)'];
+
+    if (bioactivePenalty > 0) {
+      score -= bioactivePenalty;
+      tokens.add('Bioactive Risk: -$bioactivePenalty');
+    }
 
     int addDeduction = 0;
     for (final add in additives) {

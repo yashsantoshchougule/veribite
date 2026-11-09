@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/services/product_health_scorer.dart';
+import 'package:mobile_app/features/health_intelligence/domain/health_intelligence_model.dart';
 
 void main() {
   group('ProductHealthScorer Real-Time Scientific Engine Tests', () {
@@ -159,6 +160,42 @@ void main() {
       expect(tokens.any((t) => t.startsWith('Final Score:')), isTrue);
       // Ensure NOVA and Final Score are distinct elements
       expect(tokens.any((t) => t.contains('NOVA 4') && t.contains('Score:')), isFalse);
+    });
+
+    test('Bioactive Senna/stimulant in HealthIntelligence enforces Chronic Caution cap (<= 39)', () {
+      const safiIntelligence = HealthIntelligence(
+        domain: ProductCategoryDomain.ayurvedicHerbalTonic,
+        bioactiveCompounds: [
+          BioactiveCompound(
+            name: 'Senna (Cassia angustifolia / Sennosides)',
+            functionCategory: 'Stimulant Laxative',
+            riskLevel: 'caution_chronic_use',
+            physiologicalEffect: 'Induces bowel contractions; chronic daily use causes laxative dependence.',
+            triggersChronicUseWarning: true,
+          ),
+        ],
+      );
+
+      // Even with zero fat, zero sodium, and low calories:
+      final result = ProductHealthScorer.calculate(
+        nutrition: {
+          'energy_kcal': 120.0,
+          'sugars_100g': 5.0,
+          'saturated-fat_100g': 0.0,
+          'sodium_mg': 20.0,
+          'proteins_100g': 0.5,
+        },
+        additives: [],
+        ingredients: ['Senna Extract', 'Water', 'Sugar'],
+        novaGrade: 2,
+        healthIntelligence: safiIntelligence,
+      );
+
+      expect(result.isRedCapped, isTrue);
+      expect(result.score, lessThanOrEqualTo(39));
+      expect(result.scoreBreakdownSummary, contains('Bioactive Risk: -25'));
+      expect(result.scoreBreakdownSummary, contains('Chronic Caution: Capped to 39'));
+      expect(result.redCapReason, contains('Clinical Caution: Senna'));
     });
   });
 }

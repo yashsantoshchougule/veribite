@@ -142,5 +142,100 @@ INGREDIENTS: Wheat Flour, Sugar, Edible Vegetable Fat, Milk Solids, Yeast, Salt,
       expect(nut['cholesterol_mg_per_100g'], 1.00);
       expect(nut['fiber_g'], 5.20);
     });
+
+    test('Parses table gridlines (| / ! I) and filters out SINCE 1936 header noise', () {
+      const pickleJarOcrText = '''
+SINCE 1936
+Siddhivinayak Mango Pickle
+NUTRITIONAL INFORMATION
+33 Servings per pack 1 Serving Size:15g (1tbsp)
+Nutritional Parameters | Per 100g provides approx. | Per Serve provides approx. | Per Serve % RDA*
+Energy(kcal) | 153.11 | 22.97 | 1.15
+Protein(g) | 3.25 | 0.49 | *
+Carbohydrate(g) | 17.23 | 2.58 | *
+Total Sugar(g) | 2.57 | 0.39 | -
+Total Fat(g) | 7.91 | 1.19 | 1.77
+Saturated Fat(g) | 2.44 | 0.37 | 1.66
+Trans Fat(g) | 0 | 0.00 | 0.00
+*MUFA(g) | 1.85 | 0.28 | *
+*PUFA(g) | 3.6 | 0.54 | *
+Cholesterol(mg) | 0 | 0.00 | -
+Sodium(mg) 3580 | 537.00 | 26.85
+Ingredients : Mango Pieces (72%), Salt, Ground Spices, Cotton Seed Oil, Acidity Regulator - (INS 260), Preservative - (INS 211).
+''';
+
+      final result = OnDeviceNutritionParser.parseFromText(pickleJarOcrText);
+      expect(result, isNotNull);
+      // Ensures product name did not pick 'SINCE 1936'
+      expect(result!['product_name'], contains('Mango Pickle'));
+
+      final nut = jsonDecode(result['nutrition_json'] as String) as Map<String, dynamic>;
+      expect(nut['calories'], 153.11);
+      expect(nut['protein_g'], 3.25);
+      expect(nut['carbohydrates_g_per_100g'], 17.23);
+      expect(nut['sugar_g_per_100g'], 2.57);
+      expect(nut['total_fat_g_per_100g'], 7.91);
+      expect(nut['sat_fat_g_per_100g'], 2.44);
+      expect(nut['sodium_mg_per_100g'], 3580.0);
+    });
+
+    test('Infers product name from ingredients when brand is Devanagari and header has serving noise', () {
+      const devanagariJarText = '''
+NCE 1836
+33 Servings per pack 1 Serving Size:15g (1tbsp)
+NUTRITIONAL INFORMATION
+Nutritional Parameters | Per 100g provides approx.
+Energy(kcal) | 153.11
+Protein(g) | 3.25
+Carbohydrate(g) | 17.23
+Total Sugar(g) | 2.57
+Total Fat(g) | 7.91
+Saturated Fat(g) | 2.44
+Sodium(mg) | 3580
+Ingredients : Mango Pieces (72%), Salt, Ground Spices, Cotton Seed Oil, Acidity Regulator - (INS 260).
+''';
+
+      final result = OnDeviceNutritionParser.parseFromText(devanagariJarText);
+      expect(result, isNotNull);
+      // Ensures product name does not take 'NCE 1836' or '33 Servings per pack'
+      expect(result!['product_name'], 'Mango Pickle');
+      expect(result['health_score'], isNotNull);
+    });
+
+    test('Handles column-split OCR output where keys and values are grouped in separate blocks', () {
+      const columnSplitText = '''
+NUTRITIONAL INFORMATION
+Energy (kcal)
+Protein (g)
+Carbohydrate (g)
+Total Sugar (g)
+Total Fat (g)
+Saturated Fat (g)
+Sodium (mg)
+
+Per 100g Values
+153.11
+3.25
+17.23
+2.57
+7.91
+2.44
+3580
+
+Ingredients: Mango Pieces, Edible Vegetable Oil, Salt, Red Chilli Powder, Mustard, Acidity Regulator INS 260.
+''';
+
+      final result = OnDeviceNutritionParser.parseFromText(columnSplitText);
+      expect(result, isNotNull);
+
+      final nut = jsonDecode(result!['nutrition_json'] as String) as Map<String, dynamic>;
+      expect(nut['calories'], 153.11);
+      expect(nut['protein_g'], 3.25);
+      expect(nut['carbohydrates_g_per_100g'], 17.23);
+      expect(nut['sugar_g_per_100g'], 2.57);
+      expect(nut['total_fat_g_per_100g'], 7.91);
+      expect(nut['sat_fat_g_per_100g'], 2.44);
+      expect(nut['sodium_mg_per_100g'], 3580.0);
+    });
   });
 }
