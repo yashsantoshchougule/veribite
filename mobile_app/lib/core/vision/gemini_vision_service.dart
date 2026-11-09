@@ -62,38 +62,52 @@ class GeminiVisionService {
       }
     };
 
-    final modelsToTry = [GeminiConfig.model, ...GeminiConfig.fallbackModels];
+    final modelsToTry = GeminiConfig.cascadeModels;
+    final maxKeyAttempts = GeminiConfig.apiKeys.length.clamp(1, 4);
 
-    for (final model in modelsToTry) {
-      try {
-        final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
-        final response = await _client
-            .post(
-              uri,
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode(requestBody),
-            )
-            .timeout(const Duration(seconds: 8));
+    for (int keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
+      for (final model in modelsToTry) {
+        try {
+          final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
+          final response = await _client
+              .post(
+                uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(requestBody),
+              )
+              .timeout(const Duration(seconds: 8));
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final candidates = data['candidates'] as List?;
-          if (candidates != null && candidates.isNotEmpty) {
-            final content = candidates[0]['content'];
-            final parts = content['parts'] as List?;
-            if (parts != null && parts.isNotEmpty) {
-              final rawJsonText = parts[0]['text']?.toString() ?? '';
-              final parsed = _parseGeminiJson(rawJsonText);
-              if (parsed != null) {
-                return parsed;
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final candidates = data['candidates'] as List?;
+            if (candidates != null && candidates.isNotEmpty) {
+              final content = candidates[0]['content'];
+              final parts = content['parts'] as List?;
+              if (parts != null && parts.isNotEmpty) {
+                final rawJsonText = parts[0]['text']?.toString() ?? '';
+                final parsed = _parseGeminiJson(rawJsonText);
+                if (parsed != null) {
+                  return parsed;
+                }
               }
             }
+          } else if (response.statusCode == 429 || response.statusCode == 503) {
+            debugPrint(
+              '[GeminiVisionService] Quota/Server busy on $model (HTTP ${response.statusCode}). Attempting cascade fallback.',
+            );
+            if (response.statusCode == 429 && keyAttempt < maxKeyAttempts - 1) {
+              final rotated = GeminiConfig.rotateKey();
+              if (rotated) {
+                break; // Restart model cascade with new rotated key
+              }
+            }
+            continue;
+          } else {
+            debugPrint('[GeminiVisionService] Gemini API error ($model): HTTP ${response.statusCode} - ${response.body}');
           }
-        } else {
-          debugPrint('[GeminiVisionService] Gemini API error ($model): HTTP ${response.statusCode} - ${response.body}');
+        } catch (e) {
+          debugPrint('[GeminiVisionService] Model $model query notice: $e');
         }
-      } catch (e) {
-        debugPrint('[GeminiVisionService] Model $model query notice: $e');
       }
     }
 

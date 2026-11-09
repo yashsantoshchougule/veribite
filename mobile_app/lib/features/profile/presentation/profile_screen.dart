@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../main.dart';
 import '../../auth/application/supabase_auth_service.dart';
+import '../../camera/presentation/widgets/backend_settings_sheet.dart';
 import '../../legal/presentation/legal_policy_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/user_profile_service.dart';
@@ -1052,6 +1053,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => BackendSettingsSheet.show(context),
+              icon: const Icon(Icons.dns_rounded, size: 16, color: AppColors.accentBronze),
+              label: const Text(
+                'Backend & Vision Proxy Settings',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textObsidian,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.cardBorder, width: 1.2),
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
           ),
         ],
       ),

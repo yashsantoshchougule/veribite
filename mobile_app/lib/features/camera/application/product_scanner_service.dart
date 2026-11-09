@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/network/backend_endpoint_resolver.dart';
 import '../../../core/scoring/dosage_engine.dart';
 import '../../../core/vision/barcode_scanner_service.dart';
 import '../../../core/vision/food_web_extractor.dart';
 import '../../../core/vision/gemini_vision_service.dart';
+import '../../../core/vision/on_device_vision_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import 'offline_barcode_repository.dart';
 
@@ -101,6 +103,7 @@ class ScannedProductResult {
   final List<String> splitSugars;
   final String portionAdvice;
   final bool isExceededBudget;
+  final String? analysisSource;
 
   const ScannedProductResult({
     required this.barcode,
@@ -128,6 +131,7 @@ class ScannedProductResult {
     required this.splitSugars,
     required this.portionAdvice,
     required this.isExceededBudget,
+    this.analysisSource,
   });
 }
 
@@ -138,16 +142,22 @@ class ProductScannerService {
   final http.Client? _injectedHttpClient;
   final GeminiVisionService? _injectedVisionService;
   final OfflineBarcodeRepository? _injectedOfflineRepo;
+  final BackendEndpointResolver? _injectedBackendResolver;
+  final OnDeviceVisionService? _injectedOnDeviceVisionService;
 
   ProductScannerService({
     SupabaseClient? client,
     http.Client? httpClient,
     GeminiVisionService? visionService,
     OfflineBarcodeRepository? offlineBarcodeRepository,
+    BackendEndpointResolver? backendResolver,
+    OnDeviceVisionService? onDeviceVisionService,
   })  : _injectedClient = client,
         _injectedHttpClient = httpClient,
         _injectedVisionService = visionService,
-        _injectedOfflineRepo = offlineBarcodeRepository;
+        _injectedOfflineRepo = offlineBarcodeRepository,
+        _injectedBackendResolver = backendResolver,
+        _injectedOnDeviceVisionService = onDeviceVisionService;
 
   SupabaseClient? get _client {
     if (_injectedClient != null) return _injectedClient;
@@ -161,6 +171,10 @@ class ProductScannerService {
   http.Client get _httpClient => _injectedHttpClient ?? http.Client();
   OfflineBarcodeRepository get _offlineRepo =>
       _injectedOfflineRepo ?? OfflineBarcodeRepository.instance;
+  BackendEndpointResolver get _backendResolver =>
+      _injectedBackendResolver ?? BackendEndpointResolver.instance;
+  late final OnDeviceVisionService _onDeviceVisionService =
+      _injectedOnDeviceVisionService ?? OnDeviceVisionService();
   late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
   late final GeminiVisionService _visionService =
       _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
@@ -679,13 +693,14 @@ class ProductScannerService {
   }
 
   /// Resolves product using 1-4 multi-angle camera frames (for curved bottles, complex packaging, or nutrition labels).
-  /// Submits to Google Gemini Multimodal Vision AI or cloud vision backend.
+  /// Submits to Google Gemini Multimodal Vision AI, dynamic backend proxy, or local On-Device OCR.
   Future<ScannedProductResult> resolveMultiAngleScan({
     required List<List<int>> frames,
     required UserProfileModel userProfile,
     String? detectedBarcode,
   }) async {
     Map<String, dynamic>? productData;
+    String? resolvedSource;
 
     // 1. If a barcode was also detected in the view, resolve via barcode
     if (detectedBarcode != null && detectedBarcode.isNotEmpty) {
@@ -694,32 +709,39 @@ class ProductScannerService {
       } catch (_) {}
     }
 
-    // 2. Direct Gemini Multimodal Vision AI analysis
+    // 2. Direct Gemini Multimodal Vision AI analysis (with Stage 1 cascade & key rotation)
     try {
       productData = await _visionService.analyzeProductPhoto(
         frames: frames,
         hintBarcode: detectedBarcode,
       );
+      if (productData != null) {
+        resolvedSource = 'gemini_vision';
+      }
     } catch (e) {
       debugPrint('[ProductScannerService] Direct Gemini vision analysis notice: $e');
     }
 
-    // 3. Try Backend Cloud Vision proxy /api/v1/scan/vision as secondary fallback
+    // 3. Try Backend Cloud Vision proxy /api/v1/scan/vision via Dynamic Endpoint Resolver
     if (productData == null && frames.isNotEmpty) {
       try {
-        final uri = Uri.parse('http://10.0.2.2:8000/api/v1/scan/vision');
-        final request = http.MultipartRequest('POST', uri);
-        for (int i = 0; i < frames.length; i++) {
-          request.files.add(
-            http.MultipartFile.fromBytes('images', frames[i], filename: 'frame_$i.jpg'),
-          );
-        }
-        final streamedResponse = await _httpClient.send(request).timeout(const Duration(seconds: 4));
-        if (streamedResponse.statusCode == 200) {
-          final respStr = await streamedResponse.stream.bytesToString();
-          final decoded = jsonDecode(respStr);
-          if (decoded is Map<String, dynamic>) {
-            productData = decoded;
+        final backendBaseUrl = await _backendResolver.resolveActiveBackendUrl();
+        if (backendBaseUrl != null && backendBaseUrl.isNotEmpty) {
+          final uri = Uri.parse('$backendBaseUrl/api/v1/scan/vision');
+          final request = http.MultipartRequest('POST', uri);
+          for (int i = 0; i < frames.length; i++) {
+            request.files.add(
+              http.MultipartFile.fromBytes('images', frames[i], filename: 'frame_$i.jpg'),
+            );
+          }
+          final streamedResponse = await _httpClient.send(request).timeout(const Duration(seconds: 4));
+          if (streamedResponse.statusCode == 200) {
+            final respStr = await streamedResponse.stream.bytesToString();
+            final decoded = jsonDecode(respStr);
+            if (decoded is Map<String, dynamic>) {
+              productData = decoded;
+              resolvedSource = 'backend_proxy';
+            }
           }
         }
       } catch (e) {
@@ -727,7 +749,20 @@ class ProductScannerService {
       }
     }
 
-    // 4. If neither Gemini Vision nor backend could identify the product from photos:
+    // 4. Guaranteed On-Device ML Kit OCR + Local Nutrition/Additive Regex Fallback
+    if (productData == null && frames.isNotEmpty) {
+      try {
+        productData = await _onDeviceVisionService.analyzeFrames(frames);
+        if (productData != null) {
+          resolvedSource = 'on_device_vision';
+          debugPrint('[ProductScannerService] Successfully resolved product via On-Device Vision Engine!');
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] On-device vision fallback notice: $e');
+      }
+    }
+
+    // 5. If neither Gemini Vision, backend proxy, nor on-device OCR could identify the product from photos:
     // Do NOT substitute fake food facts! Throw VisionExtractionException
     if (productData == null) {
       throw VisionExtractionException(
@@ -740,7 +775,7 @@ class ProductScannerService {
     productData['barcode'] = barcodeKey;
     _writeThroughCache(productData);
 
-    return _evaluateProduct(productData, userProfile, barcodeKey);
+    return _evaluateProduct(productData, userProfile, barcodeKey, analysisSource: resolvedSource);
   }
 
   /// Resolve product by barcode string and evaluate against user biometrics
@@ -948,8 +983,9 @@ class ProductScannerService {
   ScannedProductResult _evaluateProduct(
     Map<String, dynamic> raw,
     UserProfileModel profile,
-    String barcode,
-  ) {
+    String barcode, {
+    String? analysisSource,
+  }) {
     final productName = raw['product_name']?.toString() ?? 'Packaged Food';
     final brandName = raw['brand_name']?.toString() ?? 'Brand Verified';
     final category = raw['category']?.toString() ?? 'Packaged Food';
@@ -1121,6 +1157,7 @@ class ProductScannerService {
       splitSugars: splitSugarsFound,
       portionAdvice: portionAdvice,
       isExceededBudget: isExceededBudget,
+      analysisSource: analysisSource ?? raw['source']?.toString(),
     );
   }
 

@@ -451,6 +451,59 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               return _buildListenVerdictPill(isSpeaking);
             },
           ),
+          if (widget.product.analysisSource != null) ...[
+            const SizedBox(height: 10),
+            _buildAnalysisSourceBadge(widget.product.analysisSource!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnalysisSourceBadge(String source) {
+    final String label;
+    final IconData icon;
+    final Color color;
+
+    switch (source) {
+      case 'on_device_vision':
+        label = 'Analyzed via On-Device Vision Engine';
+        icon = Icons.bolt_rounded;
+        color = AppColors.accentBronze;
+        break;
+      case 'backend_proxy':
+        label = 'Analyzed via Cloud Vision Proxy';
+        icon = Icons.cloud_done_rounded;
+        color = AppColors.safetyGreen;
+        break;
+      case 'gemini_vision':
+      default:
+        label = 'Analyzed via Multimodal Vision AI';
+        icon = Icons.auto_awesome_rounded;
+        color = const Color(0xFF4285F4);
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25), width: 1.0),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
         ],
       ),
     );

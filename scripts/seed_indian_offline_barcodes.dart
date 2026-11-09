@@ -2484,3 +2484,4 @@ void main() {
 
   print('Successfully wrote ${products.length} products to ${outFile.path} (${(outFile.lengthSync() / 1024).toStringAsFixed(1)} KB)');
 }
+

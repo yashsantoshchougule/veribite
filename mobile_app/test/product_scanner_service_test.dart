@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mobile_app/core/vision/on_device_vision_service.dart';
 import 'package:mobile_app/features/camera/application/offline_barcode_repository.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
@@ -567,6 +568,51 @@ void main() {
       expect(result.brandName, 'Raw Nature');
       expect(result.healthScore, 85);
       expect(result.verdictTag, 'Nutri Safe 🟢');
+    });
+
+    test('automatically cascades to On-Device Vision Service when Gemini Vision and Backend Proxy fail', () async {
+      // Mock HTTP client: both Gemini Vision and cloud backend fail
+      final mockClient = MockClient((request) async {
+        return http.Response('Service Unavailable', 503);
+      });
+
+      // Inject OnDeviceVisionService with local text extraction
+      final localOcrService = OnDeviceVisionService(
+        injectedOcrEngine: (bytes) async {
+          return '''
+Haldiram's Aloo Bhujia
+NUTRITION FACTS per 100g:
+Energy: 560 kcal
+Total Sugars: 2.0 g
+Saturated Fat: 14.0 g
+Sodium: 650 mg
+Protein: 9.0 g
+Serving Size: 30 g
+Net Weight: 200 g
+Ingredients: Potatoes, Edible Vegetable Oil, Gram Pulse Flour, Spices and Condiments, Iodised Salt, Acidity Regulator (INS 330).
+''';
+        },
+      );
+
+      final service = ProductScannerService(
+        httpClient: mockClient,
+        onDeviceVisionService: localOcrService,
+      );
+
+      final dummyFrames = [
+        List<int>.generate(150, (i) => i % 255),
+      ];
+
+      final result = await service.resolveMultiAngleScan(
+        frames: dummyFrames,
+        userProfile: defaultUser,
+      );
+
+      expect(result.brandName, "Haldiram");
+      expect(result.sugarGPer100g, 2.0);
+      expect(result.satFatGPer100g, 14.0);
+      expect(result.sodiumMgPer100g, 650.0);
+      expect(result.analysisSource, 'on_device_vision');
     });
   });
 }

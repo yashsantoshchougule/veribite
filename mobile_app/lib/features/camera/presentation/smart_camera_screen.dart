@@ -13,6 +13,7 @@ import '../application/camera_scan_notifier.dart';
 import '../application/offline_barcode_repository.dart';
 import '../application/product_scanner_service.dart';
 import 'widgets/camera_reticle_painter.dart';
+import 'widgets/backend_settings_sheet.dart';
 import 'widgets/glare_alert_banner.dart';
 import 'widgets/multi_angle_capture_strip.dart';
 import 'widgets/offline_variant_match_sheet.dart';
@@ -1420,45 +1421,48 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.center,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ChoiceChip(
-                                label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
-                                selected: !state.isMultiAngleMode,
-                                selectedColor: const Color(0xFF0F9D58),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                                labelStyle: TextStyle(
-                                  color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                        child: GestureDetector(
+                          onLongPress: () => BackendSettingsSheet.show(context),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
+                                  selected: !state.isMultiAngleMode,
+                                  selectedColor: const Color(0xFF0F9D58),
+                                  visualDensity: VisualDensity.compact,
+                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                  labelStyle: TextStyle(
+                                    color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                  ),
+                                  onSelected: (val) {
+                                    if (val) notifier.setMultiAngleMode(false);
+                                  },
                                 ),
-                                onSelected: (val) {
-                                  if (val) notifier.setMultiAngleMode(false);
-                                },
-                              ),
-                              const SizedBox(width: 4),
-                              ChoiceChip(
-                                label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
-                                selected: state.isMultiAngleMode,
-                                selectedColor: const Color(0xFF4285F4),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                                labelStyle: TextStyle(
-                                  color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                const SizedBox(width: 4),
+                                ChoiceChip(
+                                  label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
+                                  selected: state.isMultiAngleMode,
+                                  selectedColor: const Color(0xFF4285F4),
+                                  visualDensity: VisualDensity.compact,
+                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                  labelStyle: TextStyle(
+                                    color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                  ),
+                                  onSelected: (val) {
+                                    if (val) notifier.setMultiAngleMode(true);
+                                  },
                                 ),
-                                onSelected: (val) {
-                                  if (val) notifier.setMultiAngleMode(true);
-                                },
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),

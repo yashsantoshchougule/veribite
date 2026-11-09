@@ -133,5 +133,64 @@ void main() {
       expect(result['brand_name'], 'Milky Mist');
       expect(result['category'], 'Cheese & Dairy');
     });
+
+    test('cascades to lightweight fallback models when primary model returns 429 quota limit', () async {
+      int requestCount = 0;
+      final requestedModels = <String>[];
+
+      final mockResponse = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'product_name': 'Amul Pure Ghee',
+                    'brand_name': 'Amul',
+                    'category': 'Oils & Ghee',
+                    'serving_size_g': 15.0,
+                    'pack_weight_g': 1000.0,
+                    'nutrition': {
+                      'energy_kj': 3700.0,
+                      'sugar_g_per_100g': 0.0,
+                      'sat_fat_g_per_100g': 65.0,
+                      'sodium_mg_per_100g': 0.0,
+                    },
+                    'ingredients': ['Milk Fat'],
+                    'additives': [],
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        requestCount++;
+        final path = request.url.path;
+        if (path.contains('gemini-2.5-flash:')) {
+          requestedModels.add('gemini-2.5-flash');
+          return http.Response('{"error": {"code": 429, "message": "RESOURCE_EXHAUSTED"}}', 429);
+        }
+        if (path.contains('gemini-2.5-flash-lite:')) {
+          requestedModels.add('gemini-2.5-flash-lite');
+          return http.Response(jsonEncode(mockResponse), 200, headers: {'content-type': 'application/json'});
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = GeminiVisionService(httpClient: mockClient);
+      final dummyFrame = List<int>.generate(150, (i) => i % 255);
+
+      final result = await service.analyzeProductPhoto(frames: [dummyFrame]);
+
+      expect(result, isNotNull);
+      expect(result!['product_name'], 'Amul Pure Ghee');
+      expect(result['brand_name'], 'Amul');
+      expect(requestCount, 2);
+      expect(requestedModels, contains('gemini-2.5-flash'));
+      expect(requestedModels, contains('gemini-2.5-flash-lite'));
+    });
   });
 }
