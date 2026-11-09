@@ -9,6 +9,7 @@ import '../../../core/vision/barcode_scanner_service.dart';
 import '../../../core/vision/food_web_extractor.dart';
 import '../../../core/vision/gemini_vision_service.dart';
 import '../../../core/vision/on_device_vision_service.dart';
+import '../../../services/product_health_scorer.dart';
 import '../../profile/domain/user_profile_model.dart';
 import 'offline_barcode_repository.dart';
 
@@ -91,8 +92,8 @@ class ScannedProductResult {
   final double sodiumMgPer100g;
   final double sodiumMgPerServing;
   final double packWeightG;
-  final int healthScore;
-  final String verdictTag; // 'Nutri Safe 🟢', 'Caution 🟠', 'Toxic / Capped 🔴'
+  final int? healthScore;
+  final String verdictTag; // 'Nutri Safe 🟢', 'Caution 🟠', 'Toxic / Capped 🔴', 'Insufficient Data'
   final int novaGrade;
   final bool redCapTriggered;
   final int safePortionGrams;
@@ -104,6 +105,8 @@ class ScannedProductResult {
   final String portionAdvice;
   final bool isExceededBudget;
   final String? analysisSource;
+  final String? scoreBreakdown;
+  final bool isIngredientOnlyScore;
 
   const ScannedProductResult({
     required this.barcode,
@@ -132,6 +135,8 @@ class ScannedProductResult {
     required this.portionAdvice,
     required this.isExceededBudget,
     this.analysisSource,
+    this.scoreBreakdown,
+    this.isIngredientOnlyScore = false,
   });
 }
 
@@ -623,7 +628,6 @@ class ProductScannerService {
       'serving_size_g': servingG,
       'pack_weight_g': packG,
       'piece_weight_g': null,
-      'health_score': 65,
       'nova_grade': (p['nova_group'] as num?)?.toInt() ?? 3,
       'red_cap_triggered': 0,
       'nutrition_json': jsonEncode({
@@ -908,7 +912,6 @@ class ProductScannerService {
             'serving_size_g': servingG,
             'pack_weight_g': packG,
             'piece_weight_g': null,
-            'health_score': 65,
             'nova_grade': (p['nova_group'] as num?)?.toInt() ?? 3,
             'red_cap_triggered': 0,
             'nutrition_json': jsonEncode({
@@ -1103,24 +1106,45 @@ class ProductScannerService {
     int? safePieces = (dosageResult['safe_pieces'] as num?)?.toInt();
     if (safePieces != null && safePieces < 1) safePieces = 1;
 
-    // Health Score & Verdict
-    int score = (raw['health_score'] as num?)?.toInt() ?? 65;
-    final isRedCap = raw['red_cap_triggered'] == 1 ||
-        raw['red_cap_triggered'] == true ||
-        additivesList.any((a) => a['risk_tier'] == 'RED' || a['triggers_red_cap'] == 1);
+    // Dynamic Scientific Health Score & Verdict via ProductHealthScorer
+    final scoreResult = ProductHealthScorer.calculate(
+      nutrition: nutritionMap.isNotEmpty ? nutritionMap : {
+        'sugar_g_per_100g': sugarPer100,
+        'sat_fat_g_per_100g': satFatPer100,
+        'sodium_mg_per_100g': sodiumPer100,
+        'calories': servingSize > 0 ? (caloriesPerServing * (100.0 / servingSize)) : caloriesPerServing,
+      },
+      additives: additivesList,
+      ingredients: ingredientsList,
+      novaGrade: (raw['nova_grade'] as num?)?.toInt(),
+      redCapTriggered: raw['red_cap_triggered'] == 1 || raw['red_cap_triggered'] == true,
+    );
 
-    if (isRedCap && score > 39) {
-      score = 39; // Enforce strict Red-tier additive cap
-    }
-
+    int? finalScore;
     String verdictTag;
-    if (score >= 70 && !isRedCap) {
-      verdictTag = 'Nutri Safe 🟢';
-    } else if (score >= 40 && !isRedCap) {
-      verdictTag = 'Caution 🟠';
+    final String scoreBreakdown = scoreResult.scoreBreakdownSummary;
+    final bool isIngredientOnly = scoreResult.isIngredientOnlyScore;
+
+    // Honor explicit verified scores (e.g. curated offline catalog) only if NOT the fake 65 fallback
+    final explicitScore = (raw['health_score'] as num?)?.toInt();
+    if (explicitScore != null && explicitScore != 65) {
+      finalScore = explicitScore;
+      if (scoreResult.isRedCapped && finalScore > 39) {
+        finalScore = 39;
+      }
+      if (finalScore >= 70 && !scoreResult.isRedCapped) {
+        verdictTag = 'Nutri Safe 🟢';
+      } else if (finalScore >= 40 && !scoreResult.isRedCapped) {
+        verdictTag = 'Caution 🟠';
+      } else {
+        verdictTag = 'Toxic / Capped 🔴';
+      }
     } else {
-      verdictTag = 'Toxic / Capped 🔴';
+      finalScore = scoreResult.score;
+      verdictTag = scoreResult.verdictTag;
     }
+
+    final isRedCap = scoreResult.isRedCapped;
 
     // Advice text
     final portionAdvice = safePieces != null && safePieces > 0
@@ -1145,7 +1169,7 @@ class ProductScannerService {
       sodiumMgPer100g: sodiumPer100,
       sodiumMgPerServing: sodiumPerServing,
       packWeightG: packWeight,
-      healthScore: score,
+      healthScore: finalScore,
       verdictTag: verdictTag,
       novaGrade: (raw['nova_grade'] as num?)?.toInt() ?? 3,
       redCapTriggered: isRedCap,
@@ -1158,6 +1182,8 @@ class ProductScannerService {
       portionAdvice: portionAdvice,
       isExceededBudget: isExceededBudget,
       analysisSource: analysisSource ?? raw['source']?.toString(),
+      scoreBreakdown: scoreBreakdown,
+      isIngredientOnlyScore: isIngredientOnly,
     );
   }
 

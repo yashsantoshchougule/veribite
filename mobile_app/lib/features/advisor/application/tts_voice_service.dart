@@ -120,7 +120,11 @@ class TtsVoiceService {
         .replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}]', unicode: true), '')
         .trim();
     buffer.write('Here is the safety verdict for ${product.productName}. ');
-    buffer.write('Overall health score is ${product.healthScore} out of 100, classified as $cleanVerdict. ');
+    if (product.healthScore != null) {
+      buffer.write('Overall health score is ${product.healthScore} out of 100, classified as $cleanVerdict. ');
+    } else {
+      buffer.write('Overall health score has insufficient data. ');
+    }
 
     // 2. Toxic Red-Cap Override Status
     if (product.redCapTriggered) {

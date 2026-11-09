@@ -4,7 +4,7 @@ import '../../../../core/theme/app_colors.dart';
 
 /// Animated circular arc health score gauge with color interpolation and Red-Cap badge
 class CircularScoreGauge extends StatefulWidget {
-  final int score;
+  final int? score;
   final bool isRedCapped;
   final String verdictTag;
   final double size;
@@ -34,7 +34,7 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
     );
     _scoreAnimation = Tween<double>(
       begin: 0.0,
-      end: widget.score.toDouble(),
+      end: (widget.score ?? 0).toDouble(),
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
@@ -56,6 +56,9 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
   }
 
   Color _getScoreColor(double score) {
+    if (widget.score == null) {
+      return AppColors.safetyAmber;
+    }
     if (widget.isRedCapped || score <= 39) {
       return AppColors.safetyRed;
     } else if (score < 70) {
@@ -72,6 +75,7 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
       builder: (context, _) {
         final currentScore = _scoreAnimation.value;
         final animatedColor = _getScoreColor(currentScore);
+        final bool isNullScore = widget.score == null;
 
         return SizedBox(
           width: widget.size,
@@ -82,7 +86,7 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
               CustomPaint(
                 size: Size(widget.size, widget.size),
                 painter: _ScoreArcPainter(
-                  score: currentScore,
+                  score: isNullScore ? 0.0 : currentScore,
                   maxScore: 100.0,
                   scoreColor: animatedColor,
                 ),
@@ -91,24 +95,25 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    currentScore.round().toString(),
+                    isNullScore ? '--' : currentScore.round().toString(),
                     style: TextStyle(
-                      fontSize: widget.size * 0.28,
+                      fontSize: widget.size * (isNullScore ? 0.24 : 0.28),
                       fontWeight: FontWeight.w900,
                       color: animatedColor,
                       height: 1.0,
-                      letterSpacing: -1.0,
+                      letterSpacing: isNullScore ? 2.0 : -1.0,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    '/100',
-                    style: TextStyle(
-                      fontSize: widget.size * 0.08,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textMutedMocha,
+                  if (!isNullScore)
+                    Text(
+                      '/100',
+                      style: TextStyle(
+                        fontSize: widget.size * 0.08,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textMutedMocha,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -123,7 +128,7 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
                     child: Text(
                       widget.verdictTag,
                       style: TextStyle(
-                        fontSize: widget.size * 0.065,
+                        fontSize: widget.size * (isNullScore ? 0.055 : 0.065),
                         fontWeight: FontWeight.w800,
                         color: animatedColor,
                       ),

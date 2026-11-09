@@ -1337,7 +1337,7 @@ class _HomeScreenState extends State<HomeScreen> {
               alignment: Alignment.center,
               child: item.isFood
                   ? Text(
-                      '${item.healthScore ?? 65}',
+                      '${item.healthScore ?? '--'}',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,

@@ -309,12 +309,13 @@ class MedicalReportPdfService {
   }
 
   static pw.Widget _buildProductVerdictSection(ScannedProductResult product) {
-    final scoreColor = product.healthScore >= 70
+    final score = product.healthScore ?? 0;
+    final scoreColor = score >= 70
         ? colorGreen
-        : (product.healthScore >= 40 ? colorAmber : colorRed);
-    final scoreBg = product.healthScore >= 70
+        : (score >= 40 ? colorAmber : colorRed);
+    final scoreBg = score >= 70
         ? colorGreenBg
-        : (product.healthScore >= 40 ? colorAmberBg : colorRedBg);
+        : (score >= 40 ? colorAmberBg : colorRedBg);
 
     String novaDesc = 'Ultra-Processed (Nova 4)';
     if (product.novaGrade == 1) novaDesc = 'Unprocessed / Minimally Processed (Nova 1)';
@@ -389,7 +390,7 @@ class MedicalReportPdfService {
                   style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: scoreColor),
                 ),
                 pw.Text(
-                  '${product.healthScore}',
+                  '${product.healthScore ?? "--"}',
                   style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold, color: scoreColor),
                 ),
                 pw.Text(

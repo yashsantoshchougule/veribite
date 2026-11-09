@@ -179,7 +179,6 @@ Respond ONLY with a valid JSON object matching this schema without any markdown 
           'serving_size_g': servingG,
           'pack_weight_g': packG,
           'piece_weight_g': null,
-          'health_score': 65,
           'nova_grade': 3,
           'red_cap_triggered': 0,
           'nutrition_json': jsonEncode({

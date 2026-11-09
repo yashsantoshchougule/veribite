@@ -114,7 +114,6 @@ class FoodWebExtractor {
       'serving_size_g': weights['serving_g'] ?? 30.0,
       'pack_weight_g': weights['pack_g'] ?? 100.0,
       'piece_weight_g': weights['piece_g'],
-      'health_score': 65, // Will be computed deterministically by scoring engine
       'nova_grade': 3,
       'red_cap_triggered': 0,
       'nutrition_json': jsonEncode(nutrition),

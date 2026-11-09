@@ -768,9 +768,10 @@ class HealthierSwapsService {
     // Filter by:
     // 1. Equal or higher brand tier
     // 2. Equal or higher health score
+    final currentScore = product.healthScore ?? 50;
     final qualifiedSwaps = categorySwaps.where((alt) {
       final brandTierOk = alt.brandTier >= scannedBrandTier;
-      final healthScoreOk = alt.healthScore >= product.healthScore;
+      final healthScoreOk = alt.healthScore >= currentScore;
       return brandTierOk && healthScoreOk;
     }).toList();
 
@@ -778,7 +779,7 @@ class HealthierSwapsService {
     // fall back to the highest-scoring clean alternatives in the SAME category that improve health
     final effectiveSwaps = qualifiedSwaps.isNotEmpty
         ? qualifiedSwaps
-        : categorySwaps.where((alt) => alt.healthScore >= product.healthScore).toList();
+        : categorySwaps.where((alt) => alt.healthScore >= currentScore).toList();
 
     if (effectiveSwaps.isEmpty) {
       return [];
@@ -786,7 +787,7 @@ class HealthierSwapsService {
 
     // Recalculate dynamic score delta against the current product's real score
     final result = effectiveSwaps.map((alt) {
-      final delta = (alt.healthScore - product.healthScore).clamp(0, 99);
+      final delta = (alt.healthScore - currentScore).clamp(0, 99);
       return SwapAlternativeModel(
         barcode: alt.barcode,
         productName: alt.productName,

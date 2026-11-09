@@ -383,7 +383,7 @@ class OfflineBarcodeRepository {
       'serving_size_g': (raw['serving_size_g'] as num?)?.toDouble() ?? 30.0,
       'pack_weight_g': (raw['pack_weight_g'] as num?)?.toDouble() ?? 100.0,
       'piece_weight_g': (raw['piece_weight_g'] as num?)?.toDouble(),
-      'health_score': (raw['health_score'] as num?)?.toInt() ?? 60,
+      'health_score': (raw['health_score'] as num?)?.toInt(),
       'nova_grade': (raw['nova_grade'] as num?)?.toInt() ?? 3,
       'red_cap_triggered': raw['red_cap_triggered'] == 1 || raw['red_cap_triggered'] == true ? 1 : 0,
       'nutrition_json': nutritionJson,

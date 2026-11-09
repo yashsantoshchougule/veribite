@@ -407,6 +407,20 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   }
 
   Widget _buildScoreGaugeCard() {
+    final score = widget.product.healthScore;
+    final String scoreAdvice;
+    if (score == null) {
+      scoreAdvice = 'Insufficient nutrition facts & ingredients to calculate score. Please capture physical packaging.';
+    } else if (widget.product.isIngredientOnlyScore) {
+      scoreAdvice = 'Score calculated from verified ingredients & additives (Nutrition table not detected).';
+    } else if (score >= 70 && !widget.product.redCapTriggered) {
+      scoreAdvice = 'Nutrient-dense formulation with minimal industrial additives.';
+    } else if (score >= 40 && !widget.product.redCapTriggered) {
+      scoreAdvice = 'Moderate nutritional quality. Consume in controlled moderation.';
+    } else {
+      scoreAdvice = 'Ultra-processed food formulation with high sugar or hazardous additives.';
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       decoration: BoxDecoration(
@@ -431,11 +445,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            widget.product.healthScore >= 70 && !widget.product.redCapTriggered
-                ? 'Nutrient-dense formulation with minimal industrial additives.'
-                : widget.product.healthScore >= 40 && !widget.product.redCapTriggered
-                    ? 'Moderate nutritional quality. Consume in controlled moderation.'
-                    : 'Ultra-processed food formulation with high sugar or hazardous additives.',
+            scoreAdvice,
             style: const TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -443,6 +453,10 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ),
             textAlign: TextAlign.center,
           ),
+          if (widget.product.scoreBreakdown != null && widget.product.scoreBreakdown!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildScoreBreakdownCard(),
+          ],
           const SizedBox(height: 14),
           ValueListenableBuilder<String?>(
             valueListenable: _ttsService.currentlySpeakingIdNotifier,
@@ -455,6 +469,105 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             const SizedBox(height: 10),
             _buildAnalysisSourceBadge(widget.product.analysisSource!),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoreBreakdownCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.canvasCream,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.analytics_outlined, size: 14, color: AppColors.textMutedMocha),
+              const SizedBox(width: 6),
+              const Text(
+                'SCIENTIFIC SCORE BREAKDOWN',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textMutedMocha,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const Spacer(),
+              if (widget.product.isIngredientOnlyScore)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.sugarPeachBg,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'Ingredient-Based',
+                    style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: AppColors.sugarPeachText),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: widget.product.scoreBreakdown!
+                .split(' | ')
+                .map((token) {
+                  final isBase = token.startsWith('Base');
+                  final isNegative = token.contains(':-') || token.contains('Capped');
+                  final isPositive = token.contains(':+');
+                  final isScore = token.startsWith('Score:') || token.contains('= Score:');
+
+                  Color bg = Colors.white;
+                  Color text = AppColors.textObsidian;
+                  Color border = AppColors.cardBorder;
+
+                  if (isBase) {
+                    bg = const Color(0xFFF0EFEB);
+                    text = AppColors.textObsidian;
+                  } else if (isScore) {
+                    bg = AppColors.primaryObsidian;
+                    text = Colors.white;
+                    border = AppColors.primaryObsidian;
+                  } else if (isNegative) {
+                    bg = AppColors.safetyRedBg;
+                    text = AppColors.safetyRed;
+                    border = AppColors.safetyRedBorder;
+                  } else if (isPositive) {
+                    bg = const Color(0xFFE6F4EA);
+                    text = AppColors.safetyGreen;
+                    border = const Color(0xFF34A853).withValues(alpha: 0.35);
+                  }
+
+                  final cleanToken = token.replaceAll(' = Score: ', 'Score: ');
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: border, width: 1.0),
+                    ),
+                    child: Text(
+                      cleanToken,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: text,
+                      ),
+                    ),
+                  );
+                })
+                .toList(),
+          ),
         ],
       ),
     );

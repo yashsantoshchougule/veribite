@@ -87,14 +87,14 @@ class ChatMessage {
 class ProductAdvisorContext {
   final String productName;
   final String barcode;
-  final int healthScore;
+  final int? healthScore;
   final List<Map<String, dynamic>> additives;
   final Map<String, dynamic> nutrition;
 
   const ProductAdvisorContext({
     required this.productName,
     required this.barcode,
-    required this.healthScore,
+    this.healthScore,
     this.additives = const [],
     this.nutrition = const {},
   });

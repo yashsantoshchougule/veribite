@@ -114,7 +114,7 @@ void main() {
         // Must be equal or better brand tier than Milky Mist (Tier 2)
         expect(swap.brandTier, greaterThanOrEqualTo(2));
         // Health score must improve
-        expect(swap.healthScore, greaterThan(milkyMistCheese.healthScore));
+        expect(swap.healthScore, greaterThan(milkyMistCheese.healthScore!));
       }
 
       // Check specific top clean brands

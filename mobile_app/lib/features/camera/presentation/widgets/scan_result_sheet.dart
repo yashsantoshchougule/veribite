@@ -20,10 +20,11 @@ class ScanResultSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     Color gradeColor;
     Color gradeBg;
-    if (product.healthScore >= 70 && !product.redCapTriggered) {
+    final score = product.healthScore;
+    if (score != null && score >= 70 && !product.redCapTriggered) {
       gradeColor = AppColors.safetyGreen;
       gradeBg = const Color(0xFFE6F4EA);
-    } else if (product.healthScore >= 40 && !product.redCapTriggered) {
+    } else if (score != null && score >= 40 && !product.redCapTriggered) {
       gradeColor = AppColors.safetyAmber;
       gradeBg = const Color(0xFFFEF7E0);
     } else {

@@ -292,7 +292,8 @@ class _HealthierSwapsScreenState extends State<HealthierSwapsScreen> {
 
   Widget _buildCurrentProductBanner() {
     final prod = widget.currentProduct!;
-    final isRed = prod.healthScore < 40 || prod.redCapTriggered;
+    final score = prod.healthScore ?? 50;
+    final isRed = score < 40 || prod.redCapTriggered;
 
     return Container(
       padding: const EdgeInsets.all(16),
