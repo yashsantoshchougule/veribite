@@ -27,7 +27,8 @@ void main() {
     expect(find.byIcon(Icons.flash_off_rounded), findsOneWidget);
 
     // Verify mode chips
-    expect(find.text('Barcode / Auto'), findsOneWidget);
+    expect(find.text('Auto Barcode / QR'), findsOneWidget);
+    expect(find.text('Capture Nutrition Label'), findsOneWidget);
     expect(find.text('Curved Bottle'), findsOneWidget);
 
     // Verify manual macro input trigger button
@@ -232,7 +233,8 @@ void main() {
 
     // Verify all top action bar elements are cleanly present
     expect(find.byIcon(Icons.arrow_back), findsOneWidget);
-    expect(find.text('Barcode / Auto'), findsOneWidget);
+    expect(find.text('Auto Barcode / QR'), findsOneWidget);
+    expect(find.text('Capture Nutrition Label'), findsOneWidget);
     expect(find.text('Curved Bottle'), findsOneWidget);
     expect(find.byIcon(Icons.flash_off_rounded), findsOneWidget);
   });
@@ -445,6 +447,15 @@ void main() {
     await tester.tap(shutter);
     await tester.pumpAndSettle();
 
+    // Verify in-app confirmation preview overlay appears with Retake and Extract buttons
+    expect(find.text('Confirm Photo Clarity'), findsOneWidget);
+    expect(find.text('Retake'), findsOneWidget);
+    expect(find.text('Extract Nutrition Data'), findsOneWidget);
+
+    // Tap Extract Nutrition Data
+    await tester.tap(find.text('Extract Nutrition Data'));
+    await tester.pumpAndSettle();
+
     // Verify VerdictReportScreen opens directly with extracted product facts
     expect(find.byType(VerdictReportScreen), findsOneWidget);
     expect(find.textContaining('Amul Pure Ghee'), findsOneWidget);
@@ -459,21 +470,43 @@ void main() {
       ),
     );
 
-    // Verify initially ON
-    expect(find.text('Auto-Scan Label: ON'), findsOneWidget);
-
-    // Tap toggle pill
-    await tester.tap(find.text('Auto-Scan Label: ON'));
-    await tester.pump();
-
-    // Verify toggled to OFF
+    // Verify initially OFF (auto-snap disabled by default)
     expect(find.text('Auto-Scan Label: OFF'), findsOneWidget);
 
-    // Tap toggle pill again
+    // Tap toggle pill
     await tester.tap(find.text('Auto-Scan Label: OFF'));
     await tester.pump();
 
-    // Verify toggled back to ON
+    // Verify toggled to ON
     expect(find.text('Auto-Scan Label: ON'), findsOneWidget);
+
+    // Tap toggle pill again
+    await tester.tap(find.text('Auto-Scan Label: ON'));
+    await tester.pump();
+
+    // Verify toggled back to OFF
+    expect(find.text('Auto-Scan Label: OFF'), findsOneWidget);
+  });
+
+  testWidgets('Mode selector switches between Auto Barcode / QR and Capture Nutrition Label', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify mode chips are present
+    expect(find.text('Auto Barcode / QR'), findsOneWidget);
+    expect(find.text('Capture Nutrition Label'), findsOneWidget);
+
+    // Tap Capture Nutrition Label
+    await tester.tap(find.text('Capture Nutrition Label'));
+    await tester.pumpAndSettle();
+
+    // Verify chip state
+    expect(find.text('Capture Nutrition Label'), findsOneWidget);
   });
 }

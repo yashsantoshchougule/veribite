@@ -118,18 +118,30 @@ class GeminiVisionService {
     return '''
 You are an expert food toxicology and nutrition analyst.
 Analyze this photo of a packaged food product, bottle, can, or nutrition facts label.
+
+CRITICAL INSTRUCTIONS FOR INDIAN FOOD PACKAGING:
+- Indian packaging frequently splits the nutrition table into TWO SIDE-BY-SIDE COLUMNS (e.g., Left table: Energy, Total Fat, Saturated Fat, Trans Fat, Carbohydrates; Right table: Total Sugar, Added Sugar, Protein, Cholesterol, Sodium, Dietary Fibre). Carefully read both columns!
+- ALWAYS extract values from the "100g" / "Per 100g" column. DO NOT extract from "% RDA per 100g" or "% RDA per Serve" percentage columns!
+- If "% RDA per 100g" and "% RDA per Serve" are printed, also extract them as "rda_per_100g" and "rda_per_serve" so exact serving size can be calculated: (rda_per_serve / rda_per_100g) * 100.
+
 Extract the exact information printed on the package:
-1. "product_name": Full product name (e.g., "MTR Badam Drink Mix", "Amul Gold Milk", "Tata Tea Gold").
-2. "brand_name": Manufacturer brand (e.g., "MTR", "Amul", "Tata Consumer", "Britannia").
-3. "category": Food category (e.g., "Beverages & Juices", "Biscuits & Cookies", "Cheese & Dairy", "Snacks & Namkeen", "Breakfast Cereals", "Instant Foods & Noodles").
+1. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "MTR Badam Drink Mix", "Catch Chole Masala").
+2. "brand_name": Manufacturer brand (e.g., "Kwality", "MTR", "Catch", "Britannia").
+3. "category": Food category (e.g., "Bakery & Breads", "Biscuits & Cookies", "Snacks & Namkeen", "Instant Foods & Noodles").
 4. "serving_size_g": Serving size in grams or ml (default to 30.0 if not specified).
-5. "pack_weight_g": Net pack weight in grams or ml (e.g., 200.0, 500.0, 1000.0).
+5. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0).
 6. "nutrition": Object with numeric values per 100g:
-   - "energy_kj": Energy in kJ (if kcal printed, multiply kcal by 4.184)
+   - "energy_kcal": Energy in kcal per 100g (e.g., 368.00)
+   - "energy_kj": Energy in kJ per 100g (if kcal printed, multiply kcal by 4.184)
    - "sugar_g_per_100g": Total sugars in grams per 100g
+   - "added_sugar_g_per_100g": Added sugars in grams per 100g
+   - "total_fat_g_per_100g": Total fat in grams per 100g
    - "sat_fat_g_per_100g": Saturated fat in grams per 100g
-   - "sodium_mg_per_100g": Sodium in mg per 100g (if salt in g printed, salt_g * 400)
+   - "trans_fat_g_per_100g": Trans fat in grams per 100g
+   - "carbohydrates_g_per_100g": Total carbohydrate in grams per 100g
    - "protein_g": Protein in grams per 100g
+   - "sodium_mg_per_100g": Sodium in mg per 100g (if salt in g printed, salt_g * 400)
+   - "cholesterol_mg_per_100g": Cholesterol in mg per 100g
    - "fiber_g": Dietary fiber in grams per 100g (default 1.0)
 7. "ingredients": List of ingredient strings printed on the package.
 8. "additives": List of detected food additives with "ins_code", "primary_name", and "risk_tier" ("GREEN", "YELLOW", or "RED").
@@ -156,17 +168,47 @@ Respond ONLY with a valid JSON object matching this schema without any markdown 
 
         final brandName = decoded['brand_name']?.toString().trim() ?? 'Brand Verified';
         final category = decoded['category']?.toString().trim() ?? 'Packaged Food';
-        final servingG = (decoded['serving_size_g'] as num?)?.toDouble() ?? 30.0;
-        final packG = (decoded['pack_weight_g'] as num?)?.toDouble() ?? 100.0;
-
         // Ensure nutrition map is properly formatted
         final nut = (decoded['nutrition'] as Map<String, dynamic>?) ?? {};
-        final energyKj = (nut['energy_kj'] as num?)?.toDouble() ?? 600.0;
         final sugars = (nut['sugar_g_per_100g'] as num?)?.toDouble() ?? 5.0;
+        final addedSugars = (nut['added_sugar_g_per_100g'] as num?)?.toDouble() ?? 0.0;
         final satFat = (nut['sat_fat_g_per_100g'] as num?)?.toDouble() ?? 1.5;
+        final totalFat = (nut['total_fat_g_per_100g'] as num?)?.toDouble() ?? satFat;
+        final transFat = (nut['trans_fat_g_per_100g'] as num?)?.toDouble() ?? 0.0;
         final sodium = (nut['sodium_mg_per_100g'] as num?)?.toDouble() ?? 100.0;
+        final cholesterol = (nut['cholesterol_mg_per_100g'] as num?)?.toDouble() ?? 0.0;
         final protein = (nut['protein_g'] as num?)?.toDouble() ?? 2.0;
+        final carbs = (nut['carbohydrates_g_per_100g'] as num?)?.toDouble() ?? 0.0;
         final fiber = (nut['fiber_g'] as num?)?.toDouble() ?? 1.0;
+
+        // Energy extraction & Atwater Calorie Sanity Check
+        // Expected kcal per 100g = (protein * 4) + (carbs * 4) + (total_fat * 9)
+        double energyKcal = (nut['energy_kcal'] as num?)?.toDouble() ?? 0.0;
+        final double energyKj = (nut['energy_kj'] as num?)?.toDouble() ?? (energyKcal > 0 ? energyKcal * 4.184 : 600.0);
+        if (energyKcal <= 0.0) {
+          energyKcal = energyKj / 4.184;
+        }
+
+        if (protein > 0 || carbs > 0 || totalFat > 0) {
+          final atwaterKcal = (protein * 4.0) + (carbs * 4.0) + (totalFat * 9.0);
+          if (energyKcal <= 0 || (energyKcal - atwaterKcal).abs() > 10.0 || energyKcal > 1000.0) {
+            debugPrint('[GeminiVisionService] Atwater correction: adjusting kcal from $energyKcal to ${atwaterKcal.roundToDouble()}');
+            energyKcal = atwaterKcal.roundToDouble();
+          }
+        }
+
+        // Serving size derivation from % RDA ratio if missing
+        double servingG = (decoded['serving_size_g'] as num?)?.toDouble() ?? 0.0;
+        final rdaServe = (decoded['rda_per_serve'] as num?)?.toDouble() ?? (nut['rda_per_serve'] as num?)?.toDouble();
+        final rda100 = (decoded['rda_per_100g'] as num?)?.toDouble() ?? (nut['rda_per_100g'] as num?)?.toDouble();
+        if (servingG <= 0.0) {
+          if (rdaServe != null && rda100 != null && rda100 > 0) {
+            servingG = double.parse(((rdaServe / rda100) * 100.0).toStringAsFixed(1));
+          } else {
+            servingG = 30.0;
+          }
+        }
+        final packG = (decoded['pack_weight_g'] as num?)?.toDouble() ?? 100.0;
 
         final additives = (decoded['additives'] as List?) ?? [];
         final ingredients = (decoded['ingredients'] as List?) ?? ['Natural Food Ingredients'];
@@ -182,13 +224,22 @@ Respond ONLY with a valid JSON object matching this schema without any markdown 
           'nova_grade': 3,
           'red_cap_triggered': 0,
           'nutrition_json': jsonEncode({
-            'energy_kj': energyKj,
+            'energy_kj': energyKcal * 4.184,
+            'energy_kcal': energyKcal,
+            'calories': energyKcal,
             'sugar_g_per_100g': sugars,
+            'added_sugar_g_per_100g': addedSugars,
             'sat_fat_g_per_100g': satFat,
+            'total_fat_g_per_100g': totalFat,
+            'trans_fat_g_per_100g': transFat,
             'sodium_mg_per_100g': sodium,
+            'cholesterol_mg_per_100g': cholesterol,
             'protein_g': protein,
+            'carbohydrates_g_per_100g': carbs,
             'fiber_g': fiber,
             'fruit_veg_nut_pct': 0.0,
+            'rda_per_serve': rdaServe,
+            'rda_per_100g': rda100,
           }),
           'additives_json': jsonEncode(additives),
           'ingredients_json': jsonEncode(ingredients.map((e) => e.toString()).toList()),

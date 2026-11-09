@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../services/product_health_scorer.dart';
 import '../../advisor/application/tts_voice_service.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
@@ -38,25 +39,37 @@ class VerdictReportScreen extends StatefulWidget {
   State<VerdictReportScreen> createState() => _VerdictReportScreenState();
 }
 
+enum PortionMode { per100g, perServing, wholePack }
+
 class _VerdictReportScreenState extends State<VerdictReportScreen> {
   late final HomeDashboardService _dashboardService;
   late final TtsVoiceService _ttsService;
+  late ScannedProductResult _product;
   bool _ownsTtsService = false;
-  bool _isWholePack = false;
+  PortionMode _portionMode = PortionMode.per100g;
   bool _isSubmitting = false;
   bool _isExportingPdf = false;
 
-  String get _speakingMessageId => 'verdict_${widget.product.barcode}';
+  String get _speakingMessageId => 'verdict_${_product.barcode}';
 
   @override
   void initState() {
     super.initState();
+    _product = widget.product;
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
     if (widget.ttsService != null) {
       _ttsService = widget.ttsService!;
     } else {
       _ttsService = TtsVoiceService();
       _ownsTtsService = true;
+    }
+  }
+
+  @override
+  void didUpdateWidget(VerdictReportScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.product != widget.product) {
+      _product = widget.product;
     }
   }
 
@@ -72,48 +85,87 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   Future<void> _toggleListenVerdict() async {
     unawaited(HapticFeedback.lightImpact());
     final summary = TtsVoiceService.buildVerdictSpeechSummary(
-      product: widget.product,
+      product: _product,
       userProfile: widget.userProfile,
     );
     await _ttsService.toggleSpeak(summary, messageId: _speakingMessageId);
   }
 
-  double get _packWeight => widget.product.packWeightG > 0
-      ? widget.product.packWeightG
-      : widget.product.servingSizeG * 3.0;
+  double get _packWeight => _product.packWeightG > 0
+      ? _product.packWeightG
+      : (_product.servingSizeG > 0 ? _product.servingSizeG * 3.0 : 100.0);
 
-  double get _multiplier {
-    if (!_isWholePack) return 1.0;
-    if (widget.product.servingSizeG <= 0) return 1.0;
-    return (_packWeight / widget.product.servingSizeG).clamp(1.0, 25.0);
+  double get _currentServingGrams {
+    switch (_portionMode) {
+      case PortionMode.per100g:
+        return 100.0;
+      case PortionMode.perServing:
+        return _product.servingSizeG > 0 ? _product.servingSizeG : 30.0;
+      case PortionMode.wholePack:
+        return _packWeight;
+    }
   }
 
-  double get _currentServingGrams => _isWholePack ? _packWeight : widget.product.servingSizeG;
-  double get _currentSugarGrams => widget.product.sugarGPerServing * _multiplier;
-  int get _currentCalories => (widget.product.caloriesPerServing * _multiplier).round();
+  double get _portionRatio => _currentServingGrams / 100.0;
 
-  // Real saturated fat & sodium per serving from database/scan, scaled with multiplier
+  int get _currentCalories {
+    switch (_portionMode) {
+      case PortionMode.per100g:
+        return _product.effectiveCaloriesPer100g.round();
+      case PortionMode.perServing:
+        return _product.caloriesPerServing.round();
+      case PortionMode.wholePack:
+        final packRatio = _packWeight / (_product.servingSizeG > 0 ? _product.servingSizeG : 100.0);
+        return (_product.caloriesPerServing > 0
+            ? (_product.caloriesPerServing * packRatio)
+            : (_product.effectiveCaloriesPer100g * (_packWeight / 100.0))).round();
+    }
+  }
+
+  double get _currentSugarGrams {
+    switch (_portionMode) {
+      case PortionMode.per100g:
+        return _product.sugarGPer100g;
+      case PortionMode.perServing:
+        return _product.sugarGPerServing > 0 ? _product.sugarGPerServing : (_product.sugarGPer100g * (_product.servingSizeG / 100.0));
+      case PortionMode.wholePack:
+        final packRatio = _packWeight / (_product.servingSizeG > 0 ? _product.servingSizeG : 100.0);
+        return double.parse(((_product.sugarGPerServing > 0 ? _product.sugarGPerServing : (_product.sugarGPer100g * (_product.servingSizeG / 100.0))) * packRatio).toStringAsFixed(1));
+    }
+  }
+
+  // Real saturated fat & sodium per portion
   double get _currentSatFatGrams {
-    if (widget.product.satFatGPerServing > 0) {
-      return double.parse((widget.product.satFatGPerServing * _multiplier).toStringAsFixed(1));
+    switch (_portionMode) {
+      case PortionMode.per100g:
+        return _product.satFatGPer100g;
+      case PortionMode.perServing:
+        return _product.satFatGPerServing > 0 ? _product.satFatGPerServing : double.parse((_product.satFatGPer100g * (_product.servingSizeG / 100.0)).toStringAsFixed(1));
+      case PortionMode.wholePack:
+        final packRatio = _packWeight / (_product.servingSizeG > 0 ? _product.servingSizeG : 100.0);
+        return double.parse(((_product.satFatGPerServing > 0 ? _product.satFatGPerServing : (_product.satFatGPer100g * (_product.servingSizeG / 100.0))) * packRatio).toStringAsFixed(1));
     }
-    if (widget.product.satFatGPer100g > 0) {
-      return double.parse((widget.product.satFatGPer100g * (_currentServingGrams / 100.0)).toStringAsFixed(1));
-    }
-    final base = (widget.product.sugarGPerServing * 0.4).clamp(0.5, 12.0);
-    return double.parse((base * _multiplier).toStringAsFixed(1));
   }
 
   int get _currentSodiumMg {
-    if (widget.product.sodiumMgPerServing > 0) {
-      return (widget.product.sodiumMgPerServing * _multiplier).round();
+    switch (_portionMode) {
+      case PortionMode.per100g:
+        return _product.sodiumMgPer100g.round();
+      case PortionMode.perServing:
+        return _product.sodiumMgPerServing > 0 ? _product.sodiumMgPerServing.round() : (_product.sodiumMgPer100g * (_product.servingSizeG / 100.0)).round();
+      case PortionMode.wholePack:
+        final packRatio = _packWeight / (_product.servingSizeG > 0 ? _product.servingSizeG : 100.0);
+        return ((_product.sodiumMgPerServing > 0 ? _product.sodiumMgPerServing : (_product.sodiumMgPer100g * (_product.servingSizeG / 100.0))) * packRatio).round();
     }
-    if (widget.product.sodiumMgPer100g > 0) {
-      return (widget.product.sodiumMgPer100g * (_currentServingGrams / 100.0)).round();
-    }
-    final base = (widget.product.servingSizeG * 6.5).clamp(20.0, 950.0);
-    return (base * _multiplier).round();
   }
+
+  // Secondary nutrients scaled with portion
+  double get _currentProteinGrams => double.parse((_product.proteinGPer100g * _portionRatio).toStringAsFixed(1));
+  double get _currentCarbsGrams => double.parse((_product.carbsGPer100g * _portionRatio).toStringAsFixed(1));
+  double get _currentFiberGrams => double.parse((_product.fiberGPer100g * _portionRatio).toStringAsFixed(1));
+  double get _currentAddedSugarGrams => double.parse((_product.addedSugarGPer100g * _portionRatio).toStringAsFixed(1));
+  double get _currentTransFatGrams => double.parse((_product.transFatGPer100g * _portionRatio).toStringAsFixed(1));
+  double get _currentCholesterolMg => double.parse((_product.cholesterolMgPer100g * _portionRatio).toStringAsFixed(0));
 
   Future<void> _handleIAteThis() async {
     if (_isSubmitting) return;
@@ -249,13 +301,20 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                             const SizedBox(height: 14),
                           ],
 
-                          // 3. Dynamic Serving Multiplier Segmented Toggle
+                          // 3. Nutrition Section Header with Edit Button & 3-Tab Segmented Portion Control
+                          _buildNutritionSectionHeader(),
+                          const SizedBox(height: 8),
                           _buildServingMultiplierToggle(),
 
                           const SizedBox(height: 14),
 
                           // 4. Dynamic Macro Nutritional Cards Grid
                           _buildMacroNutritionalGrid(sugarPercentage, maxSugarCeiling),
+
+                          const SizedBox(height: 12),
+
+                          // Secondary Extracted Nutrients Grid
+                          _buildSecondaryNutrientsGrid(),
 
                           const SizedBox(height: 16),
 
@@ -516,15 +575,17 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           ),
           const SizedBox(height: 8),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 8,
+            runSpacing: 8,
             children: widget.product.scoreBreakdown!
-                .split(' | ')
+                .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:)'))
+                .map((t) => t.trim())
+                .where((t) => t.isNotEmpty)
                 .map((token) {
                   final isBase = token.startsWith('Base');
-                  final isNegative = token.contains(':-') || token.contains('Capped');
-                  final isPositive = token.contains(':+');
-                  final isScore = token.startsWith('Score:') || token.contains('= Score:');
+                  final isScore = token.startsWith('Score:') || token.startsWith('Final Score:');
+                  final isNegative = !isScore && (token.contains(':-') || token.contains('Capped') || token.contains('NOVA 4') || token.contains('NOVA 3'));
+                  final isPositive = !isScore && token.contains(':+');
 
                   Color bg = Colors.white;
                   Color text = AppColors.textObsidian;
@@ -547,10 +608,10 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                     border = const Color(0xFF34A853).withValues(alpha: 0.35);
                   }
 
-                  final cleanToken = token.replaceAll(' = Score: ', 'Score: ');
+                  final cleanToken = token.startsWith('Score:') ? 'Final $token' : token;
 
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                     decoration: BoxDecoration(
                       color: bg,
                       borderRadius: BorderRadius.circular(8),
@@ -710,6 +771,52 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     );
   }
 
+  Widget _buildNutritionSectionHeader() {
+    return Row(
+      children: [
+        const Icon(Icons.table_chart_outlined, size: 16, color: AppColors.textMutedMocha),
+        const SizedBox(width: 6),
+        const Text(
+          'NUTRITION INFORMATION',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textMutedMocha,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const Spacer(),
+        InkWell(
+          onTap: _showEditNutritionSheet,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.cardBorder, width: 1.0),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.edit_note_rounded, size: 15, color: AppColors.primaryObsidian),
+                SizedBox(width: 4),
+                Text(
+                  'Edit / Verify',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primaryObsidian,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildServingMultiplierToggle() {
     return Container(
       decoration: BoxDecoration(
@@ -721,54 +828,307 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
       child: Row(
         children: [
           Expanded(
-            child: GestureDetector(
-              onTap: () {
-                if (_isWholePack) setState(() => _isWholePack = false);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                decoration: BoxDecoration(
-                  color: !_isWholePack ? AppColors.primaryObsidian : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '1 Serving (${widget.product.servingSizeG.toStringAsFixed(0)}g)',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: !_isWholePack ? Colors.white : AppColors.textMutedMocha,
-                  ),
-                ),
-              ),
+            child: _buildPortionTab(
+              mode: PortionMode.per100g,
+              label: 'Per 100g (Label)',
             ),
           ),
           const SizedBox(width: 4),
           Expanded(
-            child: GestureDetector(
-              onTap: () {
-                if (!_isWholePack) setState(() => _isWholePack = true);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                decoration: BoxDecoration(
-                  color: _isWholePack ? AppColors.primaryObsidian : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  'Whole Pack (${_packWeight.toStringAsFixed(0)}g)',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: _isWholePack ? Colors.white : AppColors.textMutedMocha,
-                  ),
-                ),
-              ),
+            child: _buildPortionTab(
+              mode: PortionMode.perServing,
+              label: '1 Serving (${_product.servingSizeG.toStringAsFixed(0)}g)',
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _buildPortionTab(
+              mode: PortionMode.wholePack,
+              label: 'Whole Pack (${_packWeight.toStringAsFixed(0)}g)',
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPortionTab({required PortionMode mode, required String label}) {
+    final isSelected = _portionMode == mode;
+    return GestureDetector(
+      onTap: () {
+        if (_portionMode != mode) setState(() => _portionMode = mode);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 2),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primaryObsidian : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
+            color: isSelected ? Colors.white : AppColors.textMutedMocha,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSecondaryNutrientsGrid() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Secondary Extracted Nutrients',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textMutedMocha,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _portionMode == PortionMode.per100g
+                    ? 'Per 100g'
+                    : (_portionMode == PortionMode.perServing ? 'Per Serve (${_product.servingSizeG.toStringAsFixed(0)}g)' : 'Whole Pack (${_packWeight.toStringAsFixed(0)}g)'),
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.accentBronze,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: _buildSecondaryNutrientTile('Added Sugar', '${_currentAddedSugarGrams.toStringAsFixed(1)} g')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildSecondaryNutrientTile('Carbohydrates', '${_currentCarbsGrams.toStringAsFixed(1)} g')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildSecondaryNutrientTile('Protein', '${_currentProteinGrams.toStringAsFixed(1)} g')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: _buildSecondaryNutrientTile('Dietary Fibre', '${_currentFiberGrams.toStringAsFixed(1)} g')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildSecondaryNutrientTile('Trans Fat', '${_currentTransFatGrams.toStringAsFixed(1)} g')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildSecondaryNutrientTile('Cholesterol', '${_currentCholesterolMg.toStringAsFixed(0)} mg')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecondaryNutrientTile(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: AppColors.textMutedMocha),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textObsidian),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditNutritionSheet() {
+    final calCtrl = TextEditingController(text: _product.effectiveCaloriesPer100g.toStringAsFixed(0));
+    final sugarCtrl = TextEditingController(text: _product.sugarGPer100g.toStringAsFixed(1));
+    final satFatCtrl = TextEditingController(text: _product.satFatGPer100g.toStringAsFixed(1));
+    final sodiumCtrl = TextEditingController(text: _product.sodiumMgPer100g.toStringAsFixed(0));
+    final proteinCtrl = TextEditingController(text: _product.proteinGPer100g.toStringAsFixed(1));
+    final carbsCtrl = TextEditingController(text: _product.carbsGPer100g.toStringAsFixed(1));
+    final fiberCtrl = TextEditingController(text: _product.fiberGPer100g.toStringAsFixed(1));
+    final servingCtrl = TextEditingController(text: _product.servingSizeG.toStringAsFixed(0));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Verify & Edit Scanned Values',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textObsidian),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const Text(
+                  'Values per 100g from physical package. Changing values recalculates Health Score live.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(child: _buildEditField('Calories (kcal)', calCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildEditField('Total Sugar (g)', sugarCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _buildEditField('Sat. Fat (g)', satFatCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildEditField('Sodium (mg)', sodiumCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _buildEditField('Protein (g)', proteinCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildEditField('Carbs (g)', carbsCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _buildEditField('Dietary Fibre (g)', fiberCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildEditField('Serving Size (g)', servingCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryObsidian,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: () {
+                      final newCal = double.tryParse(calCtrl.text) ?? _product.effectiveCaloriesPer100g;
+                      final newSugar = double.tryParse(sugarCtrl.text) ?? _product.sugarGPer100g;
+                      final newSatFat = double.tryParse(satFatCtrl.text) ?? _product.satFatGPer100g;
+                      final newSodium = double.tryParse(sodiumCtrl.text) ?? _product.sodiumMgPer100g;
+                      final newProtein = double.tryParse(proteinCtrl.text) ?? _product.proteinGPer100g;
+                      final newCarbs = double.tryParse(carbsCtrl.text) ?? _product.carbsGPer100g;
+                      final newFiber = double.tryParse(fiberCtrl.text) ?? _product.fiberGPer100g;
+                      final newServing = double.tryParse(servingCtrl.text) ?? _product.servingSizeG;
+
+                      final scoreRes = ProductHealthScorer.calculate(
+                        nutrition: {
+                          'energy_kcal': newCal,
+                          'sugar_g_per_100g': newSugar,
+                          'sat_fat_g_per_100g': newSatFat,
+                          'sodium_mg_per_100g': newSodium,
+                          'protein_g': newProtein,
+                          'fiber_g': newFiber,
+                          'carbohydrates_g_per_100g': newCarbs,
+                        },
+                        additives: _product.additives,
+                        ingredients: _product.splitSugars,
+                        novaGrade: _product.novaGrade,
+                        redCapTriggered: _product.redCapTriggered,
+                      );
+
+                      setState(() {
+                        _product = _product.copyWith(
+                          caloriesPer100g: newCal,
+                          caloriesPerServing: (newCal * (newServing / 100.0)).roundToDouble(),
+                          sugarGPer100g: newSugar,
+                          sugarGPerServing: double.parse((newSugar * (newServing / 100.0)).toStringAsFixed(1)),
+                          satFatGPer100g: newSatFat,
+                          satFatGPerServing: double.parse((newSatFat * (newServing / 100.0)).toStringAsFixed(1)),
+                          sodiumMgPer100g: newSodium,
+                          sodiumMgPerServing: (newSodium * (newServing / 100.0)).roundToDouble(),
+                          proteinGPer100g: newProtein,
+                          carbsGPer100g: newCarbs,
+                          fiberGPer100g: newFiber,
+                          servingSizeG: newServing,
+                          healthScore: scoreRes.score,
+                          verdictTag: scoreRes.verdictTag,
+                          scoreBreakdown: scoreRes.scoreBreakdownSummary,
+                        );
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('Recalculate & Apply Values', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEditField(String label, TextEditingController controller) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.textMutedMocha)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.cardBorder)),
+          ),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ],
     );
   }
 

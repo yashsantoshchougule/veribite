@@ -135,5 +135,30 @@ void main() {
       final norm = ProductHealthScorer.normalizeNutrients({'energy_kj': 1673.6});
       expect(norm.energyKcal, closeTo(400.0, 0.5));
     });
+
+    test('Score breakdown formats Final Score as separate token avoiding NOVA concatenation bug', () {
+      final result = ProductHealthScorer.calculate(
+        nutrition: {
+          'energy_kcal': 368.0,
+          'sugars_100g': 26.28,
+          'saturated-fat_100g': 5.99,
+          'sodium_mg': 250.80,
+          'proteins_100g': 7.25,
+          'fiber_100g': 5.20,
+        },
+        additives: [
+          {'ins_code': '102', 'primary_name': 'Tartrazine', 'risk_tier': 'RED'},
+        ],
+        ingredients: ['Wheat Flour', 'Sugar', 'Palm Oil'],
+        novaGrade: 4,
+      );
+
+      expect(result.scoreBreakdownSummary, contains(' | Final Score: '));
+      final tokens = result.scoreBreakdownSummary.split(' | ');
+      expect(tokens.any((t) => t.contains('NOVA 4')), isTrue);
+      expect(tokens.any((t) => t.startsWith('Final Score:')), isTrue);
+      // Ensure NOVA and Final Score are distinct elements
+      expect(tokens.any((t) => t.contains('NOVA 4') && t.contains('Score:')), isFalse);
+    });
   });
 }

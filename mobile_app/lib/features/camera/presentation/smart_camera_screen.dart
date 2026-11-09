@@ -55,6 +55,8 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
   ConsumerState<SmartCameraScreen> createState() => _SmartCameraScreenState();
 }
 
+enum CameraScanMode { barcodeQr, nutritionLabel, multiAngle }
+
 class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with WidgetsBindingObserver {
   CameraController? _cameraController;
   late final BarcodeScanner _barcodeScanner;
@@ -69,6 +71,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
   bool _isCameraInitialized = false;
   String? _cameraError;
 
+  CameraScanMode _scanMode = CameraScanMode.barcodeQr;
+  List<int>? _capturedPreviewBytes;
+  bool _showCapturePreviewOverlay = false;
+
   String? _lastDismissedPayload;
   DateTime? _lastDismissedTime;
   Timer? _qrDebounceTimer;
@@ -81,7 +87,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
   DateTime _lastOcrScanTime = DateTime.fromMillisecondsSinceEpoch(0);
   int _nutritionDetectedCycles = 0;
   bool _isNutritionLabelDetected = false;
-  bool _isAutoCaptureEnabled = true;
+  bool _isAutoCaptureEnabled = false;
 
   // Zoom & Focus
   double _baseZoomScale = 1.0;
@@ -268,17 +274,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       final inputImage = _inputImageFromCameraImage(image);
       if (inputImage == null) return;
 
-      // 1. Barcode / QR detection
-      final barcodes = await _barcodeScanner.processImage(inputImage);
-      if (barcodes.isNotEmpty) {
-        if (_isNutritionLabelDetected) {
-          setState(() {
-            _isNutritionLabelDetected = false;
-            _nutritionDetectedCycles = 0;
-          });
+      // 1. Barcode / QR detection (Paused when user is in Capture Nutrition Label mode to prevent edge barcode hijacking)
+      if (_scanMode == CameraScanMode.barcodeQr) {
+        final barcodes = await _barcodeScanner.processImage(inputImage);
+        if (barcodes.isNotEmpty) {
+          if (_isNutritionLabelDetected) {
+            setState(() {
+              _isNutritionLabelDetected = false;
+              _nutritionDetectedCycles = 0;
+            });
+          }
+          _handleBarcodeCapture(barcodes);
+          return;
         }
-        _handleBarcodeCapture(barcodes);
-        return;
       }
 
       // 2. Smart Nutrition Table Auto-Detector (every 600ms when no barcode in view)
@@ -550,18 +558,28 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
   }
 
   /// Instant in-app capture of Nutrition Information & Ingredient label
-  /// Takes a high-resolution frame directly from the active camera controller,
-  /// passes it to the multi-angle / vision parser, and binds to any pending barcode.
+  /// Locks autofocus with 350ms settle delay, takes a high-res frame,
+  /// and shows an in-app confirmation preview overlay before data extraction.
   Future<void> _captureNutritionLabelFromActiveCamera() async {
     if (_isProcessingScan || _isSheetOpen) return;
     unawaited(HapticFeedback.heavyImpact().catchError((_) => null));
 
     setState(() {
       _isProcessingScan = true;
-      _activeScanningStatus = 'Capturing & extracting nutrition facts...';
+      _activeScanningStatus = 'Locking focus & capturing sharp photo...';
     });
 
     try {
+      // 1. Lock hardware focus and exposure with 350ms settle delay so lens is razor sharp
+      if (!widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          await _cameraController!.setFocusMode(FocusMode.locked);
+          await Future.delayed(const Duration(milliseconds: 350));
+        } catch (e) {
+          debugPrint('[SmartCameraScreen] Focus lock notice: $e');
+        }
+      }
+
       List<int> frameBytes;
       if (widget.useSimulatedFeed) {
         frameBytes = List<int>.generate(200, (i) => (i * 7) % 256);
@@ -574,6 +592,47 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         frameBytes = await photo.readAsBytes();
       }
 
+      if (!mounted) return;
+
+      setState(() {
+        _isProcessingScan = false;
+        _capturedPreviewBytes = frameBytes;
+        _showCapturePreviewOverlay = true;
+      });
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error capturing photo: $e');
+      if (mounted) {
+        setState(() => _isProcessingScan = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Camera capture failed: $e'),
+            backgroundColor: AppColors.safetyRed,
+          ),
+        );
+      }
+    }
+  }
+
+  void _retakePhoto() {
+    setState(() {
+      _capturedPreviewBytes = null;
+      _showCapturePreviewOverlay = false;
+      _isProcessingScan = false;
+    });
+    if (!widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
+      unawaited(_cameraController!.setFocusMode(FocusMode.auto).catchError((_) => null));
+      unawaited(_startImageStreaming().catchError((_) => null));
+    }
+  }
+
+  Future<void> _extractDataFromPreview(List<int> frameBytes) async {
+    setState(() {
+      _showCapturePreviewOverlay = false;
+      _isProcessingScan = true;
+      _activeScanningStatus = 'Extracting nutrition facts & additives...';
+    });
+
+    try {
       final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
 
       final resolvedProduct = await _productService.resolveMultiAngleScan(
@@ -632,7 +691,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         );
       }
     } catch (e, st) {
-      debugPrint('[SmartCameraScreen] Error capturing nutrition label: $e\n$st');
+      debugPrint('[SmartCameraScreen] Error extracting nutrition facts: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -645,13 +704,122 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       if (mounted) {
         setState(() {
           _isProcessingScan = false;
-          _activeScanningStatus = null;
+          _showCapturePreviewOverlay = false;
         });
-        if (!widget.useSimulatedFeed && !_isSheetOpen) {
-          unawaited(_startImageStreaming());
+        if (!widget.useSimulatedFeed) {
+          unawaited(_startImageStreaming().catchError((_) => null));
         }
       }
     }
+  }
+
+  Widget _buildCapturePreviewOverlay() {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.92),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.center_focus_strong_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Confirm Photo Clarity',
+                      style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  onPressed: _retakePhoto,
+                  tooltip: 'Cancel & Retake',
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Verify that the Nutrition Information table and numbers are sharp and free of plastic glare.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: double.infinity,
+                  color: Colors.black,
+                  child: (_capturedPreviewBytes != null && _capturedPreviewBytes!.length > 500)
+                      ? Image.memory(
+                          Uint8List.fromList(_capturedPreviewBytes!),
+                          fit: BoxFit.contain,
+                        )
+                      : Container(
+                          alignment: Alignment.center,
+                          color: const Color(0xFF1E1E1E),
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.table_chart_rounded, color: Color(0xFF0F9D58), size: 56),
+                              SizedBox(height: 12),
+                              Text(
+                                'High-Resolution Nutrition Frame Captured',
+                                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: _retakePhoto,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Retake', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F9D58),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: () {
+                      if (_capturedPreviewBytes != null) {
+                        _extractDataFromPreview(_capturedPreviewBytes!);
+                      }
+                    },
+                    icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+                    label: const Text(
+                      'Extract Nutrition Data',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _handleMultiAngleSubmit(List<List<int>> frames) async {
@@ -1765,17 +1933,38 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     ChoiceChip(
-                                      label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
-                                      selected: !state.isMultiAngleMode,
+                                      label: const Text('Auto Barcode / QR', style: TextStyle(fontSize: 11)),
+                                      selected: _scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode,
                                       selectedColor: const Color(0xFF0F9D58),
                                       visualDensity: VisualDensity.compact,
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                                       labelStyle: TextStyle(
-                                        color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                        color: (_scanMode == CameraScanMode.barcodeQr && !state.isMultiAngleMode) ? Colors.white : Colors.white70,
                                       ),
                                       onSelected: (val) {
-                                        if (val) notifier.setMultiAngleMode(false);
+                                        if (val) {
+                                          setState(() => _scanMode = CameraScanMode.barcodeQr);
+                                          notifier.setMultiAngleMode(false);
+                                        }
+                                      },
+                                    ),
+                                    const SizedBox(width: 4),
+                                    ChoiceChip(
+                                      label: const Text('Capture Nutrition Label', style: TextStyle(fontSize: 11)),
+                                      selected: _scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode,
+                                      selectedColor: const Color(0xFFEA4335),
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                      labelStyle: TextStyle(
+                                        color: (_scanMode == CameraScanMode.nutritionLabel && !state.isMultiAngleMode) ? Colors.white : Colors.white70,
+                                      ),
+                                      onSelected: (val) {
+                                        if (val) {
+                                          setState(() => _scanMode = CameraScanMode.nutritionLabel);
+                                          notifier.setMultiAngleMode(false);
+                                        }
                                       },
                                     ),
                                     const SizedBox(width: 4),
@@ -1790,7 +1979,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                                         color: state.isMultiAngleMode ? Colors.white : Colors.white70,
                                       ),
                                       onSelected: (val) {
-                                        if (val) notifier.setMultiAngleMode(true);
+                                        if (val) {
+                                          setState(() => _scanMode = CameraScanMode.multiAngle);
+                                          notifier.setMultiAngleMode(true);
+                                        }
                                       },
                                     ),
                                   ],
@@ -1887,7 +2079,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF4285F4).withValues(alpha: 0.95),
+                        color: const Color(0xFF0F9D58).withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: const [
                           BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 2)),
@@ -1900,9 +2092,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                           const SizedBox(width: 8),
                           Text(
                             _isAutoCaptureEnabled
-                                ? 'Nutrition Label Detected — Hold Steady to Auto-Scan'
-                                : 'Nutrition Label Detected — Tap Shutter to Scan',
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                                ? 'Nutrition Table in View — Hold Steady to Auto-Snap'
+                                : 'Nutrition Table in View — Tap Shutter to Capture Clear Photo',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
                           ),
                         ],
                       ),
@@ -2055,6 +2247,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
               ),
             ),
           ),
+
+          // 9. In-App Capture Preview Confirmation Overlay
+          if (_showCapturePreviewOverlay && _capturedPreviewBytes != null)
+            Positioned.fill(
+              child: _buildCapturePreviewOverlay(),
+            ),
         ],
       ),
     );

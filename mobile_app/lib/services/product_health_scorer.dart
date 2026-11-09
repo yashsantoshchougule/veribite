@@ -341,7 +341,7 @@ class ProductHealthScorer {
     }
 
     final String verdictTag = _deriveVerdictTag(finalScore, isRedCapped);
-    final String summary = '${summaryTokens.join(' | ')} = Score: $finalScore';
+    final String summary = '${summaryTokens.join(' | ')} | Final Score: $finalScore';
 
     return HealthScoreResult(
       score: finalScore,
@@ -412,7 +412,7 @@ class ProductHealthScorer {
       tokens.add('Red-Cap: Capped to 39');
     }
 
-    final summary = '${tokens.join(' | ')} = Score: $finalScore';
+    final summary = '${tokens.join(' | ')} | Final Score: $finalScore';
 
     return HealthScoreResult(
       score: finalScore,

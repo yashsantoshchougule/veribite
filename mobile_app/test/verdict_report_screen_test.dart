@@ -143,7 +143,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Initially 1 Serving: 153 kcal
+    // Initially Per 100g (Label): 383 kcal, 1.1g sugar
+    expect(find.text('Per 100g (Label)'), findsOneWidget);
+    expect(find.text('383'), findsOneWidget);
+    expect(find.text('1.1'), findsOneWidget);
+
+    // Switch to 1 Serving (40g): 153 kcal, 0.4g sugar
+    await tester.tap(find.textContaining('1 Serving'));
+    await tester.pumpAndSettle();
     expect(find.text('153'), findsOneWidget);
     expect(find.text('0.4'), findsOneWidget);
 
@@ -195,10 +202,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Verify 1-serving real values
-    expect(find.text('Whole Pack (50g)'), findsOneWidget);
-    expect(find.text('2.8'), findsOneWidget); // Real Sat Fat
-    expect(find.text('70'), findsOneWidget); // Real Sodium
+    // Verify Per 100g (Label) default values
+    expect(find.text('Per 100g (Label)'), findsOneWidget);
+    expect(find.text('11.2'), findsOneWidget); // Per 100g Sat Fat
+    expect(find.text('280'), findsOneWidget); // Per 100g Sodium
+
+    // Switch to 1 Serving (25g)
+    await tester.tap(find.text('1 Serving (25g)'));
+    await tester.pumpAndSettle();
+    expect(find.text('2.8'), findsOneWidget); // Real 1-Serving Sat Fat
+    expect(find.text('70'), findsOneWidget); // Real 1-Serving Sodium
 
     // Switch to Whole Pack (2.0x multiplier, NOT hardcoded 3.0x)
     await tester.tap(find.text('Whole Pack (50g)'));

@@ -87,6 +87,14 @@ class ScannedProductResult {
   final double sugarGPer100g;
   final double sugarGPerServing;
   final double caloriesPerServing;
+  final double caloriesPer100g;
+  final double proteinGPer100g;
+  final double carbsGPer100g;
+  final double fiberGPer100g;
+  final double addedSugarGPer100g;
+  final double transFatGPer100g;
+  final double totalFatGPer100g;
+  final double cholesterolMgPer100g;
   final double satFatGPer100g;
   final double satFatGPerServing;
   final double sodiumMgPer100g;
@@ -108,6 +116,12 @@ class ScannedProductResult {
   final String? scoreBreakdown;
   final bool isIngredientOnlyScore;
 
+  double get effectiveCaloriesPer100g {
+    if (caloriesPer100g > 0.0) return caloriesPer100g;
+    if (servingSizeG > 0.0) return (caloriesPerServing * (100.0 / servingSizeG)).roundToDouble();
+    return caloriesPerServing;
+  }
+
   const ScannedProductResult({
     required this.barcode,
     required this.productName,
@@ -117,6 +131,14 @@ class ScannedProductResult {
     required this.sugarGPer100g,
     required this.sugarGPerServing,
     required this.caloriesPerServing,
+    this.caloriesPer100g = 0.0,
+    this.proteinGPer100g = 0.0,
+    this.carbsGPer100g = 0.0,
+    this.fiberGPer100g = 0.0,
+    this.addedSugarGPer100g = 0.0,
+    this.transFatGPer100g = 0.0,
+    this.totalFatGPer100g = 0.0,
+    this.cholesterolMgPer100g = 0.0,
     this.satFatGPer100g = 0.0,
     this.satFatGPerServing = 0.0,
     this.sodiumMgPer100g = 0.0,
@@ -138,6 +160,84 @@ class ScannedProductResult {
     this.scoreBreakdown,
     this.isIngredientOnlyScore = false,
   });
+
+  ScannedProductResult copyWith({
+    String? barcode,
+    String? productName,
+    String? brandName,
+    String? category,
+    double? servingSizeG,
+    double? sugarGPer100g,
+    double? sugarGPerServing,
+    double? caloriesPerServing,
+    double? caloriesPer100g,
+    double? proteinGPer100g,
+    double? carbsGPer100g,
+    double? fiberGPer100g,
+    double? addedSugarGPer100g,
+    double? transFatGPer100g,
+    double? totalFatGPer100g,
+    double? cholesterolMgPer100g,
+    double? satFatGPer100g,
+    double? satFatGPerServing,
+    double? sodiumMgPer100g,
+    double? sodiumMgPerServing,
+    double? packWeightG,
+    int? healthScore,
+    String? verdictTag,
+    int? novaGrade,
+    bool? redCapTriggered,
+    int? safePortionGrams,
+    int? safePieces,
+    String? limitingFactor,
+    String? frequencySchedule,
+    List<Map<String, dynamic>>? additives,
+    List<String>? splitSugars,
+    String? portionAdvice,
+    bool? isExceededBudget,
+    String? analysisSource,
+    String? scoreBreakdown,
+    bool? isIngredientOnlyScore,
+  }) {
+    return ScannedProductResult(
+      barcode: barcode ?? this.barcode,
+      productName: productName ?? this.productName,
+      brandName: brandName ?? this.brandName,
+      category: category ?? this.category,
+      servingSizeG: servingSizeG ?? this.servingSizeG,
+      sugarGPer100g: sugarGPer100g ?? this.sugarGPer100g,
+      sugarGPerServing: sugarGPerServing ?? this.sugarGPerServing,
+      caloriesPerServing: caloriesPerServing ?? this.caloriesPerServing,
+      caloriesPer100g: caloriesPer100g ?? this.caloriesPer100g,
+      proteinGPer100g: proteinGPer100g ?? this.proteinGPer100g,
+      carbsGPer100g: carbsGPer100g ?? this.carbsGPer100g,
+      fiberGPer100g: fiberGPer100g ?? this.fiberGPer100g,
+      addedSugarGPer100g: addedSugarGPer100g ?? this.addedSugarGPer100g,
+      transFatGPer100g: transFatGPer100g ?? this.transFatGPer100g,
+      totalFatGPer100g: totalFatGPer100g ?? this.totalFatGPer100g,
+      cholesterolMgPer100g: cholesterolMgPer100g ?? this.cholesterolMgPer100g,
+      satFatGPer100g: satFatGPer100g ?? this.satFatGPer100g,
+      satFatGPerServing: satFatGPerServing ?? this.satFatGPerServing,
+      sodiumMgPer100g: sodiumMgPer100g ?? this.sodiumMgPer100g,
+      sodiumMgPerServing: sodiumMgPerServing ?? this.sodiumMgPerServing,
+      packWeightG: packWeightG ?? this.packWeightG,
+      healthScore: healthScore ?? this.healthScore,
+      verdictTag: verdictTag ?? this.verdictTag,
+      novaGrade: novaGrade ?? this.novaGrade,
+      redCapTriggered: redCapTriggered ?? this.redCapTriggered,
+      safePortionGrams: safePortionGrams ?? this.safePortionGrams,
+      safePieces: safePieces ?? this.safePieces,
+      limitingFactor: limitingFactor ?? this.limitingFactor,
+      frequencySchedule: frequencySchedule ?? this.frequencySchedule,
+      additives: additives ?? this.additives,
+      splitSugars: splitSugars ?? this.splitSugars,
+      portionAdvice: portionAdvice ?? this.portionAdvice,
+      isExceededBudget: isExceededBudget ?? this.isExceededBudget,
+      analysisSource: analysisSource ?? this.analysisSource,
+      scoreBreakdown: scoreBreakdown ?? this.scoreBreakdown,
+      isIngredientOnlyScore: isIngredientOnlyScore ?? this.isIngredientOnlyScore,
+    );
+  }
 }
 
 /// Service that queries Supabase Cloud, Open Food Facts live API, or built-in verified product registries,
@@ -992,7 +1092,6 @@ class ProductScannerService {
     final productName = raw['product_name']?.toString() ?? 'Packaged Food';
     final brandName = raw['brand_name']?.toString() ?? 'Brand Verified';
     final category = raw['category']?.toString() ?? 'Packaged Food';
-    final servingSize = (raw['serving_size_g'] as num?)?.toDouble() ?? 30.0;
     final unitPieceWeight = (raw['piece_weight_g'] as num?)?.toDouble();
 
     // Parse nutrition JSON or direct nutrition map
@@ -1007,10 +1106,35 @@ class ProductScannerService {
       nutritionMap = Map<String, dynamic>.from(raw['nutrition_json'] as Map);
     }
 
+    // Dynamic serving size calculation from % RDA per Serve / % RDA per 100g if missing or 0
+    double servingSize = (raw['serving_size_g'] as num?)?.toDouble() ?? 0.0;
+    if (servingSize <= 0.0) {
+      final rdaServe = (nutritionMap['rda_per_serve'] as num?)?.toDouble() ??
+          (raw['rda_per_serve'] as num?)?.toDouble();
+      final rda100 = (nutritionMap['rda_per_100g'] as num?)?.toDouble() ??
+          (raw['rda_per_100g'] as num?)?.toDouble();
+      if (rdaServe != null && rda100 != null && rda100 > 0) {
+        servingSize = double.parse(((rdaServe / rda100) * 100.0).toStringAsFixed(1));
+      } else {
+        servingSize = 30.0;
+      }
+    }
+
     final sugarPer100 = (nutritionMap['sugar_g_per_100g'] ?? nutritionMap['total_sugars_g'] ?? 0.0 as num).toDouble();
     final sugarPerServing = double.parse((sugarPer100 * (servingSize / 100.0)).toStringAsFixed(1));
-    final energyKj = (nutritionMap['energy_kj'] as num?)?.toDouble() ?? 500.0;
-    final caloriesPerServing = double.parse(((energyKj / 4.184) * (servingSize / 100.0)).toStringAsFixed(0));
+
+    double caloriesPer100;
+    if (nutritionMap['energy_kcal'] != null) {
+      caloriesPer100 = (nutritionMap['energy_kcal'] as num).toDouble();
+    } else if (nutritionMap['calories'] != null) {
+      caloriesPer100 = (nutritionMap['calories'] as num).toDouble();
+    } else if (nutritionMap['energy_kj'] != null) {
+      caloriesPer100 = (nutritionMap['energy_kj'] as num).toDouble() / 4.184;
+    } else {
+      caloriesPer100 = 120.0;
+    }
+    caloriesPer100 = double.parse(caloriesPer100.toStringAsFixed(1));
+    final caloriesPerServing = double.parse((caloriesPer100 * (servingSize / 100.0)).toStringAsFixed(0));
 
     // Parse real saturated fat & sodium per 100g and calculate per-serving values
     final satFatPer100 = (nutritionMap['sat_fat_g_per_100g'] ?? nutritionMap['sat_fat_g'] ?? 0.0 as num).toDouble();
@@ -1027,6 +1151,15 @@ class ProductScannerService {
       sodiumPer100 = (nutritionMap['salt_g'] as num).toDouble() * 400.0;
     }
     final sodiumPerServing = (sodiumPer100 * (servingSize / 100.0)).roundToDouble();
+
+    // Secondary extracted nutrients per 100g
+    final proteinPer100 = (nutritionMap['protein_g'] ?? nutritionMap['proteins_100g'] ?? nutritionMap['protein'] ?? 0.0 as num).toDouble();
+    final carbsPer100 = (nutritionMap['carbohydrates_g_per_100g'] ?? nutritionMap['carbohydrate_g'] ?? nutritionMap['carbs_100g'] ?? nutritionMap['carbohydrates'] ?? 0.0 as num).toDouble();
+    final fiberPer100 = (nutritionMap['fiber_g'] ?? nutritionMap['fiber_100g'] ?? nutritionMap['dietary_fibre_g'] ?? 0.0 as num).toDouble();
+    final addedSugarPer100 = (nutritionMap['added_sugar_g_per_100g'] ?? nutritionMap['added_sugars_g'] ?? nutritionMap['added_sugar'] ?? 0.0 as num).toDouble();
+    final transFatPer100 = (nutritionMap['trans_fat_g_per_100g'] ?? nutritionMap['trans_fat_g'] ?? nutritionMap['trans_fat'] ?? 0.0 as num).toDouble();
+    final totalFatPer100 = (nutritionMap['total_fat_g_per_100g'] ?? nutritionMap['total_fat_g'] ?? nutritionMap['fat_100g'] ?? nutritionMap['total_fat'] ?? 0.0 as num).toDouble();
+    final cholesterolPer100 = (nutritionMap['cholesterol_mg_per_100g'] ?? nutritionMap['cholesterol_mg'] ?? nutritionMap['cholesterol'] ?? 0.0 as num).toDouble();
 
     // Parse package net weight for dynamic whole pack calculations
     final packWeight = (raw['pack_weight_g'] as num?)?.toDouble() ??
@@ -1164,6 +1297,14 @@ class ProductScannerService {
       sugarGPer100g: sugarPer100,
       sugarGPerServing: sugarPerServing,
       caloriesPerServing: caloriesPerServing,
+      caloriesPer100g: caloriesPer100,
+      proteinGPer100g: proteinPer100,
+      carbsGPer100g: carbsPer100,
+      fiberGPer100g: fiberPer100,
+      addedSugarGPer100g: addedSugarPer100,
+      transFatGPer100g: transFatPer100,
+      totalFatGPer100g: totalFatPer100,
+      cholesterolMgPer100g: cholesterolPer100,
       satFatGPer100g: satFatPer100,
       satFatGPerServing: satFatPerServing,
       sodiumMgPer100g: sodiumPer100,
