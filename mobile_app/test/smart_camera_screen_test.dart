@@ -389,4 +389,91 @@ void main() {
     // Verify sheet dismissed and switched to Curved Bottle / Multi-Angle mode
     expect(find.text('Curved Bottle Multi-Angle Mode (0/4)'), findsOneWidget);
   });
+
+  testWidgets('tapping shutter button in Barcode / Auto mode captures nutrition facts directly in-app and presents VerdictReportScreen', (tester) async {
+    final mockGeminiResponse = {
+      'candidates': [
+        {
+          'content': {
+            'parts': [
+              {
+                'text': jsonEncode({
+                  'product_name': 'Amul Pure Ghee',
+                  'brand_name': 'Amul',
+                  'category': 'Dairy & Eggs',
+                  'serving_size_g': 15.0,
+                  'pack_weight_g': 500.0,
+                  'nutrition': {
+                    'energy_kj': 3700.0,
+                    'sugar_g_per_100g': 0.0,
+                    'sat_fat_g_per_100g': 62.0,
+                    'sodium_mg_per_100g': 0.0,
+                    'protein_g': 0.0,
+                  },
+                  'ingredients': ['Milk Fat'],
+                  'additives': [],
+                })
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    final mockClient = MockClient((request) async {
+      return http.Response(jsonEncode(mockGeminiResponse), 200, headers: {'content-type': 'application/json'});
+    });
+    final customProductService = ProductScannerService(httpClient: mockClient);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: UnifiedProductScannerScreen(
+            useSimulatedFeed: true,
+            disableResultSheet: false,
+            productService: customProductService,
+          ),
+        ),
+      ),
+    );
+
+    // Verify prominent shutter button is present in Barcode / Auto mode
+    final shutter = find.byIcon(Icons.camera_alt_rounded);
+    expect(shutter, findsOneWidget);
+
+    // Tap shutter button to capture nutrition facts directly
+    await tester.tap(shutter);
+    await tester.pumpAndSettle();
+
+    // Verify VerdictReportScreen opens directly with extracted product facts
+    expect(find.byType(VerdictReportScreen), findsOneWidget);
+    expect(find.textContaining('Amul Pure Ghee'), findsOneWidget);
+  });
+
+  testWidgets('Auto-Scan Label toggle pill toggles between ON and OFF', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+
+    // Verify initially ON
+    expect(find.text('Auto-Scan Label: ON'), findsOneWidget);
+
+    // Tap toggle pill
+    await tester.tap(find.text('Auto-Scan Label: ON'));
+    await tester.pump();
+
+    // Verify toggled to OFF
+    expect(find.text('Auto-Scan Label: OFF'), findsOneWidget);
+
+    // Tap toggle pill again
+    await tester.tap(find.text('Auto-Scan Label: OFF'));
+    await tester.pump();
+
+    // Verify toggled back to ON
+    expect(find.text('Auto-Scan Label: ON'), findsOneWidget);
+  });
 }

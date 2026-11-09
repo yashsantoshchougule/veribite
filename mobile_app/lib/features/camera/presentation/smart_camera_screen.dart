@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../profile/application/user_profile_service.dart';
@@ -21,9 +25,14 @@ import 'widgets/quick_macro_slider_sheet.dart';
 import 'widgets/scan_result_sheet.dart';
 import '../../results/presentation/verdict_report_screen.dart';
 
+/// Alias for unified in-app barcode and nutrition label scanner
+typedef UnifiedProductScannerScreen = SmartCameraScreen;
+
 /// Smart Camera Viewfinder Screen for VeriBite.
-/// Integrates live MobileScanner hardware stream, barcode lock-on, specular glare detection,
-/// multi-angle capture for curved bottles, and interactive ScanResultSheet.
+/// Unified in-app CameraX session that continuously scans 1D/2D barcodes,
+/// detects packaging nutrition tables in real-time with smart auto-capture,
+/// and captures high-resolution nutrition/ingredient photos directly in-app
+/// without ever launching external system camera intents.
 class SmartCameraScreen extends ConsumerStatefulWidget {
   final String? userId;
   final UserProfileModel? userProfile;
@@ -38,7 +47,7 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
     this.userProfile,
     this.onProductResolved,
     this.useSimulatedFeed = false,
-    this.disableResultSheet = false, // Live scan active by default, toggleable on screen
+    this.disableResultSheet = false,
     this.productService,
   });
 
@@ -46,21 +55,35 @@ class SmartCameraScreen extends ConsumerStatefulWidget {
   ConsumerState<SmartCameraScreen> createState() => _SmartCameraScreenState();
 }
 
-class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
-  late final MobileScannerController _scannerController;
+class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  late final BarcodeScanner _barcodeScanner;
+  late final TextRecognizer _textRecognizer;
   late final ProductScannerService _productService;
   UserProfileModel? _profile;
+
   bool _isProcessingScan = false;
+  bool _isProcessingFrame = false;
   late bool _isLiveScanMode;
   bool _isSheetOpen = false;
+  bool _isCameraInitialized = false;
+  String? _cameraError;
+
   String? _lastDismissedPayload;
   DateTime? _lastDismissedTime;
   Timer? _qrDebounceTimer;
   String? _pendingQrPayload;
-  List<int>? _pendingQrFrame;
   String? _activeScanningStatus;
   String? _pendingBindingBarcode;
 
+  // Real-time nutrition table detection
+  DateTime _lastBarcodeScanTime = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastOcrScanTime = DateTime.fromMillisecondsSinceEpoch(0);
+  int _nutritionDetectedCycles = 0;
+  bool _isNutritionLabelDetected = false;
+  bool _isAutoCaptureEnabled = true;
+
+  // Zoom & Focus
   double _baseZoomScale = 1.0;
   double _currentZoomScale = 1.0;
   int _activePointers = 0;
@@ -75,25 +98,132 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   Timer? _focusResetTimer;
   Timer? _tapFocusTimer;
 
+  static const List<String> _nutritionKeywords = [
+    'nutrition',
+    'nutritional',
+    'energy',
+    'calories',
+    'kcal',
+    'protein',
+    'carbohydrate',
+    'sugar',
+    'added sugar',
+    'fat',
+    'saturated fat',
+    'trans fat',
+    'sodium',
+    'salt',
+    'cholesterol',
+    'dietary fiber',
+    'serving size',
+    'per 100g',
+    'per serve',
+    'ingredients',
+  ];
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _isLiveScanMode = !widget.disableResultSheet;
     _productService = widget.productService ?? ProductScannerService();
     _profile = widget.userProfile;
 
-    _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.normal,
-      facing: CameraFacing.back,
-      torchEnabled: false,
-      cameraResolution: const Size(1920, 1080),
-      formats: const [BarcodeFormat.all],
-      autoZoom: true,
-      returnImage: true,
-    );
+    _barcodeScanner = BarcodeScanner(formats: const [BarcodeFormat.all]);
+    _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
     if (_profile == null && widget.userId != null) {
       _loadProfile();
+    }
+
+    if (!widget.useSimulatedFeed) {
+      _initializeCamera();
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) setState(() => _cameraError = 'No camera found on device');
+        return;
+      }
+
+      final backCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+
+      ImageFormatGroup formatGroup = ImageFormatGroup.yuv420;
+      try {
+        if (Platform.isAndroid) {
+          formatGroup = ImageFormatGroup.nv21;
+        } else if (Platform.isIOS) {
+          formatGroup = ImageFormatGroup.bgra8888;
+        }
+      } catch (_) {}
+
+      final controller = CameraController(
+        backCamera,
+        ResolutionPreset.veryHigh,
+        enableAudio: false,
+        imageFormatGroup: formatGroup,
+      );
+
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      _cameraController = controller;
+      setState(() {
+        _isCameraInitialized = true;
+        _cameraError = null;
+      });
+
+      await _startImageStreaming();
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error initializing camera: $e');
+      if (mounted) {
+        setState(() => _cameraError = 'Camera init failed: $e');
+      }
+    }
+  }
+
+  Future<void> _startImageStreaming() async {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (controller.value.isStreamingImages) return;
+
+    try {
+      await controller.startImageStream(_onCameraImageAvailable);
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error starting image stream: $e');
+    }
+  }
+
+  Future<void> _stopImageStreaming() async {
+    final controller = _cameraController;
+    if (controller != null && controller.value.isInitialized && controller.value.isStreamingImages) {
+      try {
+        await controller.stopImageStream();
+      } catch (_) {}
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _stopImageStreaming();
+      controller.dispose();
+      _cameraController = null;
+      if (mounted) setState(() => _isCameraInitialized = false);
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
     }
   }
 
@@ -107,6 +237,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _qrDebounceTimer?.cancel();
     _zoomOverlayTimer?.cancel();
     _zoomThrottleTimer?.cancel();
@@ -115,24 +246,145 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     _zoomScaleNotifier.dispose();
     _isPinchingNotifier.dispose();
     _tapFocusOffset.dispose();
-    _scannerController.dispose();
+    _barcodeScanner.close();
+    _textRecognizer.close();
+    _cameraController?.dispose();
     super.dispose();
   }
 
-  void _handleBarcodeCapture(BarcodeCapture capture) {
+  Future<void> _onCameraImageAvailable(CameraImage image) async {
+    if (_isProcessingScan || _isSheetOpen || _isProcessingFrame) return;
+
+    final now = DateTime.now();
+    // 200ms throttle for frame processing
+    if (now.difference(_lastBarcodeScanTime).inMilliseconds < 200) {
+      return;
+    }
+
+    _isProcessingFrame = true;
+    _lastBarcodeScanTime = now;
+
+    try {
+      final inputImage = _inputImageFromCameraImage(image);
+      if (inputImage == null) return;
+
+      // 1. Barcode / QR detection
+      final barcodes = await _barcodeScanner.processImage(inputImage);
+      if (barcodes.isNotEmpty) {
+        if (_isNutritionLabelDetected) {
+          setState(() {
+            _isNutritionLabelDetected = false;
+            _nutritionDetectedCycles = 0;
+          });
+        }
+        _handleBarcodeCapture(barcodes);
+        return;
+      }
+
+      // 2. Smart Nutrition Table Auto-Detector (every 600ms when no barcode in view)
+      if (now.difference(_lastOcrScanTime).inMilliseconds >= 600) {
+        _lastOcrScanTime = now;
+        await _checkNutritionText(inputImage);
+      }
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error processing frame: $e');
+    } finally {
+      _isProcessingFrame = false;
+    }
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    try {
+      final controller = _cameraController;
+      if (controller == null) return null;
+
+      final camera = controller.description;
+      final sensorOrientation = camera.sensorOrientation;
+      InputImageRotation? rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+      rotation ??= InputImageRotation.rotation0deg;
+
+      InputImageFormat? format;
+      if (image.format.raw is int) {
+        format = InputImageFormatValue.fromRawValue(image.format.raw as int);
+      }
+      try {
+        format ??= (Platform.isAndroid ? InputImageFormat.nv21 : InputImageFormat.bgra8888);
+      } catch (_) {
+        format ??= InputImageFormat.nv21;
+      }
+
+      final WriteBuffer allBytes = WriteBuffer();
+      for (final Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
+      }
+      final bytes = allBytes.done().buffer.asUint8List();
+
+      return InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error converting CameraImage: $e');
+      return null;
+    }
+  }
+
+  Future<void> _checkNutritionText(InputImage inputImage) async {
+    if (_isProcessingScan || _isSheetOpen) return;
+
+    try {
+      final recognizedText = await _textRecognizer.processImage(inputImage);
+      final text = recognizedText.text.toLowerCase();
+
+      int matchCount = 0;
+      for (final keyword in _nutritionKeywords) {
+        if (text.contains(keyword)) {
+          matchCount++;
+          if (matchCount >= 3) break;
+        }
+      }
+
+      if (matchCount >= 3) {
+        _nutritionDetectedCycles++;
+        if (!_isNutritionLabelDetected && mounted) {
+          setState(() => _isNutritionLabelDetected = true);
+        }
+
+        // Auto-capture if held steady for 2 consecutive cycles (~1.2s)
+        if (_nutritionDetectedCycles >= 2 && _isAutoCaptureEnabled && !_isProcessingScan && !_isSheetOpen) {
+          _nutritionDetectedCycles = 0;
+          await _captureNutritionLabelFromActiveCamera();
+        }
+      } else {
+        if (_nutritionDetectedCycles > 0 || _isNutritionLabelDetected) {
+          _nutritionDetectedCycles = 0;
+          if (mounted) setState(() => _isNutritionLabelDetected = false);
+        }
+      }
+    } catch (e) {
+      debugPrint('[SmartCameraScreen] Error recognizing text on stream: $e');
+    }
+  }
+
+  void _handleBarcodeCapture(List<Barcode> barcodes) {
     if (_isProcessingScan || _isSheetOpen) return;
 
     Barcode? oneDBarcode;
     Barcode? qrBarcode;
 
-    for (final b in capture.barcodes) {
+    for (final b in barcodes) {
       final raw = b.rawValue?.trim();
       if (raw == null || raw.isEmpty) continue;
 
       if (b.format == BarcodeFormat.ean13 ||
           b.format == BarcodeFormat.ean8 ||
-          b.format == BarcodeFormat.upcA ||
-          b.format == BarcodeFormat.upcE ||
+          b.format == BarcodeFormat.upca ||
+          b.format == BarcodeFormat.upce ||
           RegExp(r'^\d{8,14}$').hasMatch(raw)) {
         oneDBarcode = b;
         break;
@@ -149,7 +401,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _qrDebounceTimer?.cancel();
       _qrDebounceTimer = null;
       _pendingQrPayload = null;
-      _pendingQrFrame = null;
 
       final trimmed = oneDBarcode.rawValue!.trim();
       if (_lastDismissedPayload != null &&
@@ -176,7 +427,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         _qrDebounceTimer?.cancel();
         _qrDebounceTimer = null;
         _pendingQrPayload = null;
-        _pendingQrFrame = null;
         _onBarcodeDetected(trimmed);
         return;
       }
@@ -189,26 +439,20 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         return;
       }
 
-      // If a QR debounce timer is already running: update frame if available and continue
+      // If a QR debounce timer is already running: continue
       if (_qrDebounceTimer != null && _qrDebounceTimer!.isActive) {
-        if (capture.image != null) {
-          _pendingQrFrame = capture.image;
-        }
         return;
       }
 
-      // Stage 1: Buffer QR payload & frame for 450ms while listening for 1D barcode
+      // Stage 1: Buffer QR payload for 450ms while listening for 1D barcode
       _pendingQrPayload = trimmed;
-      _pendingQrFrame = capture.image;
 
       _qrDebounceTimer = Timer(const Duration(milliseconds: 450), () {
         if (!mounted || _isProcessingScan || _isSheetOpen) return;
         final payload = _pendingQrPayload;
-        final frame = _pendingQrFrame;
         _pendingQrPayload = null;
-        _pendingQrFrame = null;
         if (payload != null) {
-          _onBarcodeDetected(payload, frameImage: frame);
+          _onBarcodeDetected(payload);
         }
       });
     }
@@ -241,23 +485,34 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
 
       if (!mounted) return;
+      setState(() => _isProcessingScan = false);
+      if (mounted) setState(() => _isProcessingScan = false);
       await _showScanResultReport(resolvedProduct, activeProfile);
     } on OfflineVariantMatchException catch (e) {
       if (!mounted) return;
+      setState(() => _isProcessingScan = false);
       await _showOfflineVariantMatchSheet(e);
     } on PromotionalQrContextException catch (e) {
       if (!mounted) return;
+      setState(() => _isProcessingScan = false);
       await _showPromotionalQrContextSheet(e);
     } on NonFoodScanException catch (e) {
       if (!mounted) return;
+      setState(() => _isProcessingScan = false);
       await _showNonFoodDialog(e.message, rawBarcode);
     } on ProductNotFoundException catch (e) {
       if (!mounted) return;
+      setState(() {
+        _isProcessingScan = false;
+        _pendingBindingBarcode = e.barcode;
+      });
       await _showProductNotFoundDialog(e.barcode);
     } on FoodWebExtractionException catch (e) {
       if (!mounted) return;
+      setState(() => _isProcessingScan = false);
       await _showWebExtractionFailedDialog(e.url);
     } on VisionExtractionException catch (e) {
+      setState(() => _isProcessingScan = false);
       debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -274,6 +529,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         );
       }
     } catch (e, st) {
+      setState(() => _isProcessingScan = false);
       debugPrint('Error resolving scan $rawBarcode: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -293,18 +549,37 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
   }
 
-  Future<void> _handleMultiAngleSubmit(List<List<int>> frames) async {
-    if (_isProcessingScan || _isSheetOpen || frames.isEmpty) return;
+  /// Instant in-app capture of Nutrition Information & Ingredient label
+  /// Takes a high-resolution frame directly from the active camera controller,
+  /// passes it to the multi-angle / vision parser, and binds to any pending barcode.
+  Future<void> _captureNutritionLabelFromActiveCamera() async {
+    if (_isProcessingScan || _isSheetOpen) return;
+    unawaited(HapticFeedback.heavyImpact().catchError((_) => null));
 
-    setState(() => _isProcessingScan = true);
-    final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+    setState(() {
+      _isProcessingScan = true;
+      _activeScanningStatus = 'Capturing & extracting nutrition facts...';
+    });
 
     try {
-      unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
+      List<int> frameBytes;
+      if (widget.useSimulatedFeed) {
+        frameBytes = List<int>.generate(200, (i) => (i * 7) % 256);
+      } else {
+        if (_cameraController == null || !_cameraController!.value.isInitialized) {
+          throw Exception('Camera is not initialized');
+        }
+        await _stopImageStreaming();
+        final photo = await _cameraController!.takePicture();
+        frameBytes = await photo.readAsBytes();
+      }
+
+      final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
 
       final resolvedProduct = await _productService.resolveMultiAngleScan(
-        frames: frames,
+        frames: [frameBytes],
         userProfile: activeProfile,
+        detectedBarcode: _pendingBindingBarcode,
       );
 
       if (!mounted) return;
@@ -338,6 +613,94 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         ));
       }
 
+      if (mounted) setState(() => _isProcessingScan = false);
+      await _showScanResultReport(resolvedProduct, activeProfile);
+    } on VisionExtractionException catch (e) {
+      debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.safetyRed,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Sliders',
+              textColor: Colors.white,
+              onPressed: _openMacroSliderSheet,
+            ),
+          ),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('[SmartCameraScreen] Error capturing nutrition label: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not extract nutrition facts. Please steady camera or enter macros.'),
+            backgroundColor: AppColors.safetyRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingScan = false;
+          _activeScanningStatus = null;
+        });
+        if (!widget.useSimulatedFeed && !_isSheetOpen) {
+          unawaited(_startImageStreaming());
+        }
+      }
+    }
+  }
+
+  Future<void> _handleMultiAngleSubmit(List<List<int>> frames) async {
+    if (_isProcessingScan || _isSheetOpen || frames.isEmpty) return;
+
+    setState(() => _isProcessingScan = true);
+    final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+
+    try {
+      unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
+
+      final resolvedProduct = await _productService.resolveMultiAngleScan(
+        frames: frames,
+        userProfile: activeProfile,
+        detectedBarcode: _pendingBindingBarcode,
+      );
+
+      if (!mounted) return;
+
+      // Offline OCR Barcode Binding: bind newly analyzed product to pending barcode in Tier 2 cache
+      if (_pendingBindingBarcode != null) {
+        final boundBarcode = _pendingBindingBarcode!;
+        _pendingBindingBarcode = null;
+        unawaited(OfflineBarcodeRepository.instance.saveProduct(
+          barcode: boundBarcode,
+          productData: {
+            'barcode': boundBarcode,
+            'product_name': resolvedProduct.productName,
+            'brand_name': resolvedProduct.brandName,
+            'category': resolvedProduct.category,
+            'serving_size_g': resolvedProduct.servingSizeG,
+            'pack_weight_g': resolvedProduct.packWeightG,
+            'health_score': resolvedProduct.healthScore,
+            'nova_grade': resolvedProduct.novaGrade,
+            'red_cap_triggered': resolvedProduct.redCapTriggered ? 1 : 0,
+            'nutrition_json': jsonEncode({
+              'energy_kj': resolvedProduct.caloriesPerServing * 4.184,
+              'sugar_g_per_100g': resolvedProduct.sugarGPer100g,
+              'sat_fat_g_per_100g': resolvedProduct.satFatGPer100g,
+              'sodium_mg_per_100g': resolvedProduct.sodiumMgPer100g,
+            }),
+            'additives_json': jsonEncode(resolvedProduct.additives),
+            'ingredients_json': jsonEncode([]),
+          },
+          isUserLearned: true,
+        ));
+      }
+
+      if (mounted) setState(() => _isProcessingScan = false);
       await _showScanResultReport(resolvedProduct, activeProfile);
 
       ref.read(cameraScanNotifierProvider.notifier).clearMultiAngleFrames();
@@ -370,6 +733,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     } finally {
       if (mounted) {
         setState(() => _isProcessingScan = false);
+        if (!widget.useSimulatedFeed && !_isSheetOpen) {
+          unawaited(_startImageStreaming());
+        }
       }
     }
   }
@@ -378,9 +744,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -406,10 +770,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedPayload = product.barcode;
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
@@ -418,9 +780,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -497,10 +857,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
@@ -509,9 +867,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -557,7 +913,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Barcode "$barcode" was not found in our global food databases. If this is a real packaged food item, you can enter its nutritional values manually.',
+                'Barcode "$barcode" was not found in our global food databases. If this is a real packaged food item, you can scan its nutrition label directly with the camera or enter values manually.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 13.5,
@@ -624,10 +980,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
@@ -637,9 +991,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -684,22 +1036,21 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
 
   void _startLabelOcrForBarcode(String barcode) {
-    _pendingBindingBarcode = barcode;
-    ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
+    setState(() {
+      _pendingBindingBarcode = barcode;
+    });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Switched to Label Photo Capture for barcode $barcode. Tap shutter to capture ingredient panel.'),
-          backgroundColor: AppColors.primaryObsidian,
+          content: Text('Barcode [$barcode] registered. Point camera at Nutrition Facts or Ingredients panel to scan.'),
+          backgroundColor: const Color(0xFF0F9D58),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -710,9 +1061,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -774,8 +1123,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                     child: ElevatedButton.icon(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
-                        _captureMultiAngleFrame();
+                        _captureNutritionLabelFromActiveCamera();
                       },
                       icon: const Icon(Icons.camera_alt_rounded, size: 18),
                       label: const Text('Snap Nutrition Label Photo', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -832,10 +1180,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
@@ -844,9 +1190,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     String? action;
     try {
@@ -974,9 +1318,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
         ref.read(cameraScanNotifierProvider.notifier).reset();
       }
       if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+        if (!widget.useSimulatedFeed) {
+          unawaited(_startImageStreaming());
+        }
         if (action == 'macros') {
           unawaited(_openMacroSliderSheet());
         }
@@ -988,9 +1332,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -1051,10 +1393,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
@@ -1063,9 +1403,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     if (_isSheetOpen) return;
     _isSheetOpen = true;
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _stopImageStreaming();
 
     try {
       if (!mounted) return;
@@ -1114,14 +1452,13 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       );
     } finally {
       _isSheetOpen = false;
-      if (mounted) {
-        try {
-          await _scannerController.start();
-        } catch (_) {}
+      if (mounted && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
       }
     }
   }
 
+  /// In-app capture for multi-angle bottle mode (ZERO external camera intent)
   Future<void> _captureMultiAngleFrame() async {
     unawaited(HapticFeedback.lightImpact().catchError((_) => null));
     if (widget.useSimulatedFeed) {
@@ -1132,32 +1469,31 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     }
 
     try {
-      final picker = ImagePicker();
-      final photo = await picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
-      );
-      if (photo != null) {
-        final bytes = await photo.readAsBytes();
-        if (bytes.isNotEmpty) {
-          ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(bytes);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Captured photo (${bytes.length ~/ 1024} KB). Tap Submit or add another angle.'),
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
+      if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+      await _stopImageStreaming();
+      final photo = await _cameraController!.takePicture();
+      final bytes = await photo.readAsBytes();
+      if (bytes.isNotEmpty) {
+        ref.read(cameraScanNotifierProvider.notifier).addMultiAngleFrame(bytes);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Captured photo (${bytes.length ~/ 1024} KB). Tap Submit or add another angle.'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
         }
       }
     } catch (e) {
-      debugPrint('[SmartCameraScreen] Error capturing photo via camera: $e');
+      debugPrint('[SmartCameraScreen] Error capturing photo via in-app camera: $e');
+    } finally {
+      if (mounted && !_isSheetOpen && !_isProcessingScan && !widget.useSimulatedFeed) {
+        unawaited(_startImageStreaming());
+      }
     }
   }
 
+  /// Secondary gallery photo picker (ImageSource.gallery)
   Future<void> _pickPhotoFromGallery() async {
     unawaited(HapticFeedback.lightImpact().catchError((_) => null));
     if (widget.useSimulatedFeed) {
@@ -1196,9 +1532,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   void _toggleTorch(CameraScanNotifier notifier) {
     notifier.toggleTorch();
-    if (!widget.useSimulatedFeed) {
+    if (!widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
       try {
-        _scannerController.toggleTorch();
+        final isTorchOn = ref.read(cameraScanNotifierProvider).isTorchOn;
+        _cameraController!.setFlashMode(isTorchOn ? FlashMode.torch : FlashMode.off);
       } catch (_) {}
     }
   }
@@ -1210,7 +1547,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
 
   void _handleScaleUpdate(ScaleUpdateDetails details, CameraScanNotifier notifier) {
     if (details.pointerCount >= 2) {
-      // Re-anchor baseline if transitioning into a multi-finger pinch gesture
       if (_activePointers < 2) {
         _activePointers = details.pointerCount;
         _baseZoomScale = _currentZoomScale;
@@ -1218,7 +1554,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       }
       _activePointers = details.pointerCount;
 
-      // Direct 1:1 hardware magnification ratio without artificial lag or non-linear jumps
       final targetZoom = (_baseZoomScale * details.scale).clamp(1.0, 5.0);
       _currentZoomScale = targetZoom;
 
@@ -1236,7 +1571,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     _activePointers = 0;
     _zoomThrottleTimer?.cancel();
 
-    // Guarantee the final settled zoom ratio reaches camera hardware
     _pendingZoomRatio = _currentZoomScale;
     if (!_isZoomDispatching) {
       final toSend = _pendingZoomRatio!;
@@ -1263,7 +1597,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     final now = DateTime.now();
     final elapsed = now.difference(_lastHardwareZoomTime).inMilliseconds;
 
-    // Pace requests to max ~60fps (16ms) to avoid saturating Camera2 capture session
     if (elapsed < 16) {
       _zoomThrottleTimer?.cancel();
       _zoomThrottleTimer = Timer(Duration(milliseconds: 16 - elapsed), () {
@@ -1283,10 +1616,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   }
 
   void _sendZoomToHardware(double ratio) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     _isZoomDispatching = true;
     _lastHardwareZoomTime = DateTime.now();
 
-    _scannerController.setZoomRatio(ratio).then((_) {
+    _cameraController!.getMaxZoomLevel().then((maxZoom) {
+      final clamped = ratio.clamp(1.0, maxZoom);
+      return _cameraController!.setZoomLevel(clamped);
+    }).then((_) {
       _isZoomDispatching = false;
       if (_pendingZoomRatio != null && mounted) {
         final next = _pendingZoomRatio!;
@@ -1301,7 +1638,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
   void _handleTapToFocus(Offset tapPos) {
     HapticFeedback.mediumImpact();
 
-    // Show ephemeral pulsing focus ring at tapped coordinates for 1.2s
     _tapFocusOffset.value = tapPos;
     _tapFocusTimer?.cancel();
     _tapFocusTimer = Timer(const Duration(milliseconds: 1200), () {
@@ -1310,22 +1646,20 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
       }
     });
 
-    if (!widget.useSimulatedFeed) {
+    if (!widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
       try {
         final size = MediaQuery.of(context).size;
         final relativeX = (tapPos.dx / size.width).clamp(0.0, 1.0);
         final relativeY = (tapPos.dy / size.height).clamp(0.0, 1.0);
 
-        // 1. Hardware optical auto-focus metering (CameraX / iOS AVCaptureDevice)
-        _scannerController.setFocusPoint(Offset(relativeX, relativeY));
+        _cameraController!.setFocusPoint(Offset(relativeX, relativeY));
+        _cameraController!.setExposurePoint(Offset(relativeX, relativeY));
 
-        // 2. Safety fallback: automatically reset focus back to continuous mode after 3.0s
-        // ensuring the lens NEVER gets stuck in a blurred lock state
         _focusResetTimer?.cancel();
         _focusResetTimer = Timer(const Duration(milliseconds: 3000), () {
-          if (mounted && !widget.useSimulatedFeed) {
+          if (mounted && !widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
             try {
-              _scannerController.resetFocus();
+              _cameraController!.setFocusMode(FocusMode.auto);
             } catch (_) {}
           }
         });
@@ -1343,11 +1677,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     final screenSize = MediaQuery.of(context).size;
     final reticleWidth = (screenSize.width * 0.88).clamp(320.0, 420.0);
     final reticleHeight = (reticleWidth * 0.92).clamp(320.0, 440.0);
-    final reticleRect = Rect.fromCenter(
-      center: Offset(screenSize.width / 2, screenSize.height / 2),
-      width: reticleWidth,
-      height: reticleHeight,
-    );
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1363,11 +1692,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               onTapUp: (details) => _handleTapToFocus(details.globalPosition),
               child: widget.useSimulatedFeed
                   ? _buildSimulatedViewport()
-                  : _buildLiveScannerViewport(scanWindow: reticleRect),
+                  : _buildLiveScannerViewport(),
             ),
           ),
 
-          // 2. Central Reticle Overlay (Clean corner brackets, zero permanent or tap badges)
+          // 2. Central Reticle Overlay
           IgnorePointer(
             child: CameraReticleOverlay(
               status: state.status,
@@ -1388,138 +1717,229 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
               ),
             ),
 
-          // 4. Ephemeral Tap-to-Focus Indicator (Transient pulse ring)
+          // 4. Ephemeral Tap-to-Focus Indicator
           _buildTapFocusIndicator(),
 
-          // 5. Ephemeral Pinch-to-Zoom Floating Indicator (Isolated via ValueListenableBuilder)
+          // 5. Ephemeral Pinch-to-Zoom Floating Indicator
           _buildPinchZoomIndicator(),
 
-          // 6. Top Action Bar
+          // 6. Top Action Bar & Status HUD
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.black45,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        tooltip: 'Back',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Mode Selector Chips
-                    Expanded(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.center,
-                        child: GestureDetector(
-                          onLongPress: () => BackendSettingsSheet.show(context),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ChoiceChip(
-                                  label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
-                                  selected: !state.isMultiAngleMode,
-                                  selectedColor: const Color(0xFF0F9D58),
-                                  visualDensity: VisualDensity.compact,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                                  labelStyle: TextStyle(
-                                    color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
-                                  ),
-                                  onSelected: (val) {
-                                    if (val) notifier.setMultiAngleMode(false);
-                                  },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.black45,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            tooltip: 'Back',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Mode Selector Chips
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.center,
+                            child: GestureDetector(
+                              onLongPress: () => BackendSettingsSheet.show(context),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
-                                const SizedBox(width: 4),
-                                ChoiceChip(
-                                  label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
-                                  selected: state.isMultiAngleMode,
-                                  selectedColor: const Color(0xFF4285F4),
-                                  visualDensity: VisualDensity.compact,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                                  labelStyle: TextStyle(
-                                    color: state.isMultiAngleMode ? Colors.white : Colors.white70,
-                                  ),
-                                  onSelected: (val) {
-                                    if (val) notifier.setMultiAngleMode(true);
-                                  },
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ChoiceChip(
+                                      label: const Text('Barcode / Auto', style: TextStyle(fontSize: 11)),
+                                      selected: !state.isMultiAngleMode,
+                                      selectedColor: const Color(0xFF0F9D58),
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                      labelStyle: TextStyle(
+                                        color: !state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                      ),
+                                      onSelected: (val) {
+                                        if (val) notifier.setMultiAngleMode(false);
+                                      },
+                                    ),
+                                    const SizedBox(width: 4),
+                                    ChoiceChip(
+                                      label: const Text('Curved Bottle', style: TextStyle(fontSize: 11)),
+                                      selected: state.isMultiAngleMode,
+                                      selectedColor: const Color(0xFF4285F4),
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                      labelStyle: TextStyle(
+                                        color: state.isMultiAngleMode ? Colors.white : Colors.white70,
+                                      ),
+                                      onSelected: (val) {
+                                        if (val) notifier.setMultiAngleMode(true);
+                                      },
+                                    ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Scan Mode Toggle (Live Scan vs Lens Testing Mode)
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.black45,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: Icon(
-                          _isLiveScanMode ? Icons.qr_code_scanner_rounded : Icons.camera_alt_outlined,
-                          color: _isLiveScanMode ? const Color(0xFF0F9D58) : Colors.white70,
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          setState(() => _isLiveScanMode = !_isLiveScanMode);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                _isLiveScanMode
-                                    ? 'Live Scan Active: Barcodes open Master Verdict'
-                                    : 'Lens Test Mode: Scan reports suppressed for camera testing',
-                              ),
-                              duration: const Duration(seconds: 1),
+                        const SizedBox(width: 8),
+                        // Scan Mode Toggle (Live Scan vs Lens Testing Mode)
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.black45,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              _isLiveScanMode ? Icons.qr_code_scanner_rounded : Icons.camera_alt_outlined,
+                              color: _isLiveScanMode ? const Color(0xFF0F9D58) : Colors.white70,
+                              size: 20,
                             ),
-                          );
-                        },
-                        tooltip: _isLiveScanMode ? 'Live Scan Active' : 'Lens Test Mode',
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Torch Toggle Button
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.black45,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: Icon(
-                          state.isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
-                          color: state.isTorchOn ? const Color(0xFFF4B400) : Colors.white,
-                          size: 20,
+                            onPressed: () {
+                              setState(() => _isLiveScanMode = !_isLiveScanMode);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    _isLiveScanMode
+                                        ? 'Live Scan Active: Barcodes open Master Verdict'
+                                        : 'Lens Test Mode: Scan reports suppressed for camera testing',
+                                  ),
+                                  duration: const Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                            tooltip: _isLiveScanMode ? 'Live Scan Active' : 'Lens Test Mode',
+                          ),
                         ),
-                        onPressed: () => _toggleTorch(notifier),
-                        tooltip: 'Torch',
+                        const SizedBox(width: 6),
+                        // Torch Toggle Button
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.black45,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              state.isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                              color: state.isTorchOn ? const Color(0xFFF4B400) : Colors.white,
+                              size: 20,
+                            ),
+                            onPressed: () => _toggleTorch(notifier),
+                            tooltip: 'Torch',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Unknown Barcode Pending Binding Banner
+                  if (_pendingBindingBarcode != null)
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F9D58).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 2)),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.qr_code_2_rounded, size: 18, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Barcode [$_pendingBindingBarcode] Scanned — Now Point at Nutrition Table to Capture',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () => setState(() => _pendingBindingBarcode = null),
+                            child: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    )
+                  // Live Nutrition Label Auto-Detection Badge
+                  else if (_isNutritionLabelDetected)
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4285F4).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 2)),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.document_scanner_rounded, size: 18, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isAutoCaptureEnabled
+                                ? 'Nutrition Label Detected — Hold Steady to Auto-Scan'
+                                : 'Nutrition Label Detected — Tap Shutter to Scan',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
 
-          // 7. Bottom Controls & Guidance (Zero permanent badges or clutter)
+          // 7. In-App Processing Overlay
+          if (_isProcessingScan && !_isSheetOpen)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.72),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Color(0xFF0F9D58), strokeWidth: 3),
+                      const SizedBox(height: 18),
+                      Text(
+                        _activeScanningStatus ?? 'Extracting Nutrition Facts & Ingredients...',
+                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Analyzing packaging via AI Computer Vision',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // 8. Bottom Controls & Guidance
           Positioned(
             left: 20,
             right: 20,
@@ -1536,7 +1956,49 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                       onSubmit: () => _handleMultiAngleSubmit(state.capturedFrames),
                       onClear: notifier.clearMultiAngleFrames,
                     )
-                  else
+                  else ...[
+                    // Auto-Scan Label Toggle Pill
+                    GestureDetector(
+                      onTap: () {
+                        setState(() => _isAutoCaptureEnabled = !_isAutoCaptureEnabled);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(_isAutoCaptureEnabled
+                                ? 'Auto-Scan Label ON: Automatically snaps when steady over nutrition table'
+                                : 'Auto-Scan Label OFF: Tap shutter button to capture'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _isAutoCaptureEnabled
+                              ? const Color(0xFF0F9D58).withValues(alpha: 0.85)
+                              : Colors.black54,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: _isAutoCaptureEnabled ? const Color(0xFF0F9D58) : Colors.white24,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isAutoCaptureEnabled ? Icons.bolt_rounded : Icons.touch_app_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _isAutoCaptureEnabled ? 'Auto-Scan Label: ON' : 'Auto-Scan Label: OFF',
+                              style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
@@ -1551,6 +2013,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                         textAlign: TextAlign.center,
                       ),
                     ),
+                  ],
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1564,28 +2027,28 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
                         tooltip: 'Quick Macro Sliders',
                         child: const Icon(Icons.tune_rounded),
                       ),
-                      if (state.isMultiAngleMode) ...[
-                        const SizedBox(width: 24),
-                        // Capture shutter button for multi-angle
-                        FloatingActionButton(
-                          heroTag: 'shutter_btn',
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
-                          onPressed: _captureMultiAngleFrame,
-                          tooltip: 'Capture Photo Angle',
-                          child: const Icon(Icons.camera_alt_rounded, size: 28),
-                        ),
-                        const SizedBox(width: 24),
-                        // Gallery photo picker button
-                        FloatingActionButton.small(
-                          heroTag: 'gallery_pick_btn',
-                          backgroundColor: Colors.white24,
-                          foregroundColor: Colors.white,
-                          onPressed: _pickPhotoFromGallery,
-                          tooltip: 'Pick Photo from Gallery',
-                          child: const Icon(Icons.photo_library_rounded),
-                        ),
-                      ],
+                      const SizedBox(width: 24),
+                      // Primary In-App Shutter Button (Handles both single nutrition capture & multi-angle frames)
+                      FloatingActionButton(
+                        heroTag: 'shutter_btn',
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        onPressed: state.isMultiAngleMode
+                            ? _captureMultiAngleFrame
+                            : _captureNutritionLabelFromActiveCamera,
+                        tooltip: state.isMultiAngleMode ? 'Capture Photo Angle' : 'Capture Nutrition Label',
+                        child: const Icon(Icons.camera_alt_rounded, size: 28),
+                      ),
+                      const SizedBox(width: 24),
+                      // Gallery photo picker button
+                      FloatingActionButton.small(
+                        heroTag: 'gallery_pick_btn',
+                        backgroundColor: Colors.white24,
+                        foregroundColor: Colors.white,
+                        onPressed: _pickPhotoFromGallery,
+                        tooltip: 'Pick Photo from Gallery',
+                        child: const Icon(Icons.photo_library_rounded),
+                      ),
                     ],
                   ),
                 ],
@@ -1702,16 +2165,20 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     );
   }
 
-  Widget _buildLiveScannerViewport({Rect? scanWindow}) {
-    return MobileScanner(
-      controller: _scannerController,
-      scanWindow: scanWindow,
-      onDetect: _handleBarcodeCapture,
-      errorBuilder: (context, error) {
-        return _buildSimulatedViewport(
-          errorMessage: 'Camera preview unavailable: ${error.errorCode.name}',
-        );
-      },
+  Widget _buildLiveScannerViewport() {
+    if (_cameraController == null || !_isCameraInitialized) {
+      return _buildSimulatedViewport(errorMessage: _cameraError ?? 'Initializing hardware camera...');
+    }
+
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: _cameraController!.value.previewSize?.height ?? 1080,
+          height: _cameraController!.value.previewSize?.width ?? 1920,
+          child: CameraPreview(_cameraController!),
+        ),
+      ),
     );
   }
 
@@ -1719,56 +2186,58 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> {
     return Container(
       color: const Color(0xFF121212),
       child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.videocam_outlined, size: 72, color: Colors.white24),
-            if (errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  errorMessage,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  textAlign: TextAlign.center,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.videocam_outlined, size: 72, color: Colors.white24),
+              if (errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    errorMessage,
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              // Quick Sample Test Trigger for tests or demo
+              TextButton.icon(
+                onPressed: () => _onBarcodeDetected('8901063012117'),
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 16, color: AppColors.accentBronze),
+                label: const Text(
+                  'Simulate Sample Scan (Good Day)',
+                  style: TextStyle(color: AppColors.accentBronze, fontSize: 12.5),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _onBarcodeDetected('{"product_name": "Organic Almond Butter", "brand_name": "NuttyCraft", "serving_size_g": 32.0, "nutrition": {"sugar_g_per_100g": 4.0, "sat_fat_g_per_100g": 3.0, "sodium_mg_per_100g": 60.0}}'),
+                icon: const Icon(Icons.qr_code_2_rounded, size: 16, color: AppColors.safetyGreen),
+                label: const Text(
+                  'Simulate Product QR Scan',
+                  style: TextStyle(color: AppColors.safetyGreen, fontSize: 12.5),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _onBarcodeDetected('https://wa.me/912261014560'),
+                icon: const Icon(Icons.devices_other_rounded, size: 16, color: AppColors.safetyRed),
+                label: const Text(
+                  'Simulate Non-Food QR Scan',
+                  style: TextStyle(color: AppColors.safetyRed, fontSize: 12.5),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _onBarcodeDetected('https://www.youtube.com/watch?v=everest_chole_recipe'),
+                icon: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF4285F4)),
+                label: const Text(
+                  'Simulate Recipe QR Scan (Everest)',
+                  style: TextStyle(color: Color(0xFF4285F4), fontSize: 12.5),
                 ),
               ),
             ],
-            const SizedBox(height: 18),
-            // Quick Sample Test Trigger for tests or demo
-            TextButton.icon(
-              onPressed: () => _onBarcodeDetected('8901063012117'),
-              icon: const Icon(Icons.qr_code_scanner_rounded, size: 16, color: AppColors.accentBronze),
-              label: const Text(
-                'Simulate Sample Scan (Good Day)',
-                style: TextStyle(color: AppColors.accentBronze, fontSize: 12.5),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _onBarcodeDetected('{"product_name": "Organic Almond Butter", "brand_name": "NuttyCraft", "serving_size_g": 32.0, "nutrition": {"sugar_g_per_100g": 4.0, "sat_fat_g_per_100g": 3.0, "sodium_mg_per_100g": 60.0}}'),
-              icon: const Icon(Icons.qr_code_2_rounded, size: 16, color: AppColors.safetyGreen),
-              label: const Text(
-                'Simulate Product QR Scan',
-                style: TextStyle(color: AppColors.safetyGreen, fontSize: 12.5),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _onBarcodeDetected('https://wa.me/912261014560'),
-              icon: const Icon(Icons.devices_other_rounded, size: 16, color: AppColors.safetyRed),
-              label: const Text(
-                'Simulate Non-Food QR Scan',
-                style: TextStyle(color: AppColors.safetyRed, fontSize: 12.5),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _onBarcodeDetected('https://www.youtube.com/watch?v=everest_chole_recipe'),
-              icon: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF4285F4)),
-              label: const Text(
-                'Simulate Recipe QR Scan (Everest)',
-                style: TextStyle(color: Color(0xFF4285F4), fontSize: 12.5),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
