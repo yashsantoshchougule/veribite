@@ -381,7 +381,12 @@ class ProductScannerService {
       );
     }
 
-    return resolveBarcode(barcode: parsed.barcode!, userProfile: userProfile);
+    return resolveBarcode(
+      barcode: parsed.barcode!,
+      userProfile: userProfile,
+      frameImage: frameImage,
+      onStatusUpdate: onStatusUpdate,
+    );
   }
 
   /// 4-Stage resolution pipeline for packaging web QR codes:
@@ -936,9 +941,13 @@ class ProductScannerService {
   }
 
   /// Resolve product by barcode string and evaluate against user biometrics
+  /// Stage A: Exact lookup (Catalog -> Tier 1/2 Local DB -> Supabase -> Open Food Facts)
+  /// Stage B: Same-Frame Wrapper OCR + GS1 Brand + Internet Grounding
   Future<ScannedProductResult> resolveBarcode({
     required String barcode,
     required UserProfileModel userProfile,
+    List<int>? frameImage,
+    void Function(String message)? onStatusUpdate,
   }) async {
     Map<String, dynamic>? productData;
 
@@ -987,22 +996,100 @@ class ProductScannerService {
       }
     }
 
-    // 5. If barcode is still not found, check GS1 India 890 manufacturer prefix & pack-size siblings!
+    // 5. Stage B: Same-Frame Wrapper OCR + GS1 Brand + Internet Grounding (when exact barcode misses DB)
+    String? detectedWrapperText;
+    Map<String, dynamic>? ocrProductData;
+    final gs1Brand = _offlineRepo.getBrandOrManufacturerForBarcode(barcode);
+
+    if (productData == null && frameImage != null && frameImage.length >= 50) {
+      onStatusUpdate?.call('Analyzing package details with brand context...');
+      try {
+        final ocr = await _onDeviceVisionService.analyzeFrames([frameImage]);
+        if (ocr != null) {
+          ocrProductData = ocr;
+          final ocrName = ocr['product_name']?.toString() ?? '';
+          List<dynamic> additivesList = [];
+          if (ocr['additives_json'] is String) {
+            try {
+              final decoded = jsonDecode(ocr['additives_json'] as String);
+              if (decoded is List) additivesList = decoded;
+            } catch (_) {}
+          }
+          final insCodes = additivesList
+              .map((a) => a is Map ? a['ins_code']?.toString() : null)
+              .where((c) => c != null && c.isNotEmpty)
+              .take(4)
+              .map((c) => 'INS $c')
+              .join(', ');
+
+          final parts = <String>[];
+          if (ocrName.isNotEmpty && ocrName != 'Scanned Food Product (On-Device OCR)') {
+            parts.add(ocrName);
+          }
+          if (insCodes.isNotEmpty) {
+            parts.add('Additives: $insCodes');
+          }
+          if (parts.isNotEmpty) {
+            detectedWrapperText = parts.join(' • ');
+          }
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] Frame OCR notice: $e');
+      }
+
+      // If online, query Gemini with Google Search Grounding to resolve exact product
+      try {
+        final hintContext = [
+          'Barcode: $barcode',
+          if (gs1Brand != null) 'GS1 Manufacturer: $gs1Brand',
+          if (detectedWrapperText != null) 'Wrapper details: $detectedWrapperText',
+        ].join('. ');
+
+        final visionData = await _visionService.analyzeProductPhoto(
+          frames: [frameImage],
+          hintBarcode: hintContext,
+        );
+        if (visionData != null) {
+          visionData['barcode'] = barcode;
+          if (gs1Brand != null && (visionData['brand_name'] == null || visionData['brand_name'] == 'Packaged Food')) {
+            visionData['brand_name'] = gs1Brand;
+          }
+          _writeThroughCache(visionData);
+          return _evaluateProduct(visionData, userProfile, barcode, analysisSource: 'gemini_vision');
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] Gemini vision search grounding notice: $e');
+      }
+    }
+
+    // 6. If still not found online, check GS1 India 890 manufacturer prefix & pack-size siblings!
     if (productData == null) {
       try {
         final siblings = await _offlineRepo.findSiblingProducts(barcode);
         if (siblings.isNotEmpty) {
-          final brandName = _offlineRepo.getBrandOrManufacturerForBarcode(barcode) ??
+          final brandName = gs1Brand ??
               (siblings.first['brand_name']?.toString() ?? 'Packaged Brand');
           throw OfflineVariantMatchException(
             barcode: barcode,
             brandName: brandName,
             siblingProducts: siblings,
+            detectedWrapperText: detectedWrapperText,
+            detectedProductData: ocrProductData,
           );
         }
       } catch (e) {
         if (e is OfflineVariantMatchException) rethrow;
         debugPrint('[ProductScannerService] Sibling matcher notice: $e');
+      }
+
+      // Fallback: If on-device OCR extracted nutrition facts from frame, evaluate it directly
+      if (ocrProductData != null) {
+        ocrProductData['barcode'] = barcode;
+        if (gs1Brand != null && (ocrProductData['brand_name'] == null || ocrProductData['brand_name'] == 'Packaged Food')) {
+          ocrProductData['brand_name'] = gs1Brand;
+        }
+        _writeThroughCache(ocrProductData);
+        return _evaluateProduct(ocrProductData, userProfile, barcode, analysisSource: 'on_device_vision');
       }
 
       throw ProductNotFoundException(barcode);

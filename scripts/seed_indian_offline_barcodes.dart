@@ -69,12 +69,16 @@ void main() {
     required double energyKcal,
     required double sugar,
     required double satFat,
+    double? totalFat,
     required double sodium,
     required double protein,
+    double? carbs,
     double fiber = 1.0,
     required List<Map<String, dynamic>> additives,
     required List<String> ingredients,
   }) {
+    final effectiveTotalFat = totalFat ?? (satFat > 0 ? satFat * 1.5 : 0.0);
+    final effectiveCarbs = carbs ?? (sugar > 0 ? sugar * 2.0 : 0.0);
     products.add(ProductSeedItem(
       barcode: barcode,
       productName: name,
@@ -90,6 +94,8 @@ void main() {
         'energy_kj': energyKcal * 4.184,
         'sugar_g_per_100g': sugar,
         'sat_fat_g_per_100g': satFat,
+        'total_fat_g_per_100g': effectiveTotalFat,
+        'carbohydrates_g_per_100g': effectiveCarbs,
         'sodium_mg_per_100g': sodium,
         'protein_g': protein,
         'fiber_g': fiber,
@@ -970,9 +976,33 @@ void main() {
     ingredients: ['100% Clarified Milk Fat (Pure Cow Butterfat)'],
   );
 
-  // 5. HALDIRAM'S (Prefix: 8901491)
+  // 5. HALDIRAM'S (Prefixes: 89040044 & 89040632 - Haldiram Snacks Food / Haldiram Foods International)
   addP(
-    barcode: '8901491101837',
+    barcode: '8904004442526',
+    name: 'Frozen Paneer Slab / Malai Paneer',
+    brand: "Haldiram's",
+    category: 'Dairy & Frozen Paneer',
+    serving: 30.0,
+    pack: 200.0,
+    score: 78,
+    nova: 3,
+    energyKcal: 290.0,
+    sugar: 2.0,
+    satFat: 14.0,
+    totalFat: 22.0,
+    carbs: 4.5,
+    sodium: 35.0,
+    protein: 18.0,
+    fiber: 0.0,
+    additives: [
+      {'ins_code': '575', 'name': 'Glucono delta-lactone', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+      {'ins_code': '330', 'name': 'Citric Acid', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+      {'ins_code': '509', 'name': 'Calcium Chloride', 'risk_tier': 'SAFE', 'triggers_red_cap': 0},
+    ],
+    ingredients: ['Milk Solids (Paneer)', 'Acidity Regulators (INS 575, INS 330)', 'Firming Agent (INS 509)'],
+  );
+  addP(
+    barcode: '8904004410183',
     name: 'Nagpur Aloo Bhujia',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -992,7 +1022,7 @@ void main() {
     ingredients: ['Potatoes (44%)', 'Edible Vegetable Oil (Palmolein & Cottonseed)', 'Gram Pulse Flour (Besan)', 'Moth Dal Flour', 'Spices & Condiments', 'Iodised Salt'],
   );
   addP(
-    barcode: '8901491101844',
+    barcode: '8904004410184',
     name: 'Bhujia Sev Family Pack',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -1012,7 +1042,7 @@ void main() {
     ingredients: ['Moth Dal Flour (47%)', 'Gram Pulse Flour (Besan 12%)', 'Edible Vegetable Oil', 'Iodised Salt', 'Red Chilli Powder', 'Black Pepper', 'Clove Powder'],
   );
   addP(
-    barcode: '8901491101851',
+    barcode: '8904004410185',
     name: 'Khatta Meetha Mixture',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -1032,7 +1062,7 @@ void main() {
     ingredients: ['Gram Pulse Flour', 'Edible Vegetable Oil', 'Rice Flakes', 'Sugar (14%)', 'Peanuts', 'Sago', 'Lentils', 'Turmeric'],
   );
   addP(
-    barcode: '8901491101868',
+    barcode: '8904063210186',
     name: 'Salted Moong Dal',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -1050,7 +1080,7 @@ void main() {
     ingredients: ['Moong Pulse (Split Green Gram 76%)', 'Edible Vegetable Oil (Palmolein)', 'Iodised Salt'],
   );
   addP(
-    barcode: '8901491101875',
+    barcode: '8904063210187',
     name: 'Nut Cracker Coated Peanuts',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -1070,7 +1100,7 @@ void main() {
     ingredients: ['Peanuts (58%)', 'Gram Pulse Flour (Besan)', 'Edible Vegetable Oil', 'Spices & Condiments', 'Iodised Salt'],
   );
   addP(
-    barcode: '8901491101882',
+    barcode: '8904063210188',
     name: 'Navratan Mix',
     brand: "Haldiram's",
     category: 'Snacks & Namkeen',
@@ -1090,7 +1120,7 @@ void main() {
     ingredients: ['Gram Pulse Flour', 'Edible Vegetable Oil', 'Peanuts', 'Lentils', 'Rice Flakes', 'Spices & Condiments'],
   );
   addP(
-    barcode: '8901491101899',
+    barcode: '8904063210189',
     name: 'Soan Papdi Premium Desi Ghee',
     brand: "Haldiram's",
     category: 'Sweets & Desserts',
@@ -1108,7 +1138,43 @@ void main() {
     ingredients: ['Sugar (48%)', 'Clarified Butter (Desi Ghee 25%)', 'Refined Wheat Flour', 'Gram Flour (Besan)', 'Almonds', 'Pistachio', 'Cardamom'],
   );
 
-  // 6. PEPSICO INDIA / LAY'S / KURKURE (Prefix: 8901499)
+  // 6. PEPSICO INDIA / LAY'S / KURKURE / QUAKER (Prefixes: 8901491 & 8901499)
+  addP(
+    barcode: '8901491101018',
+    name: "Lay's Classic Salted Potato Chips (Family Pack)",
+    brand: "Lay's",
+    category: 'Snacks & Chips',
+    serving: 30.0,
+    pack: 115.0,
+    score: 46,
+    nova: 4,
+    energyKcal: 544,
+    sugar: 1.0,
+    satFat: 15.0,
+    sodium: 520.0,
+    protein: 7.0,
+    fiber: 3.5,
+    additives: [],
+    ingredients: ['Potato', 'Edible Vegetable Oil (Palmolein)', 'Iodised Salt'],
+  );
+  addP(
+    barcode: '8901491101025',
+    name: 'Quaker Oats Whole Grain Rolled Oats',
+    brand: 'Quaker',
+    category: 'Breakfast Cereals',
+    serving: 40.0,
+    pack: 400.0,
+    score: 88,
+    nova: 1,
+    energyKcal: 389,
+    sugar: 0.5,
+    satFat: 1.5,
+    sodium: 5.0,
+    protein: 11.8,
+    fiber: 10.5,
+    additives: [],
+    ingredients: ['100% Whole Grain Rolled Oats'],
+  );
   addP(
     barcode: '8901499008240',
     name: "Lay's India's Magic Masala Potato Chips",
@@ -2156,9 +2222,9 @@ void main() {
     ingredients: ['Potato', 'Edible Vegetable Oil', 'Spices & Condiments (Chilli, Coriander, Mango Powder)', 'Iodised Salt'],
   );
 
-  // 17. BIKAJI FOODS (Prefix: 8904004)
+  // 17. BIKAJI FOODS (Prefix: 89060055 - Bikaji Foods International Ltd.)
   addP(
-    barcode: '8904004011011',
+    barcode: '8906005500052',
     name: 'Bikaji Aslee Bikaneri Bhujia',
     brand: 'Bikaji',
     category: 'Snacks & Namkeen',
@@ -2176,7 +2242,7 @@ void main() {
     ingredients: ['Moth Dal Flour (42%)', 'Besan (Gram Flour 10%)', 'Edible Vegetable Oil', 'Iodised Salt', 'Red Chilli', 'Black Pepper', 'Cardamom', 'Clove'],
   );
   addP(
-    barcode: '8904004011028',
+    barcode: '8906005500366',
     name: 'Bikaji Tana Tan Aloo Bhujia',
     brand: 'Bikaji',
     category: 'Snacks & Namkeen',

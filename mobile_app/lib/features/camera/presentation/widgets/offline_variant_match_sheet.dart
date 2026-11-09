@@ -11,6 +11,9 @@ class OfflineVariantMatchSheet extends StatelessWidget {
   final void Function(Map<String, dynamic> product) onSelectProduct;
   final VoidCallback onScanOcr;
   final VoidCallback onManualEntry;
+  final String? detectedWrapperText;
+  final Map<String, dynamic>? detectedProductData;
+  final void Function(Map<String, dynamic> product)? onAnalyzeDetected;
 
   const OfflineVariantMatchSheet({
     super.key,
@@ -20,6 +23,9 @@ class OfflineVariantMatchSheet extends StatelessWidget {
     required this.onSelectProduct,
     required this.onScanOcr,
     required this.onManualEntry,
+    this.detectedWrapperText,
+    this.detectedProductData,
+    this.onAnalyzeDetected,
   });
 
   Color _getScoreColor(int score) {
@@ -81,7 +87,7 @@ class OfflineVariantMatchSheet extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'GS1 PREFIX MATCH: $brandName',
+                        'GS1 MANUFACTURER MATCH: ${brandName.toUpperCase()}',
                         style: const TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
@@ -91,9 +97,9 @@ class OfflineVariantMatchSheet extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'Offline Pack-Size Variant Match',
-                      style: TextStyle(
+                    Text(
+                      'New $brandName Barcode Detected',
+                      style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textObsidian,
@@ -107,14 +113,100 @@ class OfflineVariantMatchSheet extends StatelessWidget {
 
           const SizedBox(height: 12),
           Text(
-            'Exact barcode "$barcode" is a new pack-size or variant. Per-100g nutrition & additives are typically identical across sizes for this brand. Select your matching product below to evaluate offline:',
+            'Barcode "$barcode" is registered under $brandName. A single manufacturer prefix covers multiple food categories (snacks, dairy, sweets, spices). Select ONLY if this matches your exact product, or analyze directly from your wrapper:',
             style: const TextStyle(
               fontSize: 13,
               color: AppColors.textMutedMocha,
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+
+          // Prominent Wrapper Card if OCR detected product/additives
+          if (detectedWrapperText != null && detectedWrapperText!.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.safetyGreen.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.safetyGreen.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.document_scanner_rounded, size: 16, color: AppColors.safetyGreen),
+                      SizedBox(width: 6),
+                      Text(
+                        'DETECTED ON WRAPPER',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                          color: AppColors.safetyGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    detectedWrapperText!,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (detectedProductData != null && onAnalyzeDetected != null) ...[
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => onAnalyzeDetected!(detectedProductData!),
+                            icon: const Icon(Icons.check_circle_outline, size: 15),
+                            label: const Text('Analyze Product Now', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.safetyGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onScanOcr,
+                          icon: const Icon(Icons.camera_alt_outlined, size: 15),
+                          label: const Text('Capture Nutrition Table', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textObsidian,
+                            side: const BorderSide(color: AppColors.cardBorder),
+                            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          Text(
+            'Other Cached $brandName Products (Select ONLY if same item):',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textMutedMocha,
+            ),
+          ),
+          const SizedBox(height: 8),
 
           // Sibling products list
           Flexible(

@@ -36,14 +36,33 @@ void main() {
       expect(product['red_cap_triggered'], 1);
     });
 
-    test('retrieves Amul Butter and Haldiram Aloo Bhujia instantly by barcode', () async {
+    test('retrieves Haldiram Frozen Paneer Slab instantly by barcode 8904004442526', () async {
+      final paneer = await repo.lookupBarcode('8904004442526');
+      expect(paneer, isNotNull);
+      expect(paneer!['product_name'], contains('Frozen Paneer Slab'));
+      expect(paneer['brand_name'], "Haldiram's");
+      expect(paneer['category'], 'Dairy & Frozen Paneer');
+      expect(paneer['health_score'], 78);
+      expect(paneer['nova_grade'], 3);
+      expect(paneer['additives_json'], contains('575'));
+      expect(paneer['additives_json'], contains('330'));
+      expect(paneer['additives_json'], contains('509'));
+    });
+
+    test('retrieves Amul Butter and Bikaji Bhujia instantly by barcode', () async {
       final amul = await repo.lookupBarcode('8901262010012');
       expect(amul, isNotNull);
       expect(amul!['product_name'], contains('Amul Pasteurised Salted Butter'));
 
-      final haldiram = await repo.lookupBarcode('8901491101837');
+      final bikaji = await repo.lookupBarcode('8906005500052');
+      expect(bikaji, isNotNull);
+      expect(bikaji!['product_name'], contains('Bikaji Aslee Bikaneri Bhujia'));
+      expect(bikaji['brand_name'], 'Bikaji');
+
+      final haldiram = await repo.lookupBarcode('8904004410183');
       expect(haldiram, isNotNull);
       expect(haldiram!['product_name'], contains('Aloo Bhujia'));
+      expect(haldiram['brand_name'], "Haldiram's");
     });
 
     test('returns null for unregistered barcode', () async {
@@ -107,7 +126,10 @@ void main() {
       expect(repo.getBrandOrManufacturerForBarcode('8901063000000'), 'Britannia Industries');
       expect(repo.getBrandOrManufacturerForBarcode('8901058000000'), 'Nestlé India');
       expect(repo.getBrandOrManufacturerForBarcode('8901719000000'), 'Parle Products');
-      expect(repo.getBrandOrManufacturerForBarcode('8901491000000'), "Haldiram's Snacks");
+      expect(repo.getBrandOrManufacturerForBarcode('8904004400000'), "Haldiram's");
+      expect(repo.getBrandOrManufacturerForBarcode('8904063200000'), "Haldiram's");
+      expect(repo.getBrandOrManufacturerForBarcode('8906005500000'), 'Bikaji Foods');
+      expect(repo.getBrandOrManufacturerForBarcode('8901491000000'), 'PepsiCo India');
       expect(repo.getBrandOrManufacturerForBarcode('8901262000000'), 'Amul (GCMMF)');
       expect(repo.getBrandOrManufacturerForBarcode('8901499000000'), 'PepsiCo India (Lay\'s / Kurkure)');
       expect(repo.getBrandOrManufacturerForBarcode('8901036000000'), 'Everest Spices');
@@ -134,6 +156,21 @@ void main() {
       final siblings = await repo.findSiblingProducts('8901719999999');
       expect(siblings, isNotEmpty);
       expect(siblings.any((s) => s['brand_name'] == 'Parle'), isTrue);
+    });
+
+    test('finds sibling products for Haldiram prefix without Bikaji contamination', () async {
+      // 8904004499999 is an uncatalogued barcode under Haldiram prefix (89040044)
+      final siblings = await repo.findSiblingProducts('8904004499999');
+      expect(siblings, isNotEmpty);
+      expect(siblings.every((s) => s['brand_name'] == "Haldiram's"), isTrue);
+      expect(siblings.any((s) => s['brand_name'] == 'Bikaji'), isFalse);
+    });
+
+    test('finds sibling products for Bikaji prefix (89060055)', () async {
+      final siblings = await repo.findSiblingProducts('8906005599999');
+      expect(siblings, isNotEmpty);
+      expect(siblings.every((s) => s['brand_name'] == 'Bikaji'), isTrue);
+      expect(siblings.any((s) => s['brand_name'] == "Haldiram's"), isFalse);
     });
   });
 }

@@ -45,8 +45,8 @@ void main() {
     );
 
     // Verify brand badge & title
-    expect(find.text('GS1 PREFIX MATCH: Nestlé India'), findsOneWidget);
-    expect(find.text('Offline Pack-Size Variant Match'), findsOneWidget);
+    expect(find.text('GS1 MANUFACTURER MATCH: NESTLÉ INDIA'), findsOneWidget);
+    expect(find.text('New Nestlé India Barcode Detected'), findsOneWidget);
     expect(find.textContaining('8901058999999'), findsOneWidget);
 
     // Verify sibling cards
@@ -72,6 +72,43 @@ void main() {
     await tester.tap(find.text('Enter Macros'));
     await tester.pumpAndSettle();
     expect(manualEntryTapped, isTrue);
+  });
+
+  testWidgets('OfflineVariantMatchSheet renders detected on wrapper card and handles analyze action', (tester) async {
+    Map<String, dynamic>? analyzedProduct;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OfflineVariantMatchSheet(
+            barcode: '8904004442526',
+            brandName: "Haldiram's",
+            siblingProducts: const [],
+            detectedWrapperText: 'Paneer Slab • Additives: INS 575, INS 330, INS 509',
+            detectedProductData: const {
+              'product_name': 'Frozen Paneer Slab',
+              'brand_name': "Haldiram's",
+              'health_score': 78,
+            },
+            onAnalyzeDetected: (p) => analyzedProduct = p,
+            onSelectProduct: (_) {},
+            onScanOcr: () {},
+            onManualEntry: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text("GS1 MANUFACTURER MATCH: HALDIRAM'S"), findsOneWidget);
+    expect(find.text("New Haldiram's Barcode Detected"), findsOneWidget);
+    expect(find.text('DETECTED ON WRAPPER'), findsOneWidget);
+    expect(find.text('Paneer Slab • Additives: INS 575, INS 330, INS 509'), findsOneWidget);
+    expect(find.text('Analyze Product Now'), findsOneWidget);
+
+    await tester.tap(find.text('Analyze Product Now'));
+    await tester.pumpAndSettle();
+    expect(analyzedProduct, isNotNull);
+    expect(analyzedProduct!['product_name'], 'Frozen Paneer Slab');
   });
 }
 

@@ -1227,6 +1227,24 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
           barcode: exception.barcode,
           brandName: exception.brandName,
           siblingProducts: exception.siblingProducts,
+          detectedWrapperText: exception.detectedWrapperText,
+          detectedProductData: exception.detectedProductData,
+          onAnalyzeDetected: (product) async {
+            Navigator.of(ctx).pop();
+            final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+            final evaluated = _productService.evaluateProductData(
+              productData: product,
+              userProfile: activeProfile,
+              barcode: exception.barcode,
+            );
+            unawaited(OfflineBarcodeRepository.instance.saveProduct(
+              barcode: exception.barcode,
+              productData: product,
+              isUserLearned: true,
+            ));
+            if (!mounted) return;
+            await _showScanResultReport(evaluated, activeProfile);
+          },
           onSelectProduct: (product) async {
             Navigator.of(ctx).pop();
             final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');

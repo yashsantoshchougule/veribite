@@ -614,5 +614,92 @@ Ingredients: Potatoes, Edible Vegetable Oil, Gram Pulse Flour, Spices and Condim
       expect(result.sodiumMgPer100g, 650.0);
       expect(result.analysisSource, 'on_device_vision');
     });
+
+    test('resolves Haldiram\'s Frozen Paneer Slab by barcode 8904004442526 without Bikaji confusion', () async {
+      final service = ProductScannerService();
+      final result = await service.resolveBarcode(
+        barcode: '8904004442526',
+        userProfile: defaultUser,
+      );
+
+      expect(result.brandName, "Haldiram's");
+      expect(result.productName, contains('Frozen Paneer Slab'));
+      expect(result.category, 'Dairy & Frozen Paneer');
+      expect(result.caloriesPer100g, 290.0);
+      expect(result.proteinGPer100g, 18.0);
+      expect(result.totalFatGPer100g, 22.0);
+      expect(result.satFatGPer100g, 14.0);
+      expect(result.carbsGPer100g, 4.5);
+      expect(result.sugarGPer100g, 2.0);
+      expect(result.sodiumMgPer100g, 35.0);
+      expect(result.novaGrade, 3);
+      expect(result.healthScore, 78);
+      expect(result.additives.any((a) => a['ins_code'] == '575'), isTrue);
+      expect(result.additives.any((a) => a['ins_code'] == '330'), isTrue);
+      expect(result.additives.any((a) => a['ins_code'] == '509'), isTrue);
+    });
+
+    test('fuses same-frame wrapper OCR and GS1 brand when uncatalogued barcode misses database', () async {
+      // Mock Gemini that resolves Haldiram's Paneer from hint and frame
+      final mockGeminiResponse = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'product_name': 'Haldiram Frozen Paneer Slab',
+                    'brand_name': "Haldiram's",
+                    'category': 'Dairy & Frozen Paneer',
+                    'serving_size_g': 30.0,
+                    'pack_weight_g': 200.0,
+                    'nutrition': {
+                      'energy_kj': 1213.0,
+                      'sugar_g_per_100g': 2.0,
+                      'sat_fat_g_per_100g': 14.0,
+                      'sodium_mg_per_100g': 35.0,
+                      'protein_g': 18.0,
+                      'carbohydrates_g_per_100g': 4.5,
+                      'total_fat_g_per_100g': 22.0,
+                    },
+                    'ingredients': ['Milk Solids (Paneer)', 'Acidity Regulator (INS 575)', 'Acidity Regulator (INS 330)', 'Firming Agent (INS 509)'],
+                    'additives': [
+                      {'ins_code': '575', 'primary_name': 'Glucono delta-lactone'},
+                      {'ins_code': '330', 'primary_name': 'Citric Acid'},
+                      {'ins_code': '509', 'primary_name': 'Calcium Chloride'},
+                    ],
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode(mockGeminiResponse),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final service = ProductScannerService(
+        httpClient: mockClient,
+      );
+
+      final dummyFrame = List<int>.generate(120, (i) => i % 255);
+
+      // Scanning uncatalogued barcode under Haldiram prefix 89040044
+      final result = await service.resolveScanInput(
+        rawScan: '8904004499999',
+        userProfile: defaultUser,
+        frameImage: dummyFrame,
+      );
+
+      expect(result.brandName, "Haldiram's");
+      expect(result.productName, contains('Paneer Slab'));
+      expect(result.proteinGPer100g, 18.0);
+    });
   });
 }

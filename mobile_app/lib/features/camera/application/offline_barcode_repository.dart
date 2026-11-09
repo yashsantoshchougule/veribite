@@ -11,12 +11,16 @@ class OfflineVariantMatchException implements Exception {
   final String brandName;
   final String? manufacturer;
   final List<Map<String, dynamic>> siblingProducts;
+  final String? detectedWrapperText;
+  final Map<String, dynamic>? detectedProductData;
 
   OfflineVariantMatchException({
     required this.barcode,
     required this.brandName,
     this.manufacturer,
     required this.siblingProducts,
+    this.detectedWrapperText,
+    this.detectedProductData,
   });
 
   @override
@@ -47,26 +51,37 @@ class OfflineBarcodeRepository {
 
   /// Static mapping of known Indian GS1 company prefixes to manufacturers/brands
   static const Map<String, String> knownGs1Prefixes = {
+    // Haldiram's (89040044: Haldiram Snacks Food / 89040632: Haldiram Foods International)
+    '89040044': "Haldiram's",
+    '89040632': "Haldiram's",
+    '8904004': "Haldiram's",
+
+    // Bikaji Foods International Ltd.
+    '89060055': 'Bikaji Foods',
+    '8906005': 'Bikaji Foods',
+
+    // Major Indian FMCG Brands
     '8901063': 'Britannia Industries',
     '8901058': 'Nestlé India',
     '8901719': 'Parle Products',
-    '8901725': 'ITC Limited (Sunfeast / Bingo)',
-    '8901491': "Haldiram's Snacks",
+    '8901725': 'ITC Limited',
+    '8901491': 'PepsiCo India',
     '8901499': 'PepsiCo India (Lay\'s / Kurkure)',
     '8901262': 'Amul (GCMMF)',
     '8901112': 'Mondelez India (Cadbury)',
+    '8901786': 'Everest Spices',
     '8901036': 'Everest Spices',
+    '8901648': 'MDH Spices',
     '8901233': 'MDH Spices',
+    '8901207': 'Dabur India',
+    '8901088': 'Dabur India',
+    '8901157': 'Hamdard Laboratories',
     '8901287': 'Catch Spices (DS Group)',
     '8901131': 'MTR Foods (Orkla)',
-    '8901088': 'Dabur India',
     '8901030': 'Hindustan Unilever (Kissan / Horlicks)',
     '8904043': 'Tata Consumer Products (Tata Sampann)',
-    '8904004': 'Bikaji Foods',
     '8906007': 'Balaji Wafers',
     '8906010': 'Paper Boat (Hector Beverages)',
-    '8901648': 'Mother Dairy',
-    '8904063': 'Patanjali Ayurved',
     '8901594': "Ching's Secret (Capital Foods)",
     '8901023': 'Marico (Saffola)',
   };
