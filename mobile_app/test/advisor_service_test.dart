@@ -5,6 +5,7 @@ import 'package:http/testing.dart';
 import 'package:mobile_app/core/network/client_rate_limiter.dart';
 import 'package:mobile_app/features/advisor/application/advisor_service.dart';
 import 'package:mobile_app/features/advisor/domain/advisor_chat_model.dart';
+import 'package:mobile_app/features/advisor/domain/advisor_rules.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 
 void main() {
@@ -383,6 +384,78 @@ void main() {
       expect(reply.source, 'local_offline');
       expect(reply.text, contains('rate limit active'));
       expect(customLimiter.canSendRequest(null, 'test_user'), isFalse);
+    });
+
+    test('Rule 1 & Rule 2: "what is colestrol of this product" bypasses guardrail and answers 0 mg for Safi', () async {
+      final failingClient = MockClient((request) async {
+        throw http.ClientException('Offline');
+      });
+
+      final service = AdvisorService(client: failingClient);
+      const safiContext = ProductAdvisorContext(
+        productName: 'Hamdard Safi',
+        brandName: 'Hamdard',
+        category: 'Ayurvedic Tonic',
+        barcode: '8901458001016',
+        healthScore: 35,
+        ingredients: ['Senna', 'Turbud', 'Neem', 'Tulsi', 'Chiraita', 'Invert Sugar'],
+        nutrition: {'sugars_100g': 22.0},
+      );
+
+      final reply = await service.askAdvisor(
+        userMessage: 'what is colestrol of this product',
+        productContext: safiContext,
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'local_offline');
+      expect(reply.text, contains('Cholesterol: 0 mg (Zero Cholesterol)'));
+      expect(reply.text, contains('100% botanical/plant-based Unani formulation'));
+      expect(reply.citations, contains('WHO-Guidelines-Cardiovascular-Health'));
+    });
+
+    test('Rule 1 & Rule 2: "what is carbohydrates level of safi" bypasses guardrail and details invert sugar base', () async {
+      final failingClient = MockClient((request) async {
+        throw http.ClientException('Offline');
+      });
+
+      final service = AdvisorService(client: failingClient);
+      const safiContext = ProductAdvisorContext(
+        productName: 'Hamdard Safi',
+        brandName: 'Hamdard',
+        category: 'Ayurvedic Tonic',
+        barcode: '8901458001016',
+        healthScore: 35,
+        ingredients: ['Senna', 'Turbud', 'Neem', 'Tulsi', 'Chiraita', 'Invert Sugar'],
+        nutrition: {'sugars_100g': 22.0},
+      );
+
+      final reply = await service.askAdvisor(
+        userMessage: 'what is carbohydrates level of safi',
+        productContext: safiContext,
+        userProfile: UserProfileModel.defaults('test_user'),
+      );
+
+      expect(reply.source, 'local_offline');
+      expect(reply.text, contains('Carbohydrates Breakdown for Hamdard Safi'));
+      expect(reply.text, contains('7g–8g per 10ml adult serving'));
+      expect(reply.text, contains('Invert Sugar Syrup (Qand Safaid)'));
+      expect(reply.citations, contains('ICMR-NIN-Dietary-2024'));
+    });
+
+    test('Rule 2: "what is colestrol" passes even without product context via typo-tolerant stem allowlist', () {
+      expect(AdvisorRules.isOutOfScope('what is colestrol of food'), isFalse);
+      expect(AdvisorRules.isOutOfScope('what is colestrol'), isFalse);
+      expect(AdvisorRules.isOutOfScope('what is carb level'), isFalse);
+      expect(AdvisorRules.isOutOfScope('how much protein in this item'), isFalse);
+    });
+
+    test('Rule 3: strict off-topic denylist intercepts unrelated programming and homework prompts', () {
+      expect(AdvisorRules.isOutOfScope('write a python bubble sort program'), isTrue);
+      expect(AdvisorRules.isOutOfScope('solve this math equation: x^2 + 2x = 0'), isTrue);
+      expect(AdvisorRules.isOutOfScope('who is the prime minister of india'), isTrue);
+      expect(AdvisorRules.isOutOfScope('what is the score of the cricket match'), isTrue);
+      expect(AdvisorRules.isOutOfScope('what is the current bitcoin stock price'), isTrue);
     });
   });
 }

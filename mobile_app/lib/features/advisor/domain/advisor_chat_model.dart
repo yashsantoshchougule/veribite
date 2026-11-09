@@ -90,6 +90,12 @@ class ProductAdvisorContext {
   final int? healthScore;
   final List<Map<String, dynamic>> additives;
   final Map<String, dynamic> nutrition;
+  final String? brandName;
+  final String? category;
+  final List<String> ingredients;
+  final int? novaGrade;
+  final Map<String, dynamic> extendedNutrients;
+  final Map<String, dynamic>? healthIntelligence;
 
   const ProductAdvisorContext({
     required this.productName,
@@ -97,6 +103,12 @@ class ProductAdvisorContext {
     this.healthScore,
     this.additives = const [],
     this.nutrition = const {},
+    this.brandName,
+    this.category,
+    this.ingredients = const [],
+    this.novaGrade,
+    this.extendedNutrients = const {},
+    this.healthIntelligence,
   });
 
   Map<String, dynamic> toBackendPayload() {
@@ -106,6 +118,12 @@ class ProductAdvisorContext {
       'health_score': healthScore,
       'additives': additives,
       'nutrition': nutrition,
+      if (brandName != null) 'brand_name': brandName,
+      if (category != null) 'category': category,
+      'ingredients': ingredients,
+      if (novaGrade != null) 'nova_grade': novaGrade,
+      'extended_nutrients': extendedNutrients,
+      if (healthIntelligence != null) 'health_intelligence': healthIntelligence,
     };
   }
 }

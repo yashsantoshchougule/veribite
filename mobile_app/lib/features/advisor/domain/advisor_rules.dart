@@ -1,3 +1,5 @@
+import 'advisor_chat_model.dart';
+
 /// Domain rules, system prompts, and out-of-scope guardrails for VeriBite AI Advisor.
 class AdvisorRules {
   static const String appName = 'VeriBite';
@@ -20,23 +22,30 @@ class AdvisorRules {
     required bool isDiabetic,
     required bool isHypertensive,
     String? productName,
+    String? brandName,
+    String? category,
     int? healthScore,
+    int? novaGrade,
     Map<String, dynamic>? nutrition,
     List<Map<String, dynamic>>? additives,
+    List<String>? ingredients,
+    Map<String, dynamic>? healthIntelligence,
   }) {
     final buffer = StringBuffer();
-    buffer.writeln('You are the VeriBite AI Advisor, an expert in packaged food toxicology, ingredient analysis, and VeriBite app guidance.');
+    buffer.writeln('You are the VeriBite AI Advisor, an expert in packaged food toxicology, ingredient analysis, clinical nutrition, and VeriBite app guidance.');
     buffer.writeln('');
     buffer.writeln('STRICT BEHAVIORAL REGULATIONS & SAFETY BOUNDARIES:');
     buffer.writeln('1. IDENTITY RULE: You are ONLY the "VeriBite AI Advisor". NEVER disclose or mention your underlying AI model (e.g., Gemini, GPT, LLM), model version, or creator/developer (e.g., Google, OpenAI, DeepMind). If asked who created you or what model you are, state only that you are the VeriBite AI Advisor built for this app.');
-    buffer.writeln('2. STRICT DOMAIN BOUNDARY: You ONLY answer questions related to:');
-    buffer.writeln('   a) Packaged foods, ingredients, chemical INS additives, nutrition facts, toxicology, and safe portion limits.');
-    buffer.writeln('   b) VeriBite application usage, troubleshooting, scanning, and features.');
-    buffer.writeln('   For ANY question unrelated to food, nutrition, or the VeriBite app (such as politics, world trivia, e.g. "Who is the PM of India?", sports, movies, general coding, weather, or jokes), you MUST POLITELY REFUSE and ask the user to submit a food- or app-related question.');
-    buffer.writeln('3. CONCISENESS & BREVITY: Give ONLY the details requested. Do NOT give long lectures, unsolicited essays, or unasked-for life advice. Keep your response direct, practical, and focused strictly on the user query (under 150 words unless a detailed breakdown is explicitly requested).');
-    buffer.writeln('4. IN-APP TROUBLESHOOTING: If the user asks how to use VeriBite, how to scan, how to adjust weight, or resolve camera/scan issues, provide clear, step-by-step in-app guidance.');
-    buffer.writeln('5. NO MEDICAL DIAGNOSIS: Never diagnose illnesses or prescribe pharmaceuticals. Base food safety on official regulatory standards (WHO, EFSA, FSSAI, JECFA).');
-    buffer.writeln('6. UNBIASED TOXICOLOGY: Base food evaluations on published ingredient labels and regulatory monographs. Prohibit emotional or unsubstantiated brand attacks.');
+    buffer.writeln('2. STRICT DOMAIN BOUNDARY: You answer questions related to packaged foods, ingredients, botanical extracts, chemical INS additives, nutrition facts, toxicology, safe portion limits, and VeriBite app features.');
+    buffer.writeln('   For ANY question strictly unrelated to food, nutrition, biology, health, or the app (e.g., writing programming code/scripts, sports scores, movie reviews, cryptocurrency, or political elections), you MUST POLITELY REFUSE.');
+    buffer.writeln('3. CHARITABLE TYPO INTERPRETATION: Always interpret user typos charitably without lecturing (e.g., "colestrol" -> cholesterol, "protien" -> protein, "carbs/carbohydrate", "sugr" -> sugar). Never refuse a query due to spelling or grammatical typos.');
+    buffer.writeln('4. INTELLIGENT NUTRIENT INFERENCE (NO DEAD-END REPLIES):');
+    buffer.writeln('   If the user asks for a specific nutrient (such as Cholesterol, Carbohydrates, Sugar, Fat, Protein, Sodium, or Calories) that is not explicitly printed in the label numbers:');
+    buffer.writeln('   - DO NOT refuse, and DO NOT simply say "Data missing".');
+    buffer.writeln('   - Instead, provide the exact scanned value if present, OR provide the scientifically deduced value based on the product formulation.');
+    buffer.writeln('   - Example: For plant-based or Ayurvedic herbal tonics (like Hamdard Safi), confirm that as a 100% botanical Unani formulation, it contains 0 mg Cholesterol (cholesterol only exists in animal products). Its carbohydrates (~7g-8g per 10ml serving, ~70-80g per 100ml) stem from its Invert Sugar Syrup / Qand Safaid base.');
+    buffer.writeln('5. CONCISENESS & BREVITY: Give ONLY the details requested. Keep your response direct, practical, and focused strictly on the user query (under 150 words unless a detailed breakdown is explicitly requested).');
+    buffer.writeln('6. NO MEDICAL DIAGNOSIS: Never diagnose clinical illnesses or prescribe pharmaceuticals. Base evaluations on published regulatory monographs (WHO, EFSA, FSSAI, JECFA, ICMR).');
     buffer.writeln('');
     buffer.writeln('USER HEALTH PROFILE & BIOMETRIC GUARDRAILS:');
     buffer.writeln('- Calibrated Body Weight: ${weightKg.toStringAsFixed(1)} kg');
@@ -48,11 +57,30 @@ class AdvisorRules {
       buffer.writeln('');
       buffer.writeln('ACTIVE SCANNED PRODUCT CONTEXT:');
       buffer.writeln('- Product Name: $productName');
+      if (brandName != null && brandName.isNotEmpty) buffer.writeln('- Brand: $brandName');
+      if (category != null && category.isNotEmpty) buffer.writeln('- Category: $category');
       if (healthScore != null) buffer.writeln('- Health Score: $healthScore/100');
-      if (nutrition != null) {
-        buffer.writeln('- Sugars (per 100g): ${nutrition["sugars_100g"] ?? "N/A"}');
-        buffer.writeln('- Sodium (per 100g): ${nutrition["sodium_100g"] ?? "N/A"}');
+      if (novaGrade != null) buffer.writeln('- NOVA Group: $novaGrade');
+
+      if (nutrition != null && nutrition.isNotEmpty) {
+        buffer.writeln('- Nutritional Profile (per 100g / per serving):');
+        buffer.writeln('  * Calories / Energy: ${nutrition["calories"] ?? nutrition["energy_kcal"] ?? "N/A"} kcal');
+        buffer.writeln('  * Total Carbohydrates: ${nutrition["carbohydrates_g_per_100g"] ?? nutrition["carbohydrates"] ?? nutrition["carbs_100g"] ?? "N/A"} g');
+        buffer.writeln('  * Total Sugars: ${nutrition["sugars_100g"] ?? nutrition["sugar_g_per_100g"] ?? "N/A"} g');
+        buffer.writeln('  * Added Sugars: ${nutrition["added_sugars_g"] ?? nutrition["added_sugar_g_per_100g"] ?? "N/A"} g');
+        buffer.writeln('  * Total Fat: ${nutrition["total_fat_g_per_100g"] ?? nutrition["total_fat"] ?? "N/A"} g');
+        buffer.writeln('  * Saturated Fat: ${nutrition["sat_fat_100g"] ?? nutrition["sat_fat_g_per_100g"] ?? "N/A"} g');
+        buffer.writeln('  * Trans Fat: ${nutrition["trans_fat_g_per_100g"] ?? "0"} g');
+        buffer.writeln('  * Cholesterol: ${nutrition["cholesterol_mg_per_100g"] ?? nutrition["cholesterol"] ?? "0"} mg');
+        buffer.writeln('  * Protein: ${nutrition["protein_g"] ?? nutrition["protein_100g"] ?? "N/A"} g');
+        buffer.writeln('  * Sodium: ${nutrition["sodium_100g"] ?? nutrition["sodium_mg_per_100g"] ?? "N/A"} mg');
+        buffer.writeln('  * Dietary Fibre: ${nutrition["fiber_g"] ?? "N/A"} g');
       }
+
+      if (ingredients != null && ingredients.isNotEmpty) {
+        buffer.writeln('- Ingredients: ${ingredients.join(", ")}');
+      }
+
       if (additives != null && additives.isNotEmpty) {
         buffer.writeln('- Detected Additives:');
         for (final a in additives) {
@@ -60,6 +88,32 @@ class AdvisorRules {
           final name = a['name'] ?? a['primary_name'] ?? '';
           final tier = a['risk_tier'] ?? 'Caution';
           buffer.writeln('  * INS $ins ($name) — Risk Tier: $tier');
+        }
+      }
+
+      if (healthIntelligence != null && healthIntelligence.isNotEmpty) {
+        buffer.writeln('- Botanical & Bioactive Intelligence:');
+        if (healthIntelligence['category_domain'] != null) {
+          buffer.writeln('  * Category Domain: ${healthIntelligence['category_domain']}');
+        }
+        final bioactives = healthIntelligence['bioactive_compounds'] as List<dynamic>?;
+        if (bioactives != null && bioactives.isNotEmpty) {
+          buffer.writeln('  * Bioactive Compounds:');
+          for (final b in bioactives) {
+            if (b is Map) {
+              buffer.writeln('    - ${b['name']} (${b['function_category'] ?? "Active"}): ${b['physiological_effect'] ?? ""} [Risk: ${b['risk_level'] ?? "moderate"}]');
+            }
+          }
+        }
+        final organImpact = healthIntelligence['organ_impact'] as Map<String, dynamic>?;
+        if (organImpact != null) {
+          buffer.writeln('  * Organ Impact:');
+          organImpact.forEach((k, v) => buffer.writeln('    - $k: $v'));
+        }
+        final warnings = healthIntelligence['contraindications'] as Map<String, dynamic>?;
+        if (warnings != null) {
+          buffer.writeln('  * Contraindications:');
+          warnings.forEach((k, v) => buffer.writeln('    - $k: $v'));
         }
       }
     }
@@ -82,50 +136,117 @@ class AdvisorRules {
         lower.contains('who is your creator');
   }
 
-  /// Checks if query is clearly out of food safety / app scope
-  static bool isOutOfScope(String query) {
+  /// Strict off-topic denylist patterns (coding, politics, sports, entertainment, finance, homework)
+  static final List<RegExp> _strictDenylistPatterns = [
+    RegExp(r'\b(write|create|generate|debug)\s+(python|java|javascript|c\+\+|code|script|sql|html|css|program|function|class)\b', caseSensitive: false),
+    RegExp(r'\b(bubble sort|binary search|leetcode|github repository|pull request|unit test in python)\b', caseSensitive: false),
+    RegExp(r'\b(pm of|prime minister|president of|chief minister|governor|election|parliament|bjp|congress|democrat|republican)\b', caseSensitive: false),
+    RegExp(r'\b(who is the (pm|president|minister|king|queen|ceo of))\b', caseSensitive: false),
+    RegExp(r'\b(cricket|football|fifa|ipl|match score|world cup|olympics|messi|ronaldo|virat kohli)\b', caseSensitive: false),
+    RegExp(r'\b(capital of|currency of|population of|weather in|temperature in)\b', caseSensitive: false),
+    RegExp(r'\b(movie review|actor|actress|cinema|bollywood|hollywood|song lyrics|box office)\b', caseSensitive: false),
+    RegExp(r'\b(tell me a joke|write a poem|tell a story|sing a song)\b', caseSensitive: false),
+    RegExp(r'\b(stock price|bitcoin|crypto|share market|nifty|sensex|ethereum|dogecoin)\b', caseSensitive: false),
+    RegExp(r'\b(car|bike|automobile|flight ticket|train ticket)\b', caseSensitive: false),
+    RegExp(r'\b(solve (equation|math|physics|calculus|algebra)|homework)\b', caseSensitive: false),
+  ];
+
+  /// Comprehensive nutrition, medical, botanical, and app stem allowlist (with phonetic typos)
+  static const List<String> _domainStems = [
+    // Macronutrients & Lipids (with typos)
+    'carb', 'carbo', 'sugar', 'gluco', 'fructo', 'sucro', 'calor', 'kcal', 'energ',
+    'prot', 'fat', 'lipid', 'saturat', 'unsaturat', 'trans', 'cholest', 'colest',
+    'colesterol', 'colestrol', 'fiber', 'fibr', 'starch',
+    // Micronutrients & Minerals
+    'sodiu', 'salt', 'potassi', 'calciu', 'iron', 'magnesi', 'zinc', 'vitam',
+    'mineral', 'electrolyt', 'antioxid', 'omega',
+    // Additives, Herbs & Bioactives
+    'additiv', 'ins', 'e-number', 'preserv', 'color', 'colour', 'flavour', 'flavor',
+    'emulsif', 'sweeten', 'caffein', 'taurin', 'herbal', 'ayurved', 'unani', 'botanic',
+    'senna', 'sana', 'neem', 'tulsi', 'chiraita', 'aloe', 'laxat', 'purif', 'detox',
+    'tonic', 'supplement', 'whey', 'maltodextrin', 'palm oil', 'atta', 'maida', 'gluten',
+    // Health, Organs, Conditions & Dosage
+    'health', 'safe', 'toxic', 'harm', 'risk', 'side effect', 'benefit', 'dosag', 'dose',
+    'portion', 'serv', 'daily', 'limit', 'rda', 'who', 'fssai', 'nova', 'score', 'grade',
+    'diabet', 'glycem', 'insul', 'bp', 'pressure', 'heart', 'cardio', 'liver', 'kidney',
+    'renal', 'gut', 'stomach', 'digest', 'constipat', 'diarrh', 'cramps', 'acne', 'skin',
+    'pimple', 'weight', 'pregnan', 'breastfeed', 'child', 'kid', 'teen', 'adult',
+    'allerg', 'gluten', 'lactos', 'vegan', 'veg', 'eat', 'food', 'snack', 'biscuit',
+    'noodle', 'maggi', 'chip', 'drink', 'beverage', 'syrup', 'packet', 'bottle',
+    // App & Scanner Usage
+    'veribite', 'app', 'scan', 'barcode', 'qr', 'camera', 'ocr', 'label', 'offline',
+    'report', 'pdf', 'history', 'profile', 'swap', 'blinkit', 'zepto', 'instamart',
+    'guardrail', 'settings', 'how to', 'help', 'issue', 'not working', 'focus', 'zoom', 'reticle'
+  ];
+
+  /// Context-aware intent router:
+  /// RULE 1: If active product is pinned, auto-pass queries related to product/context/inquiry.
+  /// RULE 2: If query matches any domain stem (nutrition, botanical, organs, app), auto-pass.
+  /// RULE 3: Strict off-topic denylist blocks completely unrelated topics (coding, politics, crypto).
+  static bool isOutOfScope(String query, [ProductAdvisorContext? productContext]) {
     final lower = query.toLowerCase().trim();
 
-    // Explicit non-food/app trigger patterns
-    final outOfScopePatterns = [
-      RegExp(r'\b(pm|prime minister|president|chief minister|governor|minister)\b'),
-      RegExp(r'\b(who is the (pm|president|minister|king|queen|ceo of))\b'),
-      RegExp(r'\b(capital of|currency of|population of|weather in|temperature in)\b'),
-      RegExp(r'\b(cricket|football|fifa|ipl|match score|world cup|olympics)\b'),
-      RegExp(r'\b(movie|actor|actress|cinema|bollywood|hollywood|song|lyrics)\b'),
-      RegExp(r'\b(write (python|java|javascript|c\+\+|code|a poem|a story|a joke))\b'),
-      RegExp(r'\b(tell me a joke|write a poem|tell a story|sing a song)\b'),
-      RegExp(r'\b(stock price|bitcoin|crypto|share market|nifty|sensex)\b'),
-      RegExp(r'\b(car|bike|automobile|flight|train ticket)\b'),
-    ];
+    // 1. Strict Off-Topic Denylist Check: If message explicitly asks for coding/politics/sports/crypto
+    final matchesDenylist = _strictDenylistPatterns.any((pattern) => pattern.hasMatch(lower));
 
-    for (final pattern in outOfScopePatterns) {
-      if (pattern.hasMatch(lower)) return true;
-    }
-
-    // Positive domain keywords (if query has at least one of these, it is in-scope)
-    final domainKeywords = [
-      'food', 'eat', 'safe', 'sugar', 'salt', 'sodium', 'fat', 'calorie', 'nutrition',
-      'diet', 'child', 'kid', 'diabet', 'hypertens', 'weight', 'health', 'portion',
-      'serving', 'ins', 'additive', 'e-number', 'preservative', 'color', 'sweetener',
-      'maltodextrin', 'palm oil', 'protein', 'fiber', 'atta', 'maida', 'gluten',
-      'allergy', 'biscuit', 'noodle', 'maggi', 'chip', 'snack', 'drink', 'beverage',
-      'veribite', 'app', 'scan', 'camera', 'barcode', 'history', 'score', 'red flag',
-      'swap', 'blinkit', 'zepto', 'instamart', 'profile', 'guardrail', 'settings',
-      'how to', 'help', 'issue', 'not working', 'focus', 'zoom', 'reticle'
-    ];
-
-    final hasDomainKeyword = domainKeywords.any((keyword) => lower.contains(keyword));
-    if (hasDomainKeyword) return false;
-
-    // Short greetings or app questions are in-scope
-    if (lower == 'hi' || lower == 'hello' || lower == 'hey' || lower == 'help') {
+    // 2. Greetings and brief queries
+    if (lower == 'hi' || lower == 'hello' || lower == 'hey' || lower == 'help' || lower == 'thanks' || lower == 'thank you') {
       return false;
     }
 
-    // If query is sufficiently long (> 3 words) and has zero food/app/health concepts, treat as out of scope
+    // 3. RULE 1 — ACTIVE PRODUCT CONTEXT AUTO-PASS
+    if (productContext != null) {
+      // Check product name, brand, category, and ingredients
+      final productWords = <String>{};
+      for (final part in productContext.productName.toLowerCase().split(RegExp(r'\s+'))) {
+        if (part.length >= 3) productWords.add(part);
+      }
+      if (productContext.brandName != null) {
+        for (final part in productContext.brandName!.toLowerCase().split(RegExp(r'\s+'))) {
+          if (part.length >= 3) productWords.add(part);
+        }
+      }
+      for (final ing in productContext.ingredients) {
+        for (final part in ing.toLowerCase().split(RegExp(r'\s+'))) {
+          if (part.length >= 3) productWords.add(part);
+        }
+      }
+
+      final mentionsProductTokens = productWords.any((pw) => lower.contains(pw));
+      if (mentionsProductTokens && !matchesDenylist) {
+        return false;
+      }
+
+      // Contextual references
+      final contextualRefs = ['this', 'it', 'this product', 'the product', 'syrup', 'packet', 'bottle', 'drink', 'food', 'item', 'brand'];
+      final hasContextRef = contextualRefs.any((ref) => lower.contains(ref));
+
+      // Inquiry & Question markers
+      final questionMarkers = [
+        'what', 'how', 'why', 'is', 'can', 'does', 'should', 'tell', 'explain',
+        'level', 'amount', 'value', 'content', 'much', 'many', 'good', 'bad', 'safe', 'risk'
+      ];
+      final hasQuestionMarker = questionMarkers.any((q) => lower.contains(q));
+
+      if ((hasContextRef || hasQuestionMarker) && !matchesDenylist) {
+        return false;
+      }
+    }
+
+    // 4. RULE 2 — COMPREHENSIVE NUTRITION & MEDICAL STEM ALLOWLIST
+    final hasDomainStem = _domainStems.any((stem) => lower.contains(stem));
+    if (hasDomainStem && !matchesDenylist) {
+      return false;
+    }
+
+    // 5. RULE 3 — STRICT OFF-TOPIC REFUSAL
+    if (matchesDenylist) {
+      return true;
+    }
+
+    // If query is >= 3 words and has zero overlap with product context, nutrition stems, or app usage
     final words = lower.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    if (words.length >= 3 && !hasDomainKeyword) {
+    if (words.length >= 3 && !hasDomainStem) {
       return true;
     }
 

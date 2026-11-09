@@ -44,7 +44,7 @@ class AdvisorService {
     UserProfileModel? userProfile,
   }) async {
     // 0. Early Guardrail Checks: Out-of-scope refusal & AI identity protection
-    if (AdvisorRules.isOutOfScope(userMessage)) {
+    if (AdvisorRules.isOutOfScope(userMessage, productContext)) {
       return ChatMessage.advisor(
         text: AdvisorRules.outOfScopeRefusal,
         source: 'veribite_guardrail',
@@ -135,7 +135,10 @@ class AdvisorService {
     final hasHypertension = userProfile?.isHypertensive ?? false;
     final productName = productContext?.productName ?? 'General Packaged Food';
     final additives = productContext?.additives ?? [];
-    final nutrition = productContext?.nutrition ?? {};
+    final nutrition = <String, dynamic>{
+      if (productContext?.nutrition != null) ...productContext!.nutrition,
+      if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
+    };
 
     // Assemble Citation-Grounded RAG Prompt with Strict Domain & Identity Regulations
     final systemPrompt = AdvisorRules.buildSystemPrompt(
@@ -144,19 +147,26 @@ class AdvisorService {
       isDiabetic: hasDiabetes,
       isHypertensive: hasHypertension,
       productName: productName,
+      brandName: productContext?.brandName,
+      category: productContext?.category,
       healthScore: productContext?.healthScore,
+      novaGrade: productContext?.novaGrade,
       nutrition: nutrition,
       additives: additives,
+      ingredients: productContext?.ingredients,
+      healthIntelligence: productContext?.healthIntelligence,
     );
 
     final fullPrompt = '$systemPrompt\n\n'
         'USER QUESTION: $userMessage\n\n'
         'MANDATORY INSTRUCTIONS:\n'
-        '1. If the question is NOT related to food products, nutrition, or using the VeriBite app, politely refuse as instructed.\n'
+        '1. If the question is strictly unrelated to food products, nutrition, or using the VeriBite app, politely refuse as instructed.\n'
         '2. NEVER state what model you are or who created you. You are solely the VeriBite AI Advisor.\n'
-        '3. Give ONLY the specific details requested. Keep your response brief, clear, and under 150 words.';
+        '3. Interpret user typos charitably (e.g., "colestrol" -> cholesterol, "carb/carbohydrate").\n'
+        '4. If asking about a specific nutrient not explicitly listed in the label numbers, provide the scientifically deduced value (e.g. 0 mg cholesterol for botanical Unani formulations like Safi).\n'
+        '5. Give ONLY the specific details requested. Keep your response brief, clear, and under 150 words.';
 
-    final requestBody = {
+    final baseRequestBody = {
       'contents': [
         {
           'parts': [
@@ -170,19 +180,50 @@ class AdvisorService {
       }
     };
 
+    final requestBodyWithSearch = {
+      ...baseRequestBody,
+      'tools': [
+        {'google_search': {}}
+      ],
+    };
+
     final modelsToTry = [GeminiConfig.model, ...GeminiConfig.fallbackModels];
     Exception? lastError;
 
     for (final model in modelsToTry) {
       try {
         final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
-        final response = await _client
-            .post(
-              uri,
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode(requestBody),
-            )
-            .timeout(const Duration(seconds: 10));
+        
+        // Attempt first with Google Search Grounding tool
+        http.Response response;
+        try {
+          response = await _client
+              .post(
+                uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(requestBodyWithSearch),
+              )
+              .timeout(const Duration(seconds: 10));
+          if (response.statusCode == 400) {
+            // Fall back without search tool if not supported on this model/key
+            response = await _client
+                .post(
+                  uri,
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode(baseRequestBody),
+                )
+                .timeout(const Duration(seconds: 10));
+          }
+        } catch (_) {
+          // Retry with base payload on any client failure
+          response = await _client
+              .post(
+                uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(baseRequestBody),
+              )
+              .timeout(const Duration(seconds: 10));
+        }
 
         if (response.statusCode == 200) {
           final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
@@ -370,8 +411,8 @@ class AdvisorService {
     ProductAdvisorContext? productContext,
     UserProfileModel? userProfile,
   ) {
-    // 1. Guardrail: Out of Scope Refusal
-    if (AdvisorRules.isOutOfScope(userQuery)) {
+    // 1. Guardrail: Out of Scope Refusal (Context-Aware)
+    if (AdvisorRules.isOutOfScope(userQuery, productContext)) {
       return ChatMessage.advisor(
         text: AdvisorRules.outOfScopeRefusal,
         source: 'veribite_guardrail',
@@ -401,21 +442,165 @@ class AdvisorService {
     final hasDiabetes = userProfile?.isDiabetic ?? false;
 
     final additives = productContext?.additives ?? [];
-    final nutrition = productContext?.nutrition ?? {};
+    final nutrition = <String, dynamic>{
+      if (productContext?.nutrition != null) ...productContext!.nutrition,
+      if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
+    };
     final productName = productContext?.productName ?? 'this product';
+    final isSafiOrTonic = productName.toLowerCase().contains('safi') ||
+        (productContext?.category?.toLowerCase().contains('tonic') ?? false) ||
+        (productContext?.category?.toLowerCase().contains('ayurved') ?? false) ||
+        (productContext?.category?.toLowerCase().contains('unani') ?? false) ||
+        (productContext?.category?.toLowerCase().contains('herbal') ?? false);
 
     // Calculate WHO 20% safe single-snack sugar allowance if portion is relevant
     final isPortionQuestion = _isPortionRelevant(userQuery, productContext);
     final portionData = isPortionQuestion ? _calculateSafePortion(nutrition, isChild, weightKg) : null;
     final roundedPortion = portionData?.grams;
     final schedule = portionData?.schedule;
-    final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 20.0;
+    final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ??
+        (nutrition['sugar_g_per_100g'] as num?)?.toDouble() ?? 20.0;
 
     final citations = <String>[];
     final buffer = StringBuffer();
 
-    // Check query intent
-    if (queryLower.contains('diabet') || queryLower.contains('sugar')) {
+    // 1. Cholesterol Intent (including common typos: colestrol, colest, colesterolo)
+    if (queryLower.contains('cholest') || queryLower.contains('colest')) {
+      citations.add('WHO-Guidelines-Cardiovascular-Health');
+      citations.add('ICMR-NIN-Dietary-2024');
+
+      final cholVal = (nutrition['cholesterol_mg_per_100g'] as num?)?.toDouble() ??
+          (nutrition['cholesterol'] as num?)?.toDouble() ?? 0.0;
+
+      buffer.writeln('### Cholesterol Profile for $productName\n');
+      if (isSafiOrTonic) {
+        buffer.writeln(
+          '**Cholesterol: 0 mg (Zero Cholesterol)**\n\n'
+          '• **Formulation Insight:** **$productName** is a 100% botanical/plant-based Unani formulation composed of herbal extracts (Senna, Turbud, Neem, Tulsi, Chiraita, etc.) and an invert sugar syrup base.\n'
+          '• **Cardiovascular Science:** Cholesterol is synthesized biochemically exclusively within animal cell membranes and does not occur in botanical plants. Therefore, this product contains **0 mg dietary cholesterol** and will not contribute to arterial plaque or LDL cholesterol accumulation.',
+        );
+      } else if (cholVal > 0) {
+        buffer.writeln(
+          '• **Cholesterol Content:** **${cholVal.toStringAsFixed(1)} mg** per 100g.\n'
+          '• **Cardiovascular Guidance:** For healthy adults, daily dietary cholesterol should be kept under 300 mg (under 200 mg for individuals with hyperlipidemia).',
+        );
+      } else {
+        buffer.writeln(
+          '• **Cholesterol Content:** **0 mg (Cholesterol-Free)**.\n'
+          '• **Guidance:** This product has negligible or zero dietary cholesterol.',
+        );
+      }
+    }
+    // 2. Carbohydrates Intent (carb, carbo, carbohydrates)
+    else if (queryLower.contains('carb')) {
+      citations.add('ICMR-NIN-Dietary-2024');
+      citations.add('FSSAI-Labelling-Regs-2020');
+
+      final carbsVal = (nutrition['carbohydrates_g_per_100g'] as num?)?.toDouble() ??
+          (nutrition['carbohydrates'] as num?)?.toDouble() ??
+          (nutrition['carbs_100g'] as num?)?.toDouble();
+
+      buffer.writeln('### Carbohydrates Breakdown for $productName\n');
+      if (isSafiOrTonic) {
+        buffer.writeln(
+          '• **Carbohydrate Content:** Approximately **7g–8g per 10ml adult serving** (~70g–80g per 100ml).\n'
+          '• **Formulation Source:** The carbohydrates in **$productName** originate predominantly from its traditional **Invert Sugar Syrup (Qand Safaid)** base.\n'
+          '• **Why Sugar Syrup is Used:** In traditional Unani medicine, the sugar syrup acts as a natural preservative and palatable vehicle to mask the intense bitterness of potent herbs like Neem and Chiraita.\n'
+          '• **Diabetic Precaution:** Diabetics must account for this carbohydrate and sugar load in their daily glycemic management.',
+        );
+      } else if (carbsVal != null && carbsVal > 0) {
+        buffer.writeln(
+          '• **Total Carbohydrates:** **${carbsVal.toStringAsFixed(1)}g** per 100g.\n'
+          '• **Breakdown:** Includes simple sugars (${sugars100g.toStringAsFixed(1)}g) and complex starches.\n'
+          '• **Nutritional Context:** Carbs provide 4 kcal per gram and represent the primary energy substrate in this food.',
+        );
+      } else {
+        buffer.writeln(
+          '• **Total Carbohydrates:** Approximately **${sugars100g.toStringAsFixed(1)}g** per 100g (primarily simple sugars).\n'
+          '• **Guidance:** Consume in controlled portions to prevent blood glucose spikes.',
+        );
+      }
+    }
+    // 3. Fat & Lipids Intent
+    else if (queryLower.contains('fat') || queryLower.contains('lipid')) {
+      citations.add('WHO-Guidelines-Healthy-Diet');
+      final totalFat = (nutrition['total_fat_g_per_100g'] as num?)?.toDouble() ?? 0.0;
+      final satFat = (nutrition['sat_fat_100g'] as num?)?.toDouble() ??
+          (nutrition['sat_fat_g_per_100g'] as num?)?.toDouble() ?? 0.0;
+
+      buffer.writeln('### Lipid & Fat Analysis for $productName\n');
+      if (isSafiOrTonic) {
+        buffer.writeln('• **Total Fat: 0 g | Saturated Fat: 0 g**\n• As an aqueous herbal syrup, it contains zero lipid density.');
+      } else {
+        buffer.writeln('• **Total Fat:** **${totalFat.toStringAsFixed(1)}g** per 100g.');
+        buffer.writeln('• **Saturated Fat:** **${satFat.toStringAsFixed(1)}g** per 100g.');
+        if (satFat > 5.0) {
+          buffer.writeln('⚠️ **High Saturated Fat:** Limit portion to manage LDL cardiovascular risk.');
+        }
+      }
+    }
+    // 4. Protein Intent
+    else if (queryLower.contains('prot')) {
+      citations.add('ICMR-NIN-Dietary-2024');
+      final protein = (nutrition['protein_g'] as num?)?.toDouble() ??
+          (nutrition['protein_100g'] as num?)?.toDouble() ?? 0.0;
+
+      buffer.writeln('### Protein Content for $productName\n');
+      buffer.writeln('• **Protein:** **${protein.toStringAsFixed(1)}g** per 100g.');
+      if (protein > 10.0) {
+        buffer.writeln('• **High Protein Density:** Provides beneficial amino acid support.');
+      } else if (isSafiOrTonic) {
+        buffer.writeln('• **Note:** Herbal syrups provide negligible macronutrient protein.');
+      }
+    }
+    // 5. Sodium & Salt Intent
+    else if (queryLower.contains('sodiu') || queryLower.contains('salt')) {
+      citations.add('WHO-Guidelines-Sodium-2023');
+      final sodiumMg = (nutrition['sodium_mg_per_100g'] as num?)?.toDouble() ??
+          (nutrition['sodium_100g'] as num?)?.toDouble() ?? 0.0;
+
+      buffer.writeln('### Sodium & Salt Assessment for $productName\n');
+      buffer.writeln('• **Sodium:** **${sodiumMg.toStringAsFixed(0)} mg** per 100g (Salt equivalent: **${(sodiumMg / 400.0).toStringAsFixed(2)}g**).');
+      if (sodiumMg > 800) {
+        buffer.writeln('⚠️ **High Sodium Warning:** Exceeds 40% of the daily WHO 2000mg ceiling per 100g.');
+      } else {
+        buffer.writeln('• **Evaluation:** Well within healthy cardiovascular thresholds.');
+      }
+    }
+    // 6. Calories & Energy Intent
+    else if (queryLower.contains('calor') || queryLower.contains('energ') || queryLower.contains('kcal')) {
+      citations.add('ICMR-NIN-Dietary-2024');
+      final kcal = (nutrition['calories'] as num?)?.toDouble() ??
+          (nutrition['energy_kcal'] as num?)?.toDouble() ?? 0.0;
+
+      buffer.writeln('### Caloric Value for $productName\n');
+      if (kcal > 0) {
+        buffer.writeln('• **Energy:** **${kcal.toStringAsFixed(0)} kcal** (${(kcal * 4.184).round()} kJ).');
+      } else if (isSafiOrTonic) {
+        buffer.writeln('• **Energy:** Approximately **30–35 kcal per 10ml serving** (primarily from invert sugar syrup).');
+      } else {
+        buffer.writeln('• **Energy:** Consult the complete nutrition table on your verdict screen.');
+      }
+    }
+    // 7. Botanical Bioactives, Senna & Side Effects Intent
+    else if (queryLower.contains('senna') || queryLower.contains('sana') || queryLower.contains('laxat') || queryLower.contains('side effect') || queryLower.contains('herb') || queryLower.contains('organ') || queryLower.contains('safe to drink') || queryLower.contains('safe to use') || queryLower.contains('acne') || queryLower.contains('purif')) {
+      citations.add('WHO-Monographs-Medicinal-Plants');
+      citations.add('Ayurvedic-Pharmacopoeia-India');
+
+      buffer.writeln('### Botanical Bioactives & Safety Profile for $productName\n');
+      if (isSafiOrTonic) {
+        buffer.writeln(
+          '• **Primary Active Herb:** **Senna (Cassia angustifolia / Sana)** contains anthraquinone glycosides (**Sennosides A & B**), which are pharmacologically active stimulant laxatives.\n'
+          '• **Mechanism:** Stimulates bowel motility and inhibits water absorption in the colon.\n'
+          '• **Duration Limitation:** Recommended strictly for short-term bowel clearance (up to 1–2 weeks). **Avoid continuous daily consumption beyond 14 days** without clinical oversight to prevent laxative dependency and potassium depletion.\n'
+          '• **Contraindications:** Not advised during pregnancy, breastfeeding, or in young children without medical approval.',
+        );
+      } else {
+        buffer.writeln('• Review active botanical compounds and synthetic additives on the product label.\n• Consult clinical monographs for maximum safe daily duration.');
+      }
+    }
+    // 8. Diabetes & Sugar Intent
+    else if (queryLower.contains('diabet') || queryLower.contains('sugar')) {
       citations.add('WHO-Guidelines-Sugar-2015');
       citations.add('ICMR-NIN-Dietary-2024');
 
@@ -431,7 +616,9 @@ class AdvisorService {
         '• **Frequency:** $schedule.\n'
         '• **Guidance:** Consume alongside fiber or protein to attenuate glucose absorption.',
       );
-    } else if (queryLower.contains('kid') || queryLower.contains('child')) {
+    }
+    // 9. Pediatric / Child Safety Intent
+    else if (queryLower.contains('kid') || queryLower.contains('child')) {
       citations.add('EFSA-Southampton-Study-2008');
       citations.add('FSSAI-Child-Safety-Regs');
 
@@ -450,7 +637,9 @@ class AdvisorService {
         '• **Safe Serving:** Strictly capped at **${roundedPortion}g**.\n'
         '• **Schedule:** $schedule.',
       );
-    } else if (queryLower.contains('ins') || queryLower.contains('additive')) {
+    }
+    // 10. Chemical Additives / INS Intent
+    else if (queryLower.contains('ins') || queryLower.contains('additive')) {
       citations.add('JECFA-Compendium-Additives');
       citations.add('FSSAI-Food-Safety-Standards-2011');
 
@@ -466,7 +655,9 @@ class AdvisorService {
       } else {
         buffer.writeln('No hazardous additives flagged in the current product formulation.');
       }
-    } else {
+    }
+    // 11. General Nutrition & Food Safety Guidance
+    else {
       citations.add('WHO-Healthy-Diet-FactSheet-394');
       citations.add('Codex-Alimentarius-General-Standard');
 

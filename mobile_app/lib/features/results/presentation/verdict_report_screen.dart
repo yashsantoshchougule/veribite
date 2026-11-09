@@ -270,19 +270,45 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
   void _openAdvisor() {
     HapticFeedback.lightImpact();
+    final ext = _product.healthIntelligence?.extendedNutrients;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AdvisorChatScreen(
           userProfile: widget.userProfile,
           initialProductContext: ProductAdvisorContext(
             productName: widget.product.productName,
+            brandName: widget.product.brandName,
+            category: widget.product.category,
             barcode: widget.product.barcode,
             healthScore: widget.product.healthScore,
+            novaGrade: widget.product.novaGrade,
+            ingredients: widget.product.splitSugars,
             additives: widget.product.additives,
+            healthIntelligence: _product.healthIntelligence?.toJson(),
+            extendedNutrients: {
+              'carbohydrates_g_per_100g': _product.carbsGPer100g > 0
+                  ? _product.carbsGPer100g
+                  : (ext?.carbsG ?? 0.0),
+              'total_fat_g_per_100g': _product.totalFatGPer100g > 0
+                  ? _product.totalFatGPer100g
+                  : (ext?.totalFatG ?? 0.0),
+              'cholesterol_mg_per_100g': _product.cholesterolMgPer100g > 0
+                  ? _product.cholesterolMgPer100g
+                  : (ext?.cholesterolMg ?? 0.0),
+              'protein_g': _product.proteinGPer100g > 0 ? _product.proteinGPer100g : (ext?.proteinG ?? 0.0),
+              'fiber_g': _product.fiberGPer100g > 0 ? _product.fiberGPer100g : (ext?.dietaryFiberG ?? 0.0),
+              'trans_fat_g_per_100g': _product.transFatGPer100g > 0
+                  ? _product.transFatGPer100g
+                  : (ext?.transFatG ?? 0.0),
+              'unsaturated_fat_g': ext?.unsaturatedFatG ?? 0.0,
+              'added_sugars_g': ext?.addedSugarsG ?? 0.0,
+              'caffeine_mg': ext?.caffeineMg ?? 0.0,
+            },
             nutrition: {
               'sugars_100g': widget.product.sugarGPer100g,
               'sugar_per_serving_g': widget.product.sugarGPerServing,
               'calories': widget.product.caloriesPerServing,
+              'energy_kcal': widget.product.caloriesPerServing,
               'sat_fat_100g': widget.product.satFatGPer100g,
               'sat_fat_per_serving_g': widget.product.satFatGPerServing > 0
                   ? widget.product.satFatGPerServing
@@ -291,6 +317,17 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               'sodium_per_serving_mg': widget.product.sodiumMgPerServing > 0
                   ? widget.product.sodiumMgPerServing
                   : _currentSodiumMg.toDouble(),
+              'carbohydrates_g_per_100g': _product.carbsGPer100g > 0
+                  ? _product.carbsGPer100g
+                  : (ext?.carbsG ?? 0.0),
+              'total_fat_g_per_100g': _product.totalFatGPer100g > 0
+                  ? _product.totalFatGPer100g
+                  : (ext?.totalFatG ?? 0.0),
+              'cholesterol_mg_per_100g': _product.cholesterolMgPer100g > 0
+                  ? _product.cholesterolMgPer100g
+                  : (ext?.cholesterolMg ?? 0.0),
+              'protein_g': _product.proteinGPer100g > 0 ? _product.proteinGPer100g : (ext?.proteinG ?? 0.0),
+              'fiber_g': _product.fiberGPer100g > 0 ? _product.fiberGPer100g : (ext?.dietaryFiberG ?? 0.0),
             },
           ),
         ),
