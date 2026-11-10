@@ -494,7 +494,6 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
 
       if (!mounted) return;
       setState(() => _isProcessingScan = false);
-      if (mounted) setState(() => _isProcessingScan = false);
       await _showScanResultReport(resolvedProduct, activeProfile);
     } on OfflineVariantMatchException catch (e) {
       if (!mounted) return;
