@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "VeriBite (with 11 AI Keys)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile_app",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define-from-file=.env.json"
+      ]
+    },
+    {
+      "name": "VeriBite (Default Offline/Fallback)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile_app",
+      "program": "lib/main.dart"
+    }
+  ]
+}

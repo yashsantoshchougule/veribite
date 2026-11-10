@@ -204,11 +204,7 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
 
             // Active Route Banner Card
             _buildActiveRouteCard(),
-            const SizedBox(height: 14),
-
-            // Multi-Provider AI Pool Status Card
-            _buildAiPoolStatusCard(),
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
 
             // Custom Backend URL Input
             const Text(
@@ -358,6 +354,10 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
                 ),
               ],
             ),
+            const SizedBox(height: 18),
+
+            // Multi-Provider AI Pool Status Card
+            _buildAiPoolStatusCard(),
           ],
         ),
       ),
@@ -527,7 +527,7 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
           _buildProviderTierRow(
             tier: 'Tier 1',
             name: 'Google Gemini',
-            subtitle: 'gemini-2.5-flash (10 RPM) / 2.0-flash-lite',
+            subtitle: '${AiProviderConfig.geminiApiKeys.length} keys in pool • gemini-2.5-flash / 2.0-flash-lite',
             isActive: geminiReady,
             chipColor: AppColors.safetyGreen,
           ),
@@ -535,7 +535,7 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
           _buildProviderTierRow(
             tier: 'Tier 2',
             name: 'Groq Cloud LPU',
-            subtitle: 'Qwen 3.8 (Vision) / Llama 3.3 70B (Chat)',
+            subtitle: '${AiProviderConfig.groqApiKeys.length} keys in pool • Qwen 3.8 (Vision) / Llama 3.3 70B (Chat)',
             isActive: groqReady,
             chipColor: AppColors.safetyGreen,
           ),
@@ -543,7 +543,7 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
           _buildProviderTierRow(
             tier: 'Tier 3',
             name: 'OpenRouter & Proxy',
-            subtitle: 'Spillover Gateway (Free VL models) + FastAPI',
+            subtitle: '${AiProviderConfig.openRouterApiKeys.length} keys in pool • Spillover Gateway + FastAPI',
             isActive: openRouterReady,
             chipColor: AppColors.accentBronze,
           ),
@@ -554,6 +554,34 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
             subtitle: 'ML Kit + Local Regex Engine (Zero Net)',
             isActive: true,
             chipColor: AppColors.safetyGreen,
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: () => _showKeysManagementModal(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              decoration: BoxDecoration(
+                color: AppColors.stepPillBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.stepPillBorder, width: 0.8),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.key_rounded, size: 14, color: AppColors.accentBronze),
+                  SizedBox(width: 6),
+                  Text(
+                    'Inspect & Manage 11 Active AI Keys',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -616,6 +644,159 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showKeysManagementModal(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: AppColors.canvasCream,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.cardBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Row(
+                children: [
+                  Icon(Icons.vpn_key_rounded, size: 20, color: AppColors.accentBronze),
+                  SizedBox(width: 8),
+                  Text(
+                    'Active AI Provider Keys (11 Total)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Keys are distributed across independent project quotas for round-robin rotation & automatic failover.',
+                style: TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: ListView(
+                  children: [
+                    _buildProviderKeyGroup('Google Gemini (Pool A - 5 Keys)', AiProviderConfig.geminiApiKeys),
+                    const SizedBox(height: 12),
+                    _buildProviderKeyGroup('Groq Cloud LPU (Pool B - 3 Keys)', AiProviderConfig.groqApiKeys),
+                    const SizedBox(height: 12),
+                    _buildProviderKeyGroup('OpenRouter Gateway (Pool C - 3 Keys)', AiProviderConfig.openRouterApiKeys),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryObsidian,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProviderKeyGroup(String title, List<String> keys) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.cardBorder, width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textObsidian,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (keys.isEmpty)
+            const Text(
+              'No keys configured',
+              style: TextStyle(fontSize: 11, color: AppColors.textMutedMocha),
+            )
+          else
+            ...keys.asMap().entries.map((entry) {
+              final idx = entry.key + 1;
+              final key = entry.value;
+              final masked = AiProviderConfig.maskKeyForDisplay(key);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2.5),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 18,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.stepPillBg,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '$idx',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textMutedMocha,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        masked,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textObsidian,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.safetyGreen),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 }

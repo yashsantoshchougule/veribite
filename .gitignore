@@ -32,8 +32,11 @@ testing/scratch/*
 
 # Secrets & Environment
 .env
+.env.*
 .env.local
 .env.test
+*.env
+*.env.json
 
 # OS
 .DS_Store

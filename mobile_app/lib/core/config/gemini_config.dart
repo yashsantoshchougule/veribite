@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'ai_provider_config.dart';
 
 /// Google Gemini API Configuration for Cloud Vision and Personal AI Advisor
 /// with multi-model cascade failover and multi-key rotation on 5G/Wi-Fi.
@@ -27,6 +28,9 @@ class GeminiConfig {
     }
     if (_envKey.isNotEmpty && !list.contains(_envKey)) {
       list.add(_envKey);
+    }
+    for (final k in AiProviderConfig.geminiApiKeys) {
+      if (!list.contains(k)) list.add(k);
     }
     if (list.isEmpty) {
       final def = _defaultKey;

@@ -95,12 +95,6 @@ class GeminiVisionService {
             debugPrint(
               '[GeminiVisionService] Quota/Server busy on $model (HTTP ${response.statusCode}). Attempting cascade fallback.',
             );
-            if (response.statusCode == 429 && keyAttempt < maxKeyAttempts - 1) {
-              final rotated = GeminiConfig.rotateKey();
-              if (rotated) {
-                break; // Restart model cascade with new rotated key
-              }
-            }
             continue;
           } else {
             debugPrint('[GeminiVisionService] Gemini API error ($model): HTTP ${response.statusCode} - ${response.body}');
@@ -109,6 +103,7 @@ class GeminiVisionService {
           debugPrint('[GeminiVisionService] Model $model query notice: $e');
         }
       }
+      GeminiConfig.rotateKey();
     }
 
     return null;

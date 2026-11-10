@@ -254,5 +254,51 @@ Ingredients: Tepary Beans Flour, Edible Vegetable Oil, Salt, Red Chilli Powder.
       expect(result!['source'], 'on_device_vision');
       expect(result['product_name'], contains('Bhujia'));
     });
+
+    test('AiProviderConfig correctly unmasks 11 keys (5 Gemini, 3 Groq, 3 OpenRouter) and rotates', () {
+      // Clear test overrides so default pool is tested
+      AiProviderConfig.setTestGroqKeys([]);
+      AiProviderConfig.setTestOpenRouterKeys([]);
+
+      // 1. Gemini: 5 keys
+      final geminiKeys = AiProviderConfig.geminiApiKeys;
+      expect(geminiKeys.length, greaterThanOrEqualTo(5));
+      expect(geminiKeys[0], startsWith('AQ.Ab8RN6Jftl'));
+      expect(geminiKeys[1], startsWith('AQ.Ab8RN6JhPa'));
+      expect(geminiKeys[2], startsWith('AQ.Ab8RN6IREU'));
+      expect(geminiKeys[3], startsWith('AQ.Ab8RN6LoMr'));
+      expect(geminiKeys[4], startsWith('AQ.Ab8RN6KkUR'));
+
+      // 2. Groq: 3 keys
+      final groqKeys = AiProviderConfig.groqApiKeys;
+      expect(groqKeys.length, 3);
+      expect(groqKeys[0], startsWith('gsk_YDoGu9'));
+      expect(groqKeys[1], startsWith('gsk_UxArVi'));
+      expect(groqKeys[2], startsWith('gsk_Pnz9am'));
+
+      // 3. OpenRouter: 3 keys
+      final orKeys = AiProviderConfig.openRouterApiKeys;
+      expect(orKeys.length, 3);
+      expect(orKeys[0], startsWith('sk-or-v1-1b0ce'));
+      expect(orKeys[1], startsWith('sk-or-v1-671fd'));
+      expect(orKeys[2], startsWith('sk-or-v1-a911c'));
+
+      // 4. Test Key Masking for Display
+      expect(AiProviderConfig.maskKeyForDisplay(groqKeys[0]), 'gsk_YDoG••••Gknn');
+      expect(AiProviderConfig.maskKeyForDisplay(orKeys[0]), 'sk-or-v1••••2668');
+
+      // 5. Test Key Rotation
+      final firstGemini = AiProviderConfig.activeGeminiApiKey;
+      AiProviderConfig.rotateGeminiKey();
+      expect(AiProviderConfig.activeGeminiApiKey, isNot(equals(firstGemini)));
+
+      final firstGroq = AiProviderConfig.activeGroqApiKey;
+      AiProviderConfig.rotateGroqKey();
+      expect(AiProviderConfig.activeGroqApiKey, isNot(equals(firstGroq)));
+
+      final firstOr = AiProviderConfig.activeOpenRouterApiKey;
+      AiProviderConfig.rotateOpenRouterKey();
+      expect(AiProviderConfig.activeOpenRouterApiKey, isNot(equals(firstOr)));
+    });
   });
 }
