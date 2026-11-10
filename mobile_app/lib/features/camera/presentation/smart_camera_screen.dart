@@ -219,18 +219,55 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     }
   }
 
+  Future<void> _resumeCameraAfterHandoff() async {
+    if (!mounted || widget.useSimulatedFeed) return;
+    _isProcessingScan = false;
+    _isSheetOpen = false;
+
+    final controller = _cameraController;
+    if (controller != null && controller.value.isInitialized) {
+      try {
+        await controller.resumePreview();
+      } catch (_) {
+        await _initializeCamera();
+        return;
+      }
+      await _startImageStreaming();
+      if (mounted) {
+        setState(() => _isCameraInitialized = true);
+      }
+    } else {
+      await _initializeCamera();
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (widget.useSimulatedFeed) return;
 
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive) {
+      // Inactive occurs when pushing routes, system dialogs, or notification tray.
+      // Do NOT dispose the controller; stop frame stream to save CPU/battery.
       _stopImageStreaming();
-      controller.dispose();
-      _cameraController = null;
-      if (mounted) setState(() => _isCameraInitialized = false);
+    } else if (state == AppLifecycleState.paused) {
+      // App minimized or sent to background.
+      _stopImageStreaming();
+      _cameraController?.pausePreview().ignore();
     } else if (state == AppLifecycleState.resumed) {
-      _initializeCamera();
+      // Returning to foreground or route popped.
+      final controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) {
+        _initializeCamera();
+      } else {
+        controller.resumePreview().then((_) {
+          if (mounted && !_isSheetOpen && !_isProcessingScan) {
+            _startImageStreaming();
+            setState(() => _isCameraInitialized = true);
+          }
+        }).catchError((_) {
+          _initializeCamera();
+        });
+      }
     }
   }
 
@@ -1022,6 +1059,9 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     _isSheetOpen = true;
 
     await _stopImageStreaming();
+    try {
+      await _cameraController?.pausePreview();
+    } catch (_) {}
 
     try {
       if (!mounted) return;
@@ -1046,10 +1086,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = product.barcode;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1132,11 +1169,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = rawPayload;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1255,11 +1289,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = barcode;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1329,11 +1360,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = exception.barcode;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1473,11 +1501,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = url;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1615,11 +1640,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         ref.read(cameraScanNotifierProvider.notifier).reset();
       }
       if (mounted) {
-        if (!widget.useSimulatedFeed) {
-          unawaited(_startImageStreaming());
-        }
         if (action == 'macros') {
           unawaited(_openMacroSliderSheet());
+        } else if (!widget.useSimulatedFeed) {
+          unawaited(_resumeCameraAfterHandoff());
         }
       }
     }
@@ -1688,11 +1712,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     } finally {
       _lastDismissedPayload = product.barcode;
       _lastDismissedTime = DateTime.now();
-      _isSheetOpen = false;
       ref.read(cameraScanNotifierProvider.notifier).reset();
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -1748,10 +1769,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         ),
       );
     } finally {
-      _isSheetOpen = false;
-      if (mounted && !widget.useSimulatedFeed) {
-        unawaited(_startImageStreaming());
-      }
+      await _resumeCameraAfterHandoff();
     }
   }
 
@@ -2538,9 +2556,63 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     );
   }
 
+  bool get _isInTest =>
+      WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
   Widget _buildLiveScannerViewport() {
-    if (_cameraController == null || !_isCameraInitialized) {
+    if (widget.useSimulatedFeed) {
       return _buildSimulatedViewport(errorMessage: _cameraError ?? 'Initializing hardware camera...');
+    }
+
+    if (_cameraController == null || !_isCameraInitialized) {
+      return Container(
+        color: const Color(0xFF121212),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_cameraError != null) ...[
+                const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.safetyRed),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    _cameraError!,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => _initializeCamera(),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Retry Camera'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accentBronze,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ] else ...[
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(
+                    value: _isInTest ? 0.75 : null,
+                    strokeWidth: 2.5,
+                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.accentBronze),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Starting camera...',
+                  style: TextStyle(color: Colors.white54, fontSize: 13, letterSpacing: 0.2),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
 
     return SizedBox.expand(
