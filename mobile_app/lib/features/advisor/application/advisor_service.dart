@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/config/gemini_config.dart';
 import '../../../core/network/client_rate_limiter.dart';
+import '../../../services/multi_provider_ai_router.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/advisor_chat_model.dart';
 import '../domain/advisor_rules.dart';
@@ -24,13 +25,21 @@ class AdvisorService {
   final http.Client _client;
   final String? customBaseUrl;
   final ClientRateLimiter rateLimiter;
+  final MultiProviderAiRouter? _injectedAiRouter;
 
   AdvisorService({
     http.Client? client,
     this.customBaseUrl,
     ClientRateLimiter? rateLimiter,
+    MultiProviderAiRouter? aiRouter,
   })  : _client = client ?? http.Client(),
-        rateLimiter = rateLimiter ?? ClientRateLimiter();
+        rateLimiter = rateLimiter ?? ClientRateLimiter(),
+        _injectedAiRouter = aiRouter;
+
+  late final MultiProviderAiRouter _aiRouter = _injectedAiRouter ??
+      MultiProviderAiRouter(
+        httpClient: _client,
+      );
 
   /// Primary query method:
   /// 1. Enforces early domain boundary & identity guardrails.
@@ -91,25 +100,135 @@ class AdvisorService {
       }
     }
 
-    // 2. Direct Google Gemini Live API Call
-    if (!isRateLimited && GeminiConfig.isConfigured) {
+    // 2. Direct Google Gemini Live API Call (or Injected AI Router)
+    if (!isRateLimited) {
+      if (_injectedAiRouter != null) {
+        try {
+          final activeWeight = userProfile?.weightKg ?? 65.0;
+          final isChild = userProfile?.isChild ?? false;
+          final hasDiabetes = userProfile?.isDiabetic ?? false;
+          final hasHypertension = userProfile?.isHypertensive ?? false;
+          final productName = productContext?.productName ?? 'General Packaged Food';
+          final additives = productContext?.additives ?? [];
+          final nutrition = <String, dynamic>{
+            if (productContext?.nutrition != null) ...productContext!.nutrition,
+            if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
+          };
+
+          final systemPrompt = AdvisorRules.buildSystemPrompt(
+            weightKg: activeWeight,
+            isChild: isChild,
+            isDiabetic: hasDiabetes,
+            isHypertensive: hasHypertension,
+            productName: productName,
+            brandName: productContext?.brandName,
+            category: productContext?.category,
+            healthScore: productContext?.healthScore,
+            novaGrade: productContext?.novaGrade,
+            nutrition: nutrition,
+            additives: additives,
+            ingredients: productContext?.ingredients,
+            healthIntelligence: productContext?.healthIntelligence,
+          );
+
+          final reply = await _injectedAiRouter.askAdvisor(
+            systemPrompt: systemPrompt,
+            userMessage: userMessage,
+          );
+
+          if (reply != null && reply.trim().isNotEmpty) {
+            final citations = _extractCitations(reply, additives);
+            final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
+            final safePortion = isPortionQuestion
+                ? _calculateSafePortion(nutrition, isChild, activeWeight)
+                : null;
+
+            return ChatMessage.advisor(
+              text: reply.trim(),
+              source: 'cloud_ai_pool',
+              citations: citations,
+              safePortionGrams: safePortion?.grams,
+              frequencySchedule: safePortion?.schedule,
+            );
+          }
+        } catch (e) {
+          debugPrint('[AdvisorService] Injected AI Router notice: $e');
+        }
+      }
+
+      // Direct Google Gemini Live API Call
+      if (GeminiConfig.isConfigured) {
+        try {
+          final liveAiRes = await _askGeminiDirect(
+            userMessage: userMessage,
+            productContext: productContext,
+            userProfile: userProfile,
+          );
+          return liveAiRes;
+        } on RateLimitException catch (e) {
+          isRateLimited = true;
+          retryAfter = e.retryAfterSeconds;
+          debugPrint('[AdvisorService] Gemini direct API rate limited ($e).');
+        } catch (e) {
+          debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to router.');
+        }
+      }
+
+      // Fall back to MultiProviderAiRouter (Groq Llama 3.3 70B, Gemini lite, OpenRouter)
       try {
-        final liveAiRes = await _askGeminiDirect(
-          userMessage: userMessage,
-          productContext: productContext,
-          userProfile: userProfile,
+        final activeWeight = userProfile?.weightKg ?? 65.0;
+        final isChild = userProfile?.isChild ?? false;
+        final hasDiabetes = userProfile?.isDiabetic ?? false;
+        final hasHypertension = userProfile?.isHypertensive ?? false;
+        final productName = productContext?.productName ?? 'General Packaged Food';
+        final additives = productContext?.additives ?? [];
+        final nutrition = <String, dynamic>{
+          if (productContext?.nutrition != null) ...productContext!.nutrition,
+          if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
+        };
+
+        final systemPrompt = AdvisorRules.buildSystemPrompt(
+          weightKg: activeWeight,
+          isChild: isChild,
+          isDiabetic: hasDiabetes,
+          isHypertensive: hasHypertension,
+          productName: productName,
+          brandName: productContext?.brandName,
+          category: productContext?.category,
+          healthScore: productContext?.healthScore,
+          novaGrade: productContext?.novaGrade,
+          nutrition: nutrition,
+          additives: additives,
+          ingredients: productContext?.ingredients,
+          healthIntelligence: productContext?.healthIntelligence,
         );
-        return liveAiRes;
-      } on RateLimitException catch (e) {
-        isRateLimited = true;
-        retryAfter = e.retryAfterSeconds;
-        debugPrint('[AdvisorService] Gemini direct API rate limited ($e).');
+
+        final reply = await _aiRouter.askAdvisor(
+          systemPrompt: systemPrompt,
+          userMessage: userMessage,
+        );
+
+        if (reply != null && reply.trim().isNotEmpty) {
+          final citations = _extractCitations(reply, additives);
+          final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
+          final safePortion = isPortionQuestion
+              ? _calculateSafePortion(nutrition, isChild, activeWeight)
+              : null;
+
+          return ChatMessage.advisor(
+            text: reply.trim(),
+            source: 'cloud_ai_pool',
+            citations: citations,
+            safePortionGrams: safePortion?.grams,
+            frequencySchedule: safePortion?.schedule,
+          );
+        }
       } catch (e) {
-        debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to offline engine.');
+        debugPrint('[AdvisorService] MultiProviderAiRouter fallback notice: $e');
       }
     }
 
-    // 3. Offline Factual Regulatory Engine (Airplane mode, rate limit, or network fallback)
+    // 4. Offline Factual Regulatory Engine (Airplane mode, rate limit, or network fallback)
     final fallback = _buildOfflineFactualFallback(userMessage, productContext, userProfile);
     if (isRateLimited) {
       return ChatMessage.advisor(

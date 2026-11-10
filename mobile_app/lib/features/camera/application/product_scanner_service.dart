@@ -10,6 +10,7 @@ import '../../../core/vision/food_web_extractor.dart';
 import '../../../core/vision/gemini_vision_service.dart';
 import '../../../core/vision/on_device_vision_service.dart';
 import '../../../core/intelligence/web_health_intelligence_enricher.dart';
+import '../../../services/multi_provider_ai_router.dart';
 import '../../health_intelligence/domain/health_intelligence_model.dart';
 import '../../../services/product_health_scorer.dart';
 import '../../profile/domain/user_profile_model.dart';
@@ -255,6 +256,7 @@ class ProductScannerService {
   final OfflineBarcodeRepository? _injectedOfflineRepo;
   final BackendEndpointResolver? _injectedBackendResolver;
   final OnDeviceVisionService? _injectedOnDeviceVisionService;
+  final MultiProviderAiRouter? _injectedAiRouter;
 
   ProductScannerService({
     SupabaseClient? client,
@@ -263,12 +265,14 @@ class ProductScannerService {
     OfflineBarcodeRepository? offlineBarcodeRepository,
     BackendEndpointResolver? backendResolver,
     OnDeviceVisionService? onDeviceVisionService,
+    MultiProviderAiRouter? aiRouter,
   })  : _injectedClient = client,
         _injectedHttpClient = httpClient,
         _injectedVisionService = visionService,
         _injectedOfflineRepo = offlineBarcodeRepository,
         _injectedBackendResolver = backendResolver,
-        _injectedOnDeviceVisionService = onDeviceVisionService;
+        _injectedOnDeviceVisionService = onDeviceVisionService,
+        _injectedAiRouter = aiRouter;
 
   SupabaseClient? get _client {
     if (_injectedClient != null) return _injectedClient;
@@ -286,6 +290,12 @@ class ProductScannerService {
       _injectedBackendResolver ?? BackendEndpointResolver.instance;
   late final OnDeviceVisionService _onDeviceVisionService =
       _injectedOnDeviceVisionService ?? OnDeviceVisionService();
+  late final MultiProviderAiRouter _aiRouter = _injectedAiRouter ??
+      MultiProviderAiRouter(
+        httpClient: _httpClient,
+        backendResolver: _backendResolver,
+        onDeviceVisionService: _onDeviceVisionService,
+      );
   late final FoodWebExtractor _webExtractor = FoodWebExtractor(httpClient: _httpClient);
   late final GeminiVisionService _visionService =
       _injectedVisionService ?? GeminiVisionService(httpClient: _httpClient);
@@ -873,47 +883,20 @@ class ProductScannerService {
       } catch (_) {}
     }
 
-    // 2. Direct Gemini Multimodal Vision AI analysis (with Stage 1 cascade & key rotation)
+    // 2. Multi-Provider Cloud AI Pool (Gemini -> Groq -> OpenRouter -> Edge OCR)
     try {
-      productData = await _visionService.analyzeProductPhoto(
+      productData = await _aiRouter.analyzePackagingPhoto(
         frames: frames,
         hintBarcode: detectedBarcode,
       );
       if (productData != null) {
-        resolvedSource = 'gemini_vision';
+        resolvedSource = productData['source']?.toString() ?? 'ai_router';
       }
     } catch (e) {
-      debugPrint('[ProductScannerService] Direct Gemini vision analysis notice: $e');
+      debugPrint('[ProductScannerService] Multi-provider AI router vision notice: $e');
     }
 
-    // 3. Try Backend Cloud Vision proxy /api/v1/scan/vision via Dynamic Endpoint Resolver
-    if (productData == null && frames.isNotEmpty) {
-      try {
-        final backendBaseUrl = await _backendResolver.resolveActiveBackendUrl();
-        if (backendBaseUrl != null && backendBaseUrl.isNotEmpty) {
-          final uri = Uri.parse('$backendBaseUrl/api/v1/scan/vision');
-          final request = http.MultipartRequest('POST', uri);
-          for (int i = 0; i < frames.length; i++) {
-            request.files.add(
-              http.MultipartFile.fromBytes('images', frames[i], filename: 'frame_$i.jpg'),
-            );
-          }
-          final streamedResponse = await _httpClient.send(request).timeout(const Duration(seconds: 4));
-          if (streamedResponse.statusCode == 200) {
-            final respStr = await streamedResponse.stream.bytesToString();
-            final decoded = jsonDecode(respStr);
-            if (decoded is Map<String, dynamic>) {
-              productData = decoded;
-              resolvedSource = 'backend_proxy';
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('[ProductScannerService] Cloud vision proxy notice: $e');
-      }
-    }
-
-    // 4. Guaranteed On-Device ML Kit OCR + Local Nutrition/Additive Regex Fallback
+    // 3. Guaranteed On-Device ML Kit OCR fallback if router returned null
     if (productData == null && frames.isNotEmpty) {
       try {
         productData = await _onDeviceVisionService.analyzeFrames(frames);
@@ -1047,7 +1030,7 @@ class ProductScannerService {
           if (detectedWrapperText != null) 'Wrapper details: $detectedWrapperText',
         ].join('. ');
 
-        final visionData = await _visionService.analyzeProductPhoto(
+        final visionData = await _aiRouter.analyzePackagingPhoto(
           frames: [frameImage],
           hintBarcode: hintContext,
         );
@@ -1057,7 +1040,8 @@ class ProductScannerService {
             visionData['brand_name'] = gs1Brand;
           }
           _writeThroughCache(visionData);
-          return _evaluateProduct(visionData, userProfile, barcode, analysisSource: 'gemini_vision');
+          final src = visionData['source']?.toString() ?? 'ai_router';
+          return _evaluateProduct(visionData, userProfile, barcode, analysisSource: src);
         }
       } catch (e) {
         debugPrint('[ProductScannerService] Gemini vision search grounding notice: $e');

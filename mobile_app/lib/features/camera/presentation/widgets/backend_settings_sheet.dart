@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/config/ai_provider_config.dart';
 import '../../../../core/network/backend_endpoint_resolver.dart';
 import '../../../../core/theme/app_colors.dart';
 
@@ -203,6 +204,10 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
 
             // Active Route Banner Card
             _buildActiveRouteCard(),
+            const SizedBox(height: 14),
+
+            // Multi-Provider AI Pool Status Card
+            _buildAiPoolStatusCard(),
             const SizedBox(height: 18),
 
             // Custom Backend URL Input
@@ -448,6 +453,169 @@ class _BackendSettingsSheetState extends State<BackendSettingsSheet> {
         width: 1.0,
       ),
       onPressed: () => _applyPreset(url),
+    );
+  }
+
+  Widget _buildAiPoolStatusCard() {
+    final geminiReady = AiProviderConfig.isGeminiConfigured;
+    final groqReady = AiProviderConfig.isGroqConfigured;
+    final openRouterReady = AiProviderConfig.isOpenRouterConfigured;
+    final activeCooldowns = AiProviderConfig.activeCooldownCount;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.cardBorder, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.hub_rounded, size: 18, color: AppColors.accentBronze),
+                  SizedBox(width: 8),
+                  Text(
+                    'Multi-Provider AI Pool (4-Tier)',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                ],
+              ),
+              if (activeCooldowns > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.safetyAmber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$activeCooldowns on cooldown',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.safetyAmber,
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.safetyGreen.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'All Ready',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.safetyGreen,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _buildProviderTierRow(
+            tier: 'Tier 1',
+            name: 'Google Gemini',
+            subtitle: 'gemini-2.5-flash (10 RPM) / 2.0-flash-lite',
+            isActive: geminiReady,
+            chipColor: AppColors.safetyGreen,
+          ),
+          const Divider(height: 12, thickness: 0.5, color: AppColors.cardBorder),
+          _buildProviderTierRow(
+            tier: 'Tier 2',
+            name: 'Groq Cloud LPU',
+            subtitle: 'Qwen 3.8 (Vision) / Llama 3.3 70B (Chat)',
+            isActive: groqReady,
+            chipColor: AppColors.safetyGreen,
+          ),
+          const Divider(height: 12, thickness: 0.5, color: AppColors.cardBorder),
+          _buildProviderTierRow(
+            tier: 'Tier 3',
+            name: 'OpenRouter & Proxy',
+            subtitle: 'Spillover Gateway (Free VL models) + FastAPI',
+            isActive: openRouterReady,
+            chipColor: AppColors.accentBronze,
+          ),
+          const Divider(height: 12, thickness: 0.5, color: AppColors.cardBorder),
+          _buildProviderTierRow(
+            tier: 'Tier 4',
+            name: 'On-Device Edge OCR',
+            subtitle: 'ML Kit + Local Regex Engine (Zero Net)',
+            isActive: true,
+            chipColor: AppColors.safetyGreen,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProviderTierRow({
+    required String tier,
+    required String name,
+    required String subtitle,
+    required bool isActive,
+    required Color chipColor,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppColors.stepPillBg,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            tier,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textMutedMocha,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textObsidian,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textMutedMocha,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isActive ? chipColor : Colors.grey.shade400,
+          ),
+        ),
+      ],
     );
   }
 }

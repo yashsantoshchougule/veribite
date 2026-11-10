@@ -1,17 +1,36 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'on_device_nutrition_parser.dart';
 
 /// On-Device Computer Vision Service using Google ML Kit Text Recognition
 /// Runs entirely on the device CPU/NPU without requiring network access, Gemini API keys,
-/// or external server proxies.
+/// or external server proxies. Hardened with defensive PlatformException catches for
+/// devices lacking Google Play Services.
 class OnDeviceVisionService {
   final Future<String> Function(List<int> frameBytes)? _injectedOcrEngine;
+  static bool _warmedUp = false;
 
   OnDeviceVisionService({
     Future<String> Function(List<int> frameBytes)? injectedOcrEngine,
   }) : _injectedOcrEngine = injectedOcrEngine;
+
+  /// Silently warms up the ML Kit text recognizer in the background on startup.
+  /// Catches and swallows PlatformException if Google Play Services are missing.
+  static Future<void> silentWarmUp() async {
+    if (_warmedUp) return;
+    _warmedUp = true;
+    try {
+      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+      await recognizer.close();
+      debugPrint('[OnDeviceVisionService] ML Kit OCR engine pre-warmed successfully.');
+    } on PlatformException catch (e) {
+      debugPrint('[OnDeviceVisionService] Google Play Services ML Kit unavailable: ${e.message}');
+    } catch (e) {
+      debugPrint('[OnDeviceVisionService] Silent warmup notice: $e');
+    }
+  }
 
   /// Analyzes one or more captured package frames locally using ML Kit and regex parsing.
   /// Returns structured product map with `source: 'on_device_vision'`, or null if no text found.
@@ -45,6 +64,9 @@ class OnDeviceVisionService {
 
       debugPrint('[OnDeviceVisionService] Recognized ${recognizedText.length} chars locally.');
       return OnDeviceNutritionParser.parseFromText(recognizedText);
+    } on PlatformException catch (e) {
+      debugPrint('[OnDeviceVisionService] ML Kit PlatformException (Missing Play Services): ${e.message}');
+      return null;
     } catch (e) {
       debugPrint('[OnDeviceVisionService] Local OCR analysis notice: $e');
       return null;
@@ -65,6 +87,12 @@ class OnDeviceVisionService {
         final recognized = await textRecognizer.processImage(inputImage);
         final spatial = reconstructSpatialText(recognized);
         return '$spatial\n\n=== RAW OCR ===\n${recognized.text}';
+      } on PlatformException catch (e) {
+        debugPrint('[OnDeviceVisionService] ML Kit execution failed (Google Play Services missing): ${e.message}');
+        return '';
+      } catch (e) {
+        debugPrint('[OnDeviceVisionService] OCR processing error: $e');
+        return '';
       } finally {
         await textRecognizer.close();
       }
