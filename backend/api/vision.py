@@ -1,8 +1,14 @@
 """Tier 3 Multi-Angle Cloud Gemini 2.5 Flash Vision API endpoint."""
 
+import base64
 import json
+import os
 from typing import Any, Dict, List, Optional
+import requests
+from dotenv import load_dotenv
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
+load_dotenv("backend/.env")
 
 from backend.core.vision_schema import (
     VisionExtractionSchema,
@@ -17,10 +23,70 @@ router = APIRouter(prefix="/api/v1", tags=["Vision"])
 
 
 def extract_vision_with_gemini(image_bytes_list: List[bytes]) -> VisionExtractionSchema:
-    """Invoke Gemini 2.5 Flash with structured Pydantic schema."""
-    # Production hook for google.genai client; mockable in tests
-    # ponytail: minimal fallback schema if key unavailable
-    raise NotImplementedError("Gemini API key required for live cloud vision.")
+    """Invoke Gemini Vision with structured Pydantic schema."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        pool = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
+        if pool:
+            api_key = pool[0]
+
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key required for live cloud vision.")
+
+    prompt = """
+    Extract structured nutrition facts, ingredients, and product details from this food package photo.
+    Return strictly JSON matching this schema:
+    {
+      "product_name": "Product Name",
+      "brand_name": "Brand",
+      "food_category": "Snacks",
+      "net_weight_g": 100.0,
+      "serving_size_g": 20.0,
+      "piece_weight_g": 10.0,
+      "front_pack_claims": [],
+      "raw_ingredients_ordered": ["Ingredient 1", "Ingredient 2"],
+      "declared_ins_codes": ["110", "211"],
+      "nutrition_per_100g": {
+        "energy_kj": 1500.0,
+        "total_sugars_g": 20.0,
+        "sat_fat_g": 5.0,
+        "trans_fat_g": 0.0,
+        "sodium_mg": 300.0,
+        "fiber_g": 2.0,
+        "protein_g": 4.0
+      }
+    }
+    """
+    parts = [{"text": prompt}]
+    for b in image_bytes_list:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(b).decode("utf-8")
+            }
+        })
+
+    models_to_try = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-latest"]
+    for model in models_to_try:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "responseMimeType": "application/json"
+                }
+            }
+            res = requests.post(url, json=payload, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text)
+                return VisionExtractionSchema(**parsed)
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=502, detail="Gemini Vision service temporarily unavailable.")
 
 
 @router.post("/scan/vision")

@@ -1,9 +1,14 @@
 """Personal AI Advisor Chat API endpoint with Citation RAG and deterministic rule fallback."""
 
+import json
 import os
 from typing import Any, Dict, List, Optional
+import requests
+from dotenv import load_dotenv
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+load_dotenv("backend/.env")
 
 from backend.core.dosage_engine import calculate_prescribed_dosage
 from backend.services.rag_service import (
@@ -25,16 +30,41 @@ def call_gemini_advisor(prompt: str, user_message: str) -> str:
     """Call Gemini API with strict system instructions and citation groundings."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
+        pool = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
+        if pool:
+            api_key = pool[0]
+    if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
 
-    from google import genai
-    client = genai.Client(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
-    response = client.models.generate_content(
-        model=model_name,
-        contents=f"{prompt}\n\nUser Question: {user_message}",
-    )
-    return response.text
+    models_to_try = [
+        os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+        "gemini-3.5-flash-lite",
+        "gemini-flash-latest",
+    ]
+
+    for model in models_to_try:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": f"{prompt}\n\nUser Question: {user_message}"}
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.2,
+                }
+            }
+            res = requests.post(url, json=payload, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception:
+            continue
+
+    raise RuntimeError("All Gemini Advisor models failed or timed out.")
 
 
 @router.post("/chat")
