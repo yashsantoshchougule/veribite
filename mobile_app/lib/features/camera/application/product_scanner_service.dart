@@ -126,6 +126,29 @@ class ScannedProductResult {
     return caloriesPerServing;
   }
 
+  /// Universal validator ensuring product has verified non-zero nutritional macronutrients.
+  /// Rejects empty or partial stub records (e.g. only NOVA group or ingredients text reported).
+  bool get hasValidMacros {
+    final lowerName = productName.toLowerCase();
+    final lowerCat = category.toLowerCase();
+    final isZeroCalExempt = lowerName.contains('water') ||
+        lowerName.contains('black coffee') ||
+        lowerName.contains('green tea') ||
+        lowerName.contains('soda water') ||
+        lowerCat.contains('water') ||
+        lowerCat.contains('tea');
+
+    if (isZeroCalExempt) return true;
+
+    final energy = effectiveCaloriesPer100g;
+    final hasMacro = carbsGPer100g > 0.0 ||
+        totalFatGPer100g > 0.0 ||
+        proteinGPer100g > 0.0 ||
+        sugarGPer100g > 0.0;
+
+    return energy > 0.0 && hasMacro;
+  }
+
   const ScannedProductResult({
     required this.barcode,
     required this.productName,
@@ -247,9 +270,130 @@ class ScannedProductResult {
   }
 }
 
+/// Clean type alias for ScannedProductResult matching domain naming
+typedef Product = ScannedProductResult;
+
 /// Service that queries Supabase Cloud, Open Food Facts live API, or built-in verified product registries,
 /// and computes personalized safe consumption ceilings and toxicology guardrails.
 class ProductScannerService {
+  /// Universal validator for raw nutriments maps from Open Food Facts, caches, or API responses.
+  /// Returns true only if valid energy and at least one core macro are present.
+  static bool hasValidNutrimentsMap(
+    Map<String, dynamic>? nutriments, {
+    String? productName,
+    String? category,
+  }) {
+    if (nutriments == null || nutriments.isEmpty) return false;
+
+    final name = (productName ?? '').toLowerCase();
+    final cat = (category ?? '').toLowerCase();
+    final isZeroCalExempt = name.contains('water') ||
+        name.contains('black coffee') ||
+        name.contains('green tea') ||
+        name.contains('soda water') ||
+        cat.contains('water') ||
+        cat.contains('tea');
+    if (isZeroCalExempt) return true;
+
+    final energy = (nutriments['energy-kcal_100g'] as num?)?.toDouble() ??
+        (nutriments['energy-kcal'] as num?)?.toDouble() ??
+        (nutriments['energy_kcal'] as num?)?.toDouble() ??
+        (((nutriments['energy-kj_100g'] as num?)?.toDouble() ??
+                (nutriments['energy_kj'] as num?)?.toDouble() ??
+                0.0) /
+            4.184);
+
+    final carbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble() ??
+        (nutriments['carbohydrates'] as num?)?.toDouble() ??
+        (nutriments['carbs_100g'] as num?)?.toDouble() ??
+        (nutriments['carbs_g'] as num?)?.toDouble() ??
+        (nutriments['carbohydrates_g_per_100g'] as num?)?.toDouble() ??
+        0.0;
+
+    final fat = (nutriments['fat_100g'] as num?)?.toDouble() ??
+        (nutriments['total-fat_100g'] as num?)?.toDouble() ??
+        (nutriments['fat'] as num?)?.toDouble() ??
+        (nutriments['total_fat_g'] as num?)?.toDouble() ??
+        (nutriments['total_fat_g_per_100g'] as num?)?.toDouble() ??
+        0.0;
+
+    final protein = (nutriments['proteins_100g'] as num?)?.toDouble() ??
+        (nutriments['protein_100g'] as num?)?.toDouble() ??
+        (nutriments['proteins'] as num?)?.toDouble() ??
+        (nutriments['protein'] as num?)?.toDouble() ??
+        (nutriments['protein_g'] as num?)?.toDouble() ??
+        0.0;
+
+    final sugars = (nutriments['sugars_100g'] as num?)?.toDouble() ??
+        (nutriments['sugars'] as num?)?.toDouble() ??
+        (nutriments['sugar_g_per_100g'] as num?)?.toDouble() ??
+        0.0;
+
+    return energy > 0.0 && (carbs > 0.0 || fat > 0.0 || protein > 0.0 || sugars > 0.0);
+  }
+
+  /// Dynamically cleans and formats a domain or URL host into a clean Brand Name.
+  /// e.g. "www.chingssecret.com" -> "Chings Secret", "urbanplatter.in" -> "Urban Platter"
+  static String cleanDomainToBrand(String rawHostOrUrl) {
+    if (rawHostOrUrl.trim().isEmpty) return 'Brand Not Listed';
+
+    var host = rawHostOrUrl.trim();
+    if (host.startsWith('http://') || host.startsWith('https://')) {
+      final uri = Uri.tryParse(host);
+      if (uri != null && uri.host.isNotEmpty) {
+        host = uri.host;
+      }
+    }
+
+    // Strip port
+    if (host.contains(':')) {
+      host = host.split(':').first;
+    }
+
+    // Strip subdomains
+    host = host.toLowerCase();
+    if (host.startsWith('www.')) host = host.substring(4);
+    if (host.startsWith('m.')) host = host.substring(2);
+
+    // Strip common TLDs
+    final tldRegex = RegExp(r'\.(?:co\.in|com\.au|org\.in|com|in|org|net|co|io|app|store|shop|me)$');
+    host = host.replaceAll(tldRegex, '');
+
+    // If subdomains remain (e.g. "subdomain.maggi"), take the relevant main domain part
+    if (host.contains('.')) {
+      final parts = host.split('.');
+      host = parts.last;
+    }
+
+    if (host.isEmpty) return 'Brand Not Listed';
+
+    // Separate words: split camelCase, underscores, dashes
+    var words = host.split(RegExp(r'[-_]')).where((w) => w.isNotEmpty).toList();
+
+    // If single word, check for common compound brand words
+    if (words.length == 1) {
+      final single = words.first;
+      const compoundPatterns = [
+        'secret', 'spices', 'foods', 'organics', 'organic', 'kitchen',
+        'chutney', 'sauces', 'mills', 'dairy', 'farms', 'farm', 'platter', 'treats', 'delight'
+      ];
+      for (final suffix in compoundPatterns) {
+        if (single.endsWith(suffix) && single.length > suffix.length) {
+          final prefix = single.substring(0, single.length - suffix.length);
+          words = [prefix, suffix];
+          break;
+        }
+      }
+    }
+
+    // Title case each word
+    final capitalized = words.map((w) {
+      if (w.isEmpty) return '';
+      return w[0].toUpperCase() + (w.length > 1 ? w.substring(1) : '');
+    }).join(' ').trim();
+
+    return capitalized.isNotEmpty ? capitalized : 'Brand Not Listed';
+  }
   final SupabaseClient? _injectedClient;
   final http.Client? _injectedHttpClient;
   final GeminiVisionService? _injectedVisionService;
@@ -441,13 +585,21 @@ class ProductScannerService {
       onStatusUpdate?.call('Searching product catalog for $cleanedQuery...');
       final offMatch = await queryOpenFoodFactsIndia(cleanedQuery);
       if (offMatch != null) {
-        final barcodeKey = offMatch['barcode']?.toString() ?? url;
-        _writeThroughCache(offMatch);
-        return _evaluateProduct(offMatch, userProfile, barcodeKey);
+        Map<String, dynamic>? nutMap;
+        try {
+          if (offMatch['nutrition_json'] is String) {
+            nutMap = jsonDecode(offMatch['nutrition_json'] as String);
+          }
+        } catch (_) {}
+        if (hasValidNutrimentsMap(nutMap, productName: offMatch['product_name']?.toString())) {
+          final barcodeKey = offMatch['barcode']?.toString() ?? url;
+          _writeThroughCache(offMatch);
+          return _evaluateProduct(offMatch, userProfile, barcodeKey);
+        }
       }
     }
 
-    // 4. STAGE 4: Context-Enriched Live Frame Handoff to Gemini Vision
+    // 4. STAGE 4: Context-Enriched Live Frame Handoff to MultiProviderAiRouter
     if (frameImage != null && frameImage.length >= 50) {
       onStatusUpdate?.call('Analyzing package photo with brand context...');
       try {
@@ -455,17 +607,41 @@ class ProductScannerService {
             ? 'Detected QR Brand/Product context: $cleanedQuery.'
             : (brand.isNotEmpty ? 'Detected QR Brand: $brand.' : null);
 
-        final visionData = await _visionService.analyzeProductPhoto(
+        var visionData = await _aiRouter.analyzePackagingPhoto(
+          frames: [frameImage],
+          hintBarcode: contextHint,
+        );
+        visionData ??= await _visionService.analyzeProductPhoto(
           frames: [frameImage],
           hintBarcode: contextHint,
         );
         if (visionData != null) {
           final barcodeKey = visionData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
           _writeThroughCache(visionData);
-          return _evaluateProduct(visionData, userProfile, barcodeKey);
+          final src = visionData['source']?.toString() ?? 'ai_router';
+          return _evaluateProduct(visionData, userProfile, barcodeKey, analysisSource: src);
         }
       } catch (e) {
         debugPrint('[ProductScannerService] Vision handoff notice: $e');
+      }
+    }
+
+    // 5. STAGE 5: Web-Grounded AI Product Intelligence Enrichment (when QR was on front/side)
+    if (cleanedQuery.length >= 3) {
+      try {
+        onStatusUpdate?.call('Grounding product intelligence for $cleanedQuery...');
+        final enriched = await _aiRouter.enrichProductNutrition(
+          productName: rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : cleanedQuery,
+          brandName: brand.isNotEmpty ? brand : null,
+        );
+        if (enriched != null) {
+          final barcodeKey = enriched['barcode']?.toString() ?? url;
+          _writeThroughCache(enriched);
+          final src = enriched['source']?.toString() ?? 'ai_grounding';
+          return _evaluateProduct(enriched, userProfile, barcodeKey, analysisSource: src);
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] AI product grounding notice: $e');
       }
     }
 
@@ -557,7 +733,7 @@ class ProductScannerService {
             final author = (data['author_name'] ?? '').toString().trim();
             final title = (data['title'] ?? '').toString().trim();
             return {
-              'brand': author,
+              'brand': author.isNotEmpty ? author : cleanDomainToBrand(trimmed),
               'title': title,
             };
           }
@@ -599,41 +775,25 @@ class ProductScannerService {
             if (tagTitle != null) title = tagTitle.group(1);
           }
 
-          // Brand detection from og:site_name or domain
+          // Brand detection from og:site_name, author meta, or dynamic domain cleaning
           String? brand;
           final ogSite = RegExp(r'''<meta[^>]*property=["']og:site_name["'][^>]*content=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
           if (ogSite != null) brand = ogSite.group(1);
 
           if (brand == null || brand.isEmpty) {
-            final host = uri.host.toLowerCase();
-            if (host.contains('everest')) {
-              brand = 'Everest';
-            } else if (host.contains('catch')) {
-              brand = 'Catch';
-            } else if (host.contains('mdh')) {
-              brand = 'MDH';
-            } else if (host.contains('badshah')) {
-              brand = 'Badshah';
-            } else if (host.contains('suhana')) {
-              brand = 'Suhana';
-            } else if (host.contains('amul')) {
-              brand = 'Amul';
-            } else if (host.contains('mtr')) {
-              brand = 'MTR';
-            } else if (host.contains('haldiram')) {
-              brand = 'Haldiram\'s';
-            } else if (host.contains('britannia')) {
-              brand = 'Britannia';
-            } else if (host.contains('parle')) {
-              brand = 'Parle';
-            } else if (host.contains('nestle')) {
-              brand = 'Nestle';
-            }
+            final authorMatch = RegExp(r'''<meta[^>]*(?:name|property)=["']author["'][^>]*content=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
+            if (authorMatch != null) brand = authorMatch.group(1);
+          }
+
+          if (brand == null || brand.isEmpty) {
+            brand = cleanDomainToBrand(uri.host);
           }
 
           if (title != null && title.isNotEmpty) {
             return {
-              'brand': brand ?? 'Brand Not Listed',
+              'brand': (brand.isNotEmpty && brand != 'Brand Not Listed')
+                  ? brand
+                  : cleanDomainToBrand(uri.host),
               'title': title.trim(),
             };
           }
@@ -652,7 +812,7 @@ class ProductScannerService {
       if (segments.isNotEmpty) {
         final slug = segments.last.replaceAll(RegExp(r'[-_]'), ' ').trim();
         return {
-          'brand': uri.host.split('.').length > 2 ? uri.host.split('.')[1] : uri.host.split('.').first,
+          'brand': cleanDomainToBrand(uri.host),
           'title': slug,
         };
       }
@@ -721,12 +881,10 @@ class ProductScannerService {
           for (final item in products) {
             if (item is Map<String, dynamic>) {
               final nutriments = (item['nutriments'] as Map<String, dynamic>?) ?? {};
-              final hasNutrition = nutriments.containsKey('energy-kcal_100g') ||
-                  nutriments.containsKey('energy-kj_100g') ||
-                  nutriments.containsKey('sugars_100g');
-              final hasIngredients = (item['ingredients_text']?.toString().trim().isNotEmpty ?? false);
+              final pName = item['product_name']?.toString() ?? trimmed;
+              final hasNutrition = hasValidNutrimentsMap(nutriments, productName: pName);
 
-              if (hasNutrition || hasIngredients) {
+              if (hasNutrition) {
                 return _mapOffProductToVeribiteFormat(item, fallbackQuery: trimmed);
               }
             }
@@ -981,6 +1139,27 @@ class ProductScannerService {
       }
     }
 
+    // Ensure productData actually has valid macros; if not and a camera frame is present, proceed to Stage B
+    if (productData != null) {
+      Map<String, dynamic>? nutMap;
+      if (productData['nutrition'] is Map) {
+        nutMap = Map<String, dynamic>.from(productData['nutrition'] as Map);
+      } else if (productData['nutrition_json'] is String) {
+        try {
+          final decoded = jsonDecode(productData['nutrition_json'] as String);
+          if (decoded is Map) nutMap = Map<String, dynamic>.from(decoded);
+        } catch (_) {}
+      }
+      final pName = productData['product_name']?.toString();
+      final pCat = productData['category']?.toString();
+      if (!hasValidNutrimentsMap(nutMap, productName: pName, category: pCat)) {
+        if (frameImage != null && frameImage.length >= 50) {
+          debugPrint('[ProductScannerService] Found data without valid macros for $barcode; analyzing camera frame to complete macros.');
+          productData = null;
+        }
+      }
+    }
+
     // 5. Stage B: Same-Frame Wrapper OCR + GS1 Brand + Internet Grounding (when exact barcode misses DB)
     String? detectedWrapperText;
     Map<String, dynamic>? ocrProductData;
@@ -1177,6 +1356,13 @@ class ProductScannerService {
 
           final servingG = (p['serving_quantity'] as num?)?.toDouble() ?? 30.0;
           final packG = (p['product_quantity'] as num?)?.toDouble() ?? (servingG * 3.0);
+
+          final pName = (p['product_name'] ?? p['product_name_en'] ?? 'Packaged Food Item').toString();
+          final pCat = (p['categories'] ?? 'Packaged Food').toString();
+          if (!hasValidNutrimentsMap(nutriments, productName: pName, category: pCat)) {
+            debugPrint('[ProductScannerService] Open Food Facts record for $barcode lacks valid macros. Rejecting stub.');
+            return null;
+          }
 
           return {
             'barcode': barcode,

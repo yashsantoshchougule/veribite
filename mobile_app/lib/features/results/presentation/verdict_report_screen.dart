@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/product_health_scorer.dart';
+import '../../../../services/multi_provider_ai_router.dart';
 import '../../advisor/application/tts_voice_service.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
@@ -55,7 +56,9 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   late bool _isOrganImpactExpanded;
   bool _isClaimsExpanded = false;
   bool _isRefreshingIntelligence = false;
+  bool _isHealingMacros = false;
   late final ProductScannerService _productScannerService = ProductScannerService();
+  late final MultiProviderAiRouter _aiRouter = MultiProviderAiRouter();
 
   String get _speakingMessageId => 'verdict_${_product.barcode}';
 
@@ -73,6 +76,106 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
       _ttsService = TtsVoiceService();
       _ownsTtsService = true;
     }
+
+    // STEP 4: Self-heal if product reached VerdictReportScreen without valid macros
+    if (!_product.hasValidMacros) {
+      unawaited(_selfHealMissingMacros());
+    }
+  }
+
+  Future<void> _selfHealMissingMacros() async {
+    if (_isHealingMacros) return;
+    setState(() => _isHealingMacros = true);
+
+    try {
+      final enrichedMap = await _aiRouter.enrichProductNutrition(
+        productName: _product.productName,
+        brandName: _product.brandName != 'Brand Not Listed' ? _product.brandName : null,
+        category: _product.category,
+      );
+
+      if (enrichedMap != null && mounted) {
+        final evaluated = _productScannerService.evaluateProduct(
+          enrichedMap,
+          widget.userProfile,
+          _product.barcode,
+          analysisSource: 'ai_grounding',
+        );
+
+        if (evaluated.hasValidMacros) {
+          setState(() {
+            _product = evaluated;
+            _isHealingMacros = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Nutritional profile successfully enriched with verified values!'),
+              backgroundColor: AppColors.safetyGreen,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('[VerdictReportScreen] Self-healing notice: $e');
+    }
+
+    if (mounted) {
+      setState(() => _isHealingMacros = false);
+    }
+  }
+
+  Widget _buildSelfHealingBanner() {
+    if (!_isHealingMacros && _product.hasValidMacros) return const SizedBox.shrink();
+    if (!_isHealingMacros && !_product.hasValidMacros) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF7E0),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.safetyAmber.withValues(alpha: 0.4)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFB06000)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Nutrition table not detected. Tap Edit / Verify to enter macros.',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFFB06000)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F0FE),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF4285F4).withValues(alpha: 0.4)),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1967D2)),
+          ),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Fetching complete nutritional profile from verified sources...',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1967D2)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -386,6 +489,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                           ],
 
                           // 3. Nutrition Section Header with Edit Button & 3-Tab Segmented Portion Control
+                          _buildSelfHealingBanner(),
                           _buildNutritionSectionHeader(),
                           const SizedBox(height: 8),
                           _buildServingMultiplierToggle(),
@@ -1078,10 +1182,48 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   Widget _buildExpandableCompleteNutritionalProfileCard() {
     final hi = _product.healthIntelligence;
     final ext = hi?.extendedNutrients ?? const ExtendedNutrients();
-    final glycemic = ext.glycemicLoadEstimate ??
-        (_product.sugarGPer100g > 20
-            ? 'High Glycemic Load'
-            : (_product.sugarGPer100g > 10 ? 'Medium Glycemic Load' : 'Low Glycemic Load'));
+
+    String glycemic;
+    if (!_product.hasValidMacros) {
+      glycemic = 'Pending Nutrition Data';
+    } else if (ext.glycemicLoadEstimate != null &&
+        ext.glycemicLoadEstimate != 'Pending Nutrition Data' &&
+        ext.glycemicLoadEstimate!.isNotEmpty) {
+      glycemic = ext.glycemicLoadEstimate!;
+    } else {
+      final sugar = _product.sugarGPer100g;
+      final carbs = _product.carbsGPer100g;
+      final fiber = _product.fiberGPer100g;
+      final netCarbs = (carbs - fiber).clamp(0.0, 100.0);
+
+      if (sugar > 20.0 || netCarbs > 50.0) {
+        glycemic = 'High (Rapid Blood Glucose Spike)';
+      } else if (sugar > 10.0 || netCarbs > 25.0) {
+        glycemic = 'Medium (Moderate Glycemic Index)';
+      } else if (netCarbs > 0.0 || sugar > 0.0) {
+        glycemic = 'Low (Stable Glucose Curve)';
+      } else {
+        glycemic = 'Negligible Glycemic Load (Protein/Lipid Base)';
+      }
+    }
+
+    final isPending = glycemic.contains('Pending');
+    final isHigh = glycemic.contains('High');
+    final isMedium = glycemic.contains('Medium');
+    final Color badgeBg = isHigh
+        ? const Color(0xFFFCE8E6)
+        : (isMedium || isPending ? const Color(0xFFFEF7E0) : const Color(0xFFE6F4EA));
+    final Color badgeBorder = (isHigh
+            ? AppColors.safetyRed
+            : (isMedium || isPending ? AppColors.safetyAmber : AppColors.safetyGreen))
+        .withValues(alpha: 0.3);
+    final Color badgeContentColor = isHigh
+        ? AppColors.safetyRed
+        : (isMedium || isPending ? const Color(0xFFB06000) : AppColors.safetyGreen);
+    final IconData badgeIcon = isPending ? Icons.help_outline_rounded : Icons.speed_rounded;
+    final String bannerTitle = isPending
+        ? 'Glycemic Impact: Pending Nutrition Data'
+        : 'Estimated Glycemic Impact: $glycemic';
 
     return Material(
       color: AppColors.cardSurface,
@@ -1129,38 +1271,25 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: glycemic.contains('High')
-                          ? const Color(0xFFFCE8E6)
-                          : (glycemic.contains('Medium') ? const Color(0xFFFEF7E0) : const Color(0xFFE6F4EA)),
+                      color: badgeBg,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: (glycemic.contains('High')
-                                ? AppColors.safetyRed
-                                : (glycemic.contains('Medium') ? AppColors.safetyAmber : AppColors.safetyGreen))
-                            .withValues(alpha: 0.3),
-                      ),
+                      border: Border.all(color: badgeBorder),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          Icons.speed_rounded,
+                          badgeIcon,
                           size: 18,
-                          color: glycemic.contains('High')
-                              ? AppColors.safetyRed
-                              : (glycemic.contains('Medium') ? AppColors.safetyAmber : AppColors.safetyGreen),
+                          color: badgeContentColor,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Estimated Glycemic Impact: $glycemic',
+                            bannerTitle,
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
-                              color: glycemic.contains('High')
-                                  ? AppColors.safetyRed
-                                  : (glycemic.contains('Medium')
-                                      ? const Color(0xFFB06000)
-                                      : AppColors.safetyGreen),
+                              color: badgeContentColor,
                             ),
                           ),
                         ),

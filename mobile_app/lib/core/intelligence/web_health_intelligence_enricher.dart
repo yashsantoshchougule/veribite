@@ -364,6 +364,7 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
     required String brandName,
     String? category,
     List<String>? ingredients,
+    double? calories,
     double? sugarsG,
     double? sodiumMg,
     double? proteinG,
@@ -597,10 +598,22 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
     final totalFat = totalFatG ?? 0.0;
     final carbs = carbsG ?? 0.0;
     final protein = proteinG ?? 0.0;
+    final cal = calories ?? 0.0;
 
-    final glycemicLoad = sugar > 20.0
-        ? 'High (Rapid Blood Glucose Spike)'
-        : (sugar > 10.0 ? 'Medium (Moderate Glycemic Index)' : 'Low (Stable Glucose Curve)');
+    final hasMacros = (cal > 0.0 || carbs > 0.0 || sugar > 0.0 || totalFat > 0.0 || protein > 0.0);
+
+    String glycemicLoad;
+    if (!hasMacros) {
+      glycemicLoad = 'Pending Nutrition Data';
+    } else if (sugar > 20.0 || carbs > 50.0) {
+      glycemicLoad = 'High (Rapid Blood Glucose Spike)';
+    } else if (sugar > 10.0 || carbs > 25.0) {
+      glycemicLoad = 'Medium (Moderate Glycemic Index)';
+    } else if (carbs > 0.0 || sugar > 0.0) {
+      glycemicLoad = 'Low (Stable Glucose Curve)';
+    } else {
+      glycemicLoad = 'Negligible Glycemic Load (Protein/Lipid Base)';
+    }
 
     final advisories = <String>[];
     if (sugar > 20.0) advisories.add('High Sugar Load: Exceeds 80% of adult daily free sugar ceiling per 100g.');

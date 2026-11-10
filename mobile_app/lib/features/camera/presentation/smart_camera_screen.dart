@@ -81,6 +81,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
   String? _pendingQrPayload;
   String? _activeScanningStatus;
   String? _pendingBindingBarcode;
+  String? _pendingProductName;
 
   // Real-time nutrition table detection
   DateTime _lastBarcodeScanTime = DateTime.fromMillisecondsSinceEpoch(0);
@@ -476,6 +477,18 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
     if (_isProcessingScan || _isSheetOpen) return;
     setState(() => _isProcessingScan = true);
 
+    // Opportunistically grab current camera frame snapshot so nutrition tables next to barcodes/QRs are analyzed
+    List<int>? capturedFrame = frameImage;
+    if (capturedFrame == null && !widget.useSimulatedFeed && _cameraController != null && _cameraController!.value.isInitialized) {
+      try {
+        await _stopImageStreaming();
+        final photo = await _cameraController!.takePicture();
+        capturedFrame = await photo.readAsBytes();
+      } catch (e) {
+        debugPrint('[SmartCameraScreen] Notice capturing frame on barcode detection: $e');
+      }
+    }
+
     final notifier = ref.read(cameraScanNotifierProvider.notifier);
     notifier.onBarcodeScanned(rawBarcode);
 
@@ -486,13 +499,38 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       final resolvedProduct = await _productService.resolveScanInput(
         rawScan: rawBarcode,
         userProfile: activeProfile,
-        frameImage: frameImage,
+        frameImage: capturedFrame,
         onStatusUpdate: (msg) {
           if (mounted) setState(() => _activeScanningStatus = msg);
         },
       );
 
       if (!mounted) return;
+
+      // STEP 1 & STEP 3 UNIVERSAL GATE:
+      // If product resolved with zero macros (e.g. offline and no macros found in frame or DB),
+      // DO NOT navigate to VerdictReportScreen with 0 kcal and 0.0 g!
+      // Keep unified in-app camera open with HUD guidance to capture back nutrition table.
+      if (!resolvedProduct.hasValidMacros) {
+        final pName = resolvedProduct.productName.isNotEmpty && resolvedProduct.productName != 'Packaged Food'
+            ? resolvedProduct.productName
+            : (resolvedProduct.brandName.isNotEmpty && resolvedProduct.brandName != 'Brand Not Listed'
+                ? resolvedProduct.brandName
+                : 'Product');
+        debugPrint('[SmartCameraScreen] Product "$pName" lacks valid macros. Activating in-camera back-label HUD.');
+        setState(() {
+          _isProcessingScan = false;
+          _pendingBindingBarcode = resolvedProduct.barcode;
+          _pendingProductName = pName;
+          _activeScanningStatus = 'QR Read ($pName) — Now Point at Back Nutrition Table to Capture Macros';
+          _scanMode = CameraScanMode.nutritionLabel;
+        });
+        if (mounted && !widget.useSimulatedFeed) {
+          unawaited(_startImageStreaming().catchError((_) => null));
+        }
+        return;
+      }
+
       setState(() => _isProcessingScan = false);
       await _showScanResultReport(resolvedProduct, activeProfile);
     } on OfflineVariantMatchException catch (e) {
@@ -666,11 +704,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         targetBarcode = await _detectBarcodeFromFrames([frameBytes]);
       }
 
-      final resolvedProduct = await _productService.resolveMultiAngleScan(
+      var resolvedProduct = await _productService.resolveMultiAngleScan(
         frames: [frameBytes],
         userProfile: activeProfile,
         detectedBarcode: targetBarcode,
       );
+
+      // Merge saved product name if this capture was triggered from an initial QR scan
+      if (_pendingProductName != null && _pendingProductName!.isNotEmpty) {
+        resolvedProduct = resolvedProduct.copyWith(
+          productName: _pendingProductName,
+        );
+        _pendingProductName = null;
+      }
 
       if (!mounted) return;
 
@@ -877,11 +923,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         targetBarcode = await _detectBarcodeFromFrames(frames);
       }
 
-      final resolvedProduct = await _productService.resolveMultiAngleScan(
+      var resolvedProduct = await _productService.resolveMultiAngleScan(
         frames: frames,
         userProfile: activeProfile,
         detectedBarcode: targetBarcode,
       );
+
+      // Merge saved product name if this capture was triggered from an initial QR scan
+      if (_pendingProductName != null && _pendingProductName!.isNotEmpty) {
+        resolvedProduct = resolvedProduct.copyWith(
+          productName: _pendingProductName,
+        );
+        _pendingProductName = null;
+      }
 
       if (!mounted) return;
 
@@ -1554,6 +1608,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       _lastDismissedTime = DateTime.now();
       _isSheetOpen = false;
       if (action == 'multi_angle') {
+        _pendingProductName = exception.productName ?? exception.brandName;
+        _pendingBindingBarcode = exception.url;
         ref.read(cameraScanNotifierProvider.notifier).setMultiAngleMode(true);
       } else {
         ref.read(cameraScanNotifierProvider.notifier).reset();
@@ -2155,8 +2211,8 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                     ),
                   ),
 
-                  // Unknown Barcode Pending Binding Banner
-                  if (_pendingBindingBarcode != null)
+                  // Unknown Barcode or QR Pending Nutrition Table Capture Banner
+                  if (_pendingBindingBarcode != null || _pendingProductName != null)
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2174,14 +2230,19 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
                           const SizedBox(width: 8),
                           Flexible(
                             child: Text(
-                              'Barcode [$_pendingBindingBarcode] Scanned — Now Point at Nutrition Table to Capture',
+                              _pendingProductName != null
+                                  ? 'QR Read ($_pendingProductName) — Now Point at Back Nutrition Table to Capture Macros'
+                                  : 'Barcode [$_pendingBindingBarcode] Scanned — Now Point at Nutrition Table to Capture',
                               style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: 6),
                           GestureDetector(
-                            onTap: () => setState(() => _pendingBindingBarcode = null),
+                            onTap: () => setState(() {
+                              _pendingBindingBarcode = null;
+                              _pendingProductName = null;
+                            }),
                             child: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
                           ),
                         ],

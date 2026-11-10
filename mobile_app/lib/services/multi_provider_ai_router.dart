@@ -458,6 +458,284 @@ class MultiProviderAiRouter {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // 5. Product Nutrition Enrichment (Text Grounding Cascade)
+  // ---------------------------------------------------------------------------
+  Future<Map<String, dynamic>?> enrichProductNutrition({
+    required String productName,
+    String? brandName,
+    String? category,
+  }) async {
+    final query = '${brandName ?? ""} $productName'.trim();
+    if (query.isEmpty) return null;
+
+    final dedupeKey = 'enrich_nut:${query.toLowerCase()}';
+
+    return _deduplicate(dedupeKey, () async {
+      final prompt = '''
+You are an expert food safety, regulatory compliance, and clinical nutrition analyst.
+Retrieve the commercial Per-100g Nutrition Information table and ingredients for this food product:
+Product: "$productName"
+Brand: "${brandName ?? 'Packaged Brand'}"
+Category: "${category ?? 'Packaged Food'}"
+
+Return ONLY a valid JSON object matching this exact schema without markdown formatting:
+{
+  "product_name": "$productName",
+  "brand_name": "${brandName ?? 'Packaged Brand'}",
+  "category": "${category ?? 'Packaged Food'}",
+  "serving_size_g": 30.0,
+  "pack_weight_g": 100.0,
+  "nutrition": {
+    "energy_kcal": <energy in kcal per 100g as number>,
+    "energy_kj": <energy in kJ per 100g as number>,
+    "sugar_g_per_100g": <total sugars in grams as number>,
+    "added_sugar_g_per_100g": <added sugars in grams as number>,
+    "total_fat_g_per_100g": <total fat in grams as number>,
+    "sat_fat_g_per_100g": <saturated fat in grams as number>,
+    "trans_fat_g_per_100g": <trans fat in grams as number>,
+    "carbohydrates_g_per_100g": <carbohydrates in grams as number>,
+    "protein_g": <protein in grams as number>,
+    "sodium_mg_per_100g": <sodium in mg as number>,
+    "cholesterol_mg_per_100g": <cholesterol in mg as number>,
+    "fiber_g": <dietary fiber in grams as number>
+  },
+  "ingredients": ["<ingredient 1>", "<ingredient 2>"],
+  "additives": [
+    {"ins_code": "<INS number>", "primary_name": "<name>", "risk_tier": "GREEN"}
+  ],
+  "is_ai_enriched": true
+}
+''';
+
+      // 1. Try Gemini
+      final geminiResult = await _queryGeminiStructuredText(prompt);
+      if (geminiResult != null && _hasValidMacrosInNutritionMap(geminiResult['nutrition'] as Map<String, dynamic>?)) {
+        geminiResult['source'] = 'gemini_grounding';
+        return geminiResult;
+      }
+
+      // 2. Try Groq LPU (Qwen / Llama)
+      final groqResult = await _queryGroqStructuredText(prompt);
+      if (groqResult != null && _hasValidMacrosInNutritionMap(groqResult['nutrition'] as Map<String, dynamic>?)) {
+        groqResult['source'] = 'groq_grounding';
+        return groqResult;
+      }
+
+      // 3. Try OpenRouter
+      final openRouterResult = await _queryOpenRouterStructuredText(prompt);
+      if (openRouterResult != null && _hasValidMacrosInNutritionMap(openRouterResult['nutrition'] as Map<String, dynamic>?)) {
+        openRouterResult['source'] = 'openrouter_grounding';
+        return openRouterResult;
+      }
+
+      return null;
+    });
+  }
+
+  bool _hasValidMacrosInNutritionMap(Map<String, dynamic>? nutMap) {
+    if (nutMap == null || nutMap.isEmpty) return false;
+    final kcal = (nutMap['energy_kcal'] as num?)?.toDouble() ??
+        (((nutMap['energy_kj'] as num?)?.toDouble() ?? 0.0) / 4.184);
+    final carbs = (nutMap['carbohydrates_g_per_100g'] as num?)?.toDouble() ?? 0.0;
+    final sugar = (nutMap['sugar_g_per_100g'] as num?)?.toDouble() ?? 0.0;
+    final fat = (nutMap['total_fat_g_per_100g'] as num?)?.toDouble() ?? 0.0;
+    final protein = (nutMap['protein_g'] as num?)?.toDouble() ?? 0.0;
+    return kcal > 0.0 && (carbs > 0.0 || sugar > 0.0 || fat > 0.0 || protein > 0.0);
+  }
+
+  Future<Map<String, dynamic>?> _queryGeminiStructuredText(String prompt) async {
+    final keys = AiProviderConfig.geminiApiKeys;
+    if (keys.isEmpty) return null;
+
+    final models = AiProviderConfig.geminiVisionModels;
+    final maxKeyAttempts = keys.length.clamp(1, 4);
+
+    for (int keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
+      final apiKey = AiProviderConfig.activeGeminiApiKey;
+      if (apiKey.isEmpty) break;
+
+      for (final model in models) {
+        if (!AiProviderConfig.isBucketAvailable(AiProvider.gemini, apiKey, model)) {
+          continue;
+        }
+
+        final supportsThinkingConfig = model.contains('2.5');
+        final Map<String, dynamic> generationConfig = {
+          'temperature': 0.1,
+          'responseMimeType': 'application/json',
+          if (supportsThinkingConfig) 'thinkingConfig': {'thinkingBudget': 0},
+        };
+
+        final requestBody = {
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': generationConfig,
+        };
+
+        try {
+          final uri = Uri.parse('${AiProviderConfig.geminiBaseUrl}/$model:generateContent?key=$apiKey');
+          final response = await _client
+              .post(
+                uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(requestBody),
+              )
+              .timeout(const Duration(seconds: 7));
+
+          AiProviderConfig.inspectResponseHeaders(AiProvider.gemini, apiKey, model, response.headers);
+
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final candidates = data['candidates'] as List?;
+            if (candidates != null && candidates.isNotEmpty) {
+              final content = candidates[0]['content'];
+              final parts = content['parts'] as List?;
+              if (parts != null && parts.isNotEmpty) {
+                final rawJsonText = parts[0]['text']?.toString() ?? '';
+                final parsed = _parseJsonContent(rawJsonText);
+                if (parsed != null) return parsed;
+              }
+            }
+          } else if (response.statusCode == 429) {
+            final retrySec = _parseRetryAfterSeconds(response.headers);
+            AiProviderConfig.markCooldown(AiProvider.gemini, apiKey, model, retryAfterSeconds: retrySec);
+            AiProviderConfig.rotateGeminiKey();
+            break;
+          }
+        } catch (e) {
+          debugPrint('[MultiProviderAiRouter] Gemini structured text call notice: $e');
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _queryGroqStructuredText(String prompt) async {
+    final keys = AiProviderConfig.groqApiKeys;
+    if (keys.isEmpty) return null;
+
+    final models = AiProviderConfig.groqAdvisorModels;
+    final maxKeyAttempts = keys.length.clamp(1, 3);
+
+    for (int keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
+      final apiKey = AiProviderConfig.activeGroqApiKey;
+      if (apiKey.isEmpty) break;
+
+      for (final model in models) {
+        if (!AiProviderConfig.isBucketAvailable(AiProvider.groq, apiKey, model)) {
+          continue;
+        }
+
+        final requestBody = {
+          'model': model,
+          'messages': [
+            {'role': 'user', 'content': prompt}
+          ],
+          'temperature': 0.1,
+          'response_format': {'type': 'json_object'},
+        };
+
+        try {
+          final uri = Uri.parse(AiProviderConfig.groqApiUrl);
+          final response = await _client
+              .post(
+                uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $apiKey',
+                },
+                body: jsonEncode(requestBody),
+              )
+              .timeout(const Duration(seconds: 7));
+
+          AiProviderConfig.inspectResponseHeaders(AiProvider.groq, apiKey, model, response.headers);
+
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final choices = data['choices'] as List?;
+            if (choices != null && choices.isNotEmpty) {
+              final rawJson = choices[0]['message']?['content']?.toString() ?? '';
+              final parsed = _parseJsonContent(rawJson);
+              if (parsed != null) return parsed;
+            }
+          } else if (response.statusCode == 429) {
+            final retrySec = _parseRetryAfterSeconds(response.headers);
+            AiProviderConfig.markCooldown(AiProvider.groq, apiKey, model, retryAfterSeconds: retrySec);
+            AiProviderConfig.rotateGroqKey();
+            break;
+          }
+        } catch (e) {
+          debugPrint('[MultiProviderAiRouter] Groq structured text call notice: $e');
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _queryOpenRouterStructuredText(String prompt) async {
+    final keys = AiProviderConfig.openRouterApiKeys;
+    if (keys.isEmpty) return null;
+
+    final models = AiProviderConfig.openRouterVisionModels;
+
+    for (final apiKey in keys) {
+      for (final model in models) {
+        if (!AiProviderConfig.isBucketAvailable(AiProvider.openRouter, apiKey, model)) {
+          continue;
+        }
+
+        final requestBody = {
+          'model': model,
+          'messages': [
+            {'role': 'user', 'content': prompt}
+          ],
+          'temperature': 0.1,
+        };
+
+        try {
+          final uri = Uri.parse(AiProviderConfig.openRouterApiUrl);
+          final response = await _client
+              .post(
+                uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $apiKey',
+                  'HTTP-Referer': 'https://veribite.app',
+                  'X-Title': 'VeriBite Multi-Provider Grounding',
+                },
+                body: jsonEncode(requestBody),
+              )
+              .timeout(const Duration(seconds: 8));
+
+          AiProviderConfig.inspectResponseHeaders(AiProvider.openRouter, apiKey, model, response.headers);
+
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final choices = data['choices'] as List?;
+            if (choices != null && choices.isNotEmpty) {
+              final rawJson = choices[0]['message']?['content']?.toString() ?? '';
+              final parsed = _parseJsonContent(rawJson);
+              if (parsed != null) return parsed;
+            }
+          } else if (response.statusCode == 429) {
+            final retrySec = _parseRetryAfterSeconds(response.headers);
+            AiProviderConfig.markCooldown(AiProvider.openRouter, apiKey, model, retryAfterSeconds: retrySec);
+            break;
+          }
+        } catch (e) {
+          debugPrint('[MultiProviderAiRouter] OpenRouter structured text call notice: $e');
+        }
+      }
+    }
+    return null;
+  }
+
   Future<String?> _queryGroqAdvisor(
     String systemPrompt,
     String userMessage,
@@ -692,17 +970,23 @@ class MultiProviderAiRouter {
 You are an expert food safety, toxicology, and clinical nutrition analyst.
 Analyze this photo of a packaged food product, bottle, can, or nutrition facts label.
 
-CRITICAL INSTRUCTIONS FOR INDIAN FOOD PACKAGING:
-- Indian packaging frequently splits the nutrition table into TWO SIDE-BY-SIDE COLUMNS (e.g. Left table: Energy, Total Fat, Saturated Fat, Trans Fat, Carbohydrates; Right table: Total Sugar, Added Sugar, Protein, Cholesterol, Sodium, Dietary Fibre). Carefully read both columns!
-- ALWAYS extract values from the "100g" / "Per 100g" column. DO NOT extract from "% RDA per 100g" or "% RDA per Serve" percentage columns!
-- If "% RDA per 100g" and "% RDA per Serve" are printed, also extract them as "rda_per_100g" and "rda_per_serve" so exact serving size can be calculated: (rda_per_serve / rda_per_100g) * 100.
+CRITICAL INSTRUCTIONS FOR NUTRITION EXTRACTION:
+1. FIRST, inspect the entire image for ANY printed Nutrition Information / Nutrition Facts table or Ingredients list. If visible anywhere in the frame (even if small, partial, angled, or adjacent to a QR code/barcode), extract the exact printed Per-100g values:
+   - Energy (kcal and kJ)
+   - Carbohydrates, Total Sugar, Added Sugar
+   - Total Fat, Saturated Fat, Trans Fat
+   - Protein, Dietary Fibre, Sodium, Cholesterol
+2. Indian packaging frequently splits the nutrition table into TWO SIDE-BY-SIDE COLUMNS (e.g. Left table: Energy, Total Fat, Saturated Fat, Trans Fat, Carbohydrates; Right table: Total Sugar, Added Sugar, Protein, Cholesterol, Sodium, Dietary Fibre). Carefully read both columns!
+3. ALWAYS extract values from the "100g" / "Per 100g" column. DO NOT extract from "% RDA per 100g" or "% RDA per Serve" percentage columns!
+4. If "% RDA per 100g" and "% RDA per Serve" are printed, also extract them as "rda_per_100g" and "rda_per_serve" so exact serving size can be calculated: (rda_per_serve / rda_per_100g) * 100.
+5. SECOND, if this image was captured from a product front/side where the nutrition table is not clearly legible, but product identification/brand/packaging is visible (or indicated by the hint below), use your verified nutritional knowledge and web grounding to retrieve and populate the accurate Per-100g nutritional profile, ingredients, additives, and mark "is_ai_enriched": true.
 
-Extract the exact information printed on the package:
-1. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "Amul Butter", "Siddhivinayak Mango Pickle").
-2. "brand_name": Manufacturer brand (e.g., "Kwality", "Amul", "Britannia", "Siddhivinayak").
-3. "category": Food category (e.g., "Bakery & Breads", "Dairy & Cheese", "Pickles & Chutneys", "Snacks & Namkeen").
+Extract the exact information:
+1. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "Amul Butter", "Schezwan Chutney").
+2. "brand_name": Manufacturer brand (e.g., "Kwality", "Amul", "Britannia", "Ching's Secret").
+3. "category": Food category (e.g., "Bakery & Breads", "Sauces & Condiments", "Pickles & Chutneys", "Snacks & Namkeen").
 4. "serving_size_g": Serving size in grams or ml (default to 30.0 if not specified).
-5. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0).
+5. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0, 250.0).
 6. "nutrition": Object with numeric values per 100g:
    - "energy_kcal": Energy in kcal per 100g (e.g., 368.00)
    - "energy_kj": Energy in kJ per 100g (if kcal printed, multiply kcal by 4.184)
@@ -716,12 +1000,13 @@ Extract the exact information printed on the package:
    - "sodium_mg_per_100g": Sodium in mg per 100g (if salt in g printed, salt_g * 400)
    - "cholesterol_mg_per_100g": Cholesterol in mg per 100g
    - "fiber_g": Dietary fiber in grams per 100g
-7. "ingredients": List of ingredient strings printed on the package.
+7. "ingredients": List of ingredient strings printed on the package or known for this product.
 8. "additives": List of detected food additives with "ins_code", "primary_name", and "risk_tier" ("GREEN", "CAUTION", or "RED").
 9. "bioactive_compounds": List of detected herbs/alkaloids/bioactives (e.g., Senna, Caffeine, Ashwagandha) or empty list.
 10. "warnings": List of clinical cautions (e.g., "High Sodium", "Contains Gluten") or empty list.
+11. "is_ai_enriched": Boolean (true if values were enriched via nutritional knowledge because label was not fully readable, false if directly read from printed label).
 
-${hintBarcode != null ? 'Note: Scanned barcode hint: $hintBarcode.' : ''}
+${hintBarcode != null ? 'Note: Scanned QR/barcode and product context hint: $hintBarcode.' : ''}
 Respond ONLY with a valid JSON object matching this schema without any markdown formatting.
 ''';
   }
