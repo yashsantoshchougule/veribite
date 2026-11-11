@@ -10,6 +10,7 @@ import 'package:mobile_app/features/home/presentation/home_screen.dart';
 import 'package:mobile_app/features/profile/application/user_profile_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
+import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
 import 'package:mobile_app/features/swaps/presentation/healthier_swaps_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -363,6 +364,34 @@ void main() {
 
       expect(find.text('32'), findsOneWidget);
       expect(find.text('Toxic / Capped 🔴'), findsOneWidget);
+    });
+
+    testWidgets('rapidly double-tapping a product card in Search only pushes VerdictReportScreen once', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      // Tap Search tab in bottom nav
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+
+      final noodlesCard = find.text('2-Minute Masala Noodles');
+      expect(noodlesCard, findsOneWidget);
+
+      // Perform rapid double-tap (2 taps without pumpAndSettle in between)
+      await tester.tap(noodlesCard);
+      await tester.tap(noodlesCard, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      // Exactly ONE VerdictReportScreen must be mounted
+      expect(find.byType(VerdictReportScreen), findsOneWidget);
+
+      // Popping once must return directly back to Search Catalog
+      Navigator.of(tester.element(find.byType(VerdictReportScreen))).pop();
+      await tester.pumpAndSettle();
+
+      // Verify we are back on Search, and VerdictReportScreen is gone
+      expect(find.byType(VerdictReportScreen), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
     });
 
     testWidgets('empty search results show empty state with camera trigger CTA', (tester) async {

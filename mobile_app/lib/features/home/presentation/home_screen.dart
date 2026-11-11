@@ -53,6 +53,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<SearchCatalogItem> _searchResults = [];
   bool _isSearching = false;
   Timer? _debounceTimer;
+  bool _isNavigatingToProduct = false;
+  DateTime? _lastProductTapTime;
 
   @override
   void initState() {
@@ -127,47 +129,64 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openProductVerdict(SearchCatalogItem item) async {
-    final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId);
-    final ScannedProductResult product;
-    if (item.evaluatedProduct != null) {
-      product = item.evaluatedProduct!;
-    } else {
-      final scannerService = ProductScannerService();
-      product = await scannerService.resolveBarcode(
-        barcode: item.code,
-        userProfile: activeProfile,
-      );
+    final now = DateTime.now();
+    if (_isNavigatingToProduct) return;
+    if (_lastProductTapTime != null &&
+        now.difference(_lastProductTapTime!) < const Duration(milliseconds: 500)) {
+      return;
     }
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => VerdictReportScreen(
-          product: product,
+
+    _isNavigatingToProduct = true;
+    _lastProductTapTime = now;
+
+    try {
+      // Unfocus keyboard before navigating so it does not pop back open on return
+      FocusManager.instance.primaryFocus?.unfocus();
+
+      final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId);
+      final ScannedProductResult product;
+      if (item.evaluatedProduct != null) {
+        product = item.evaluatedProduct!;
+      } else {
+        final scannerService = ProductScannerService();
+        product = await scannerService.resolveBarcode(
+          barcode: item.code,
           userProfile: activeProfile,
-        ),
-      ),
-    );
-
-    // Sync any newly evaluated score or background enrichment back to search results
-    final index = _searchResults.indexWhere((i) => i.code == item.code);
-    if (index != -1 && mounted) {
-      final old = _searchResults[index];
-      setState(() {
-        _searchResults[index] = SearchCatalogItem.food(
-          barcode: old.code,
-          productName: product.productName,
-          brandName: product.brandName,
-          category: product.category,
-          score: product.healthScore,
-          novaGroup: product.novaGrade,
-          imageUrl: old.imageUrl,
-          isOffline: old.isOffline,
-          evaluatedProduct: product,
         );
-      });
-    }
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VerdictReportScreen(
+            product: product,
+            userProfile: activeProfile,
+          ),
+        ),
+      );
 
-    await _loadAllData();
+      // Sync any newly evaluated score or background enrichment back to search results
+      final index = _searchResults.indexWhere((i) => i.code == item.code);
+      if (index != -1 && mounted) {
+        final old = _searchResults[index];
+        setState(() {
+          _searchResults[index] = SearchCatalogItem.food(
+            barcode: old.code,
+            productName: product.productName,
+            brandName: product.brandName,
+            category: product.category,
+            score: product.healthScore,
+            novaGroup: product.novaGrade,
+            imageUrl: old.imageUrl,
+            isOffline: old.isOffline,
+            evaluatedProduct: product,
+          );
+        });
+      }
+
+      await _loadAllData();
+    } finally {
+      _isNavigatingToProduct = false;
+    }
   }
 
   void _onSearchChanged(String val) {
@@ -1025,23 +1044,37 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
                             onTap: () async {
-                              final navigator = Navigator.of(context);
-                              Navigator.of(sheetCtx).pop();
+                              final now = DateTime.now();
+                              if (_isNavigatingToProduct) return;
+                              if (_lastProductTapTime != null &&
+                                  now.difference(_lastProductTapTime!) < const Duration(milliseconds: 500)) {
+                                return;
+                              }
 
-                              final resolvedProduct = await tracker.resolveLoggedProduct(
-                                entry,
-                                profile: _profile,
-                              );
+                              _isNavigatingToProduct = true;
+                              _lastProductTapTime = now;
 
-                              if (!mounted) return;
-                              await navigator.push(
-                                MaterialPageRoute(
-                                  builder: (_) => VerdictReportScreen(
-                                    product: resolvedProduct,
-                                    userProfile: _profile ?? UserProfileModel.defaults(widget.userId),
+                              try {
+                                final navigator = Navigator.of(context);
+                                Navigator.of(sheetCtx).pop();
+
+                                final resolvedProduct = await tracker.resolveLoggedProduct(
+                                  entry,
+                                  profile: _profile,
+                                );
+
+                                if (!mounted) return;
+                                await navigator.push(
+                                  MaterialPageRoute(
+                                    builder: (_) => VerdictReportScreen(
+                                      product: resolvedProduct,
+                                      userProfile: _profile ?? UserProfileModel.defaults(widget.userId),
+                                    ),
                                   ),
-                                ),
-                              );
+                                );
+                              } finally {
+                                _isNavigatingToProduct = false;
+                              }
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -1570,6 +1603,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSearchItemCard(SearchCatalogItem item) {
     return GestureDetector(
       onTap: () {
+        final now = DateTime.now();
+        if (_isNavigatingToProduct) return;
+        if (_lastProductTapTime != null &&
+            now.difference(_lastProductTapTime!) < const Duration(milliseconds: 500)) {
+          return;
+        }
+
         if (item.isFood) {
           _openProductVerdict(item);
         } else {
