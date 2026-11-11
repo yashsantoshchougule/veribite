@@ -59,6 +59,26 @@ void main() {
       expect(decoded.language, equals('hi'));
       expect(decoded.isCompleted, isTrue);
     });
+
+    test('fromMap defends against integer weight and double age without crashing', () {
+      final map = {
+        'userId': 'user_defensive',
+        'weight': 87, // integer instead of double, short key
+        'age': 25.0, // double instead of int
+        'isChild': false, // camelCase
+        'isDiabetic': true, // camelCase
+        'isHypertensive': true,
+        'allergens': ['Soy'],
+      };
+
+      final profile = UserProfileModel.fromMap(map);
+      expect(profile.userId, equals('user_defensive'));
+      expect(profile.weightKg, equals(87.0));
+      expect(profile.age, equals(25));
+      expect(profile.isDiabetic, isTrue);
+      expect(profile.isHypertensive, isTrue);
+      expect(profile.allergens, contains('Soy'));
+    });
   });
 
   group('UserProfileService Strict Account Isolation Tests', () {

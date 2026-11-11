@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../camera/application/offline_barcode_repository.dart';
 import '../../camera/application/product_scanner_service.dart';
+import '../../profile/application/user_profile_manager.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/logged_food_entry.dart';
 
@@ -46,9 +47,13 @@ class DailyConsumptionTracker extends ChangeNotifier {
 
   /// Calculates dynamic WHO / ICMR safe daily sugar ceiling based on user profile
   double calculateCeilingFromProfile(UserProfileModel? profile) {
-    if (profile == null) return 25.0;
-    if (profile.isDiabetic) return 10.0;
-    if (profile.isChild) return 15.0;
+    final active = profile ??
+        (UserProfileManager.instance.isInitialized
+            ? UserProfileManager.instance.profile
+            : null);
+    if (active == null) return 25.0;
+    if (active.isDiabetic) return 10.0;
+    if (active.isChild) return 15.0;
     return 25.0;
   }
 
@@ -73,7 +78,11 @@ class DailyConsumptionTracker extends ChangeNotifier {
   /// Initializes daily intake from SharedPreferences. Automatically checks date rollover.
   Future<void> initialize({UserProfileModel? profile}) async {
     final todayKey = _formatDateKey(DateTime.now().toLocal());
-    _dailySugarCeilingGrams = calculateCeilingFromProfile(profile);
+    final active = profile ??
+        (UserProfileManager.instance.isInitialized
+            ? UserProfileManager.instance.profile
+            : null);
+    _dailySugarCeilingGrams = calculateCeilingFromProfile(active);
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -192,7 +201,10 @@ class DailyConsumptionTracker extends ChangeNotifier {
     UserProfileModel? profile,
     ProductScannerService? scannerService,
   }) async {
-    final activeProfile = profile ?? UserProfileModel.defaults('guest_user');
+    final activeProfile = profile ??
+        (UserProfileManager.instance.isInitialized
+            ? UserProfileManager.instance.profile
+            : UserProfileModel.defaults('guest_user'));
     final service = scannerService ?? ProductScannerService();
 
     // Priority 1: Embedded Product / ProductJson (0ms)

@@ -112,23 +112,40 @@ class UserProfileModel {
 
   factory UserProfileModel.fromMap(Map<String, dynamic> map) {
     return UserProfileModel(
-      userId: map['user_id'] as String? ?? map['device_id'] as String? ?? 'anonymous',
-      weightKg: (map['weight_kg'] as num?)?.toDouble() ?? 65.0,
-      isChild: map['is_child'] as bool? ?? false,
-      age: map['age'] as int?,
+      userId: map['user_id'] as String? ??
+          map['device_id'] as String? ??
+          map['userId'] as String? ??
+          'anonymous',
+      weightKg: (map['weight_kg'] as num? ??
+              map['weightKg'] as num? ??
+              map['weight'] as num?)
+              ?.toDouble() ??
+          65.0,
+      isChild: map['is_child'] as bool? ?? map['isChild'] as bool? ?? false,
+      age: (map['age'] as num?)?.toInt(),
       gender: map['gender'] as String?,
-      heightCm: (map['height_cm'] as num?)?.toDouble(),
-      isDiabetic: map['is_diabetic'] as bool? ?? false,
-      isHypertensive: map['is_hypertensive'] as bool? ?? false,
-      isPregnancySafe: map['is_pregnancy_safe'] as bool? ?? false,
-      isLowSugar: map['is_low_sugar'] as bool? ?? false,
-      allergens: (map['allergens'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
-      dietaryPreference: map['dietary_preference'] as String?,
+      heightCm: (map['height_cm'] as num? ?? map['heightCm'] as num?)?.toDouble(),
+      isDiabetic: map['is_diabetic'] as bool? ?? map['isDiabetic'] as bool? ?? false,
+      isHypertensive:
+          map['is_hypertensive'] as bool? ?? map['isHypertensive'] as bool? ?? false,
+      isPregnancySafe:
+          map['is_pregnancy_safe'] as bool? ?? map['isPregnancySafe'] as bool? ?? false,
+      isLowSugar:
+          map['is_low_sugar'] as bool? ?? map['isLowSugar'] as bool? ?? false,
+      allergens: (map['allergens'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      dietaryPreference:
+          map['dietary_preference'] as String? ?? map['dietaryPreference'] as String?,
       language: map['language'] as String? ?? 'en',
-      isCompleted: map['is_completed'] as bool? ?? true,
+      isCompleted:
+          map['is_completed'] as bool? ?? map['isCompleted'] as bool? ?? true,
       updatedAt: map['updated_at'] != null
           ? DateTime.tryParse(map['updated_at'].toString()) ?? DateTime.now()
-          : DateTime.now(),
+          : (map['updatedAt'] != null
+              ? DateTime.tryParse(map['updatedAt'].toString()) ?? DateTime.now()
+              : DateTime.now()),
     );
   }
 

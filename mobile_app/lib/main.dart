@@ -10,6 +10,7 @@ import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/widgets/keystore_diagnostic_sheet.dart';
 import 'features/home/presentation/home_screen.dart';
 import 'features/onboarding/presentation/starter_walkthrough_screen.dart';
+import 'features/profile/application/user_profile_manager.dart';
 import 'features/profile/application/user_profile_service.dart';
 import 'features/profile/presentation/user_details_screen.dart';
 
@@ -17,6 +18,13 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Pre-load singleton user profile before widget tree mounts
+  try {
+    await UserProfileManager.instance.init();
+  } catch (e) {
+    debugPrint('UserProfileManager initialization error: $e');
+  }
 
   // Initialize Supabase Cloud Authentication if credentials configured
   if (SupabaseConfig.isConfigured) {

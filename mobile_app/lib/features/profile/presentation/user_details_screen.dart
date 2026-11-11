@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../application/user_profile_manager.dart';
 import '../application/user_profile_service.dart';
 import '../domain/user_profile_model.dart';
 
@@ -28,6 +30,8 @@ class UserDetailsScreen extends StatefulWidget {
 
 class _UserDetailsScreenState extends State<UserDetailsScreen> {
   late final UserProfileService _profileService;
+  late final TextEditingController _weightController;
+  Timer? _debounceTimer;
 
   // Essential Biometrics
   double _weightKg = 65.0;
@@ -55,7 +59,52 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
   void initState() {
     super.initState();
     _profileService = widget.profileService ?? UserProfileService();
+    final initialWeight = UserProfileManager.instance.isInitialized
+        ? UserProfileManager.instance.weightKg
+        : 65.0;
+    _weightKg = initialWeight;
+    _weightController = TextEditingController(text: initialWeight.toStringAsFixed(0));
     _loadExistingProfile();
+  }
+
+  @override
+  void dispose() {
+    if (_debounceTimer?.isActive == true) {
+      _debounceTimer?.cancel();
+      _profileService.saveProfile(_buildCurrentProfile());
+    }
+    _weightController.dispose();
+    super.dispose();
+  }
+
+  UserProfileModel _buildCurrentProfile({bool isCompleted = true}) {
+    return UserProfileModel(
+      userId: widget.userId,
+      weightKg: _weightKg,
+      isChild: _isChild,
+      age: _exactAge,
+      gender: _selectedGender,
+      isDiabetic: _isDiabetic,
+      isHypertensive: _isHypertensive,
+      isPregnancySafe: _isPregnancySafe,
+      isLowSugar: _isLowSugar,
+      allergens: _selectedAllergens.toList(),
+      dietaryPreference: _selectedDiet,
+      isCompleted: isCompleted,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void _triggerAutoSave() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        final profile = _buildCurrentProfile();
+        await _profileService.saveProfile(profile);
+      } catch (e) {
+        debugPrint('[UserDetailsScreen] Auto-save notice: $e');
+      }
+    });
   }
 
   Future<void> _loadExistingProfile() async {
@@ -70,36 +119,24 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
         _isHypertensive = existing.isHypertensive;
         _isPregnancySafe = existing.isPregnancySafe;
         _isLowSugar = existing.isLowSugar;
+        _selectedAllergens.clear();
         _selectedAllergens.addAll(existing.allergens);
         _selectedDiet = existing.dietaryPreference;
+        _weightController.text = existing.weightKg.toStringAsFixed(0);
       });
     }
   }
 
   Future<void> _handleSave() async {
     if (_isSaving) return;
+    _debounceTimer?.cancel();
 
     setState(() {
       _isSaving = true;
     });
 
     try {
-      final profile = UserProfileModel(
-        userId: widget.userId,
-        weightKg: _weightKg,
-        isChild: _isChild,
-        age: _exactAge,
-        gender: _selectedGender,
-        isDiabetic: _isDiabetic,
-        isHypertensive: _isHypertensive,
-        isPregnancySafe: _isPregnancySafe,
-        isLowSugar: _isLowSugar,
-        allergens: _selectedAllergens.toList(),
-        dietaryPreference: _selectedDiet,
-        isCompleted: true,
-        updatedAt: DateTime.now(),
-      );
-
+      final profile = _buildCurrentProfile(isCompleted: true);
       await _profileService.saveProfile(profile);
 
       if (mounted) {
@@ -125,15 +162,19 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
   Future<void> _handleSkip() async {
     if (_isSaving) return;
+    _debounceTimer?.cancel();
 
     setState(() {
       _isSaving = true;
     });
 
     try {
-      // Save safe defaults (65 kg adult, no disease restrictions)
-      final defaultProfile = UserProfileModel.defaults(widget.userId);
-      await _profileService.saveProfile(defaultProfile);
+      // If user already has custom saved profile (e.g. non-default weight or completed), do not destroy it!
+      final current = await _profileService.getProfile(widget.userId);
+      if (current == null || !current.isCompleted) {
+        final defaultProfile = UserProfileModel.defaults(widget.userId);
+        await _profileService.saveProfile(defaultProfile);
+      }
 
       if (mounted) {
         widget.onComplete();
@@ -430,7 +471,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                         ? () {
                             setState(() {
                               _weightKg = (_weightKg - 1.0).clamp(15.0, 120.0);
+                              _weightController.text = _weightKg.toStringAsFixed(0);
                             });
+                            _triggerAutoSave();
                           }
                         : null,
                   ),
@@ -462,11 +505,79 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                         ? () {
                             setState(() {
                               _weightKg = (_weightKg + 1.0).clamp(15.0, 120.0);
+                              _weightController.text = _weightKg.toStringAsFixed(0);
                             });
+                            _triggerAutoSave();
                           }
                         : null,
                   ),
                 ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Direct Numeric Input Field for custom exact weights (e.g. 87 kg)
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.stepPillBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.stepPillBorder, width: 1.0),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.edit_outlined, size: 14, color: AppColors.accentBronze),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _weightController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textObsidian,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: '87',
+                          suffixText: 'kg',
+                          suffixStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.accentBronze,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        ),
+                        onChanged: (text) {
+                          final parsed = double.tryParse(text.trim());
+                          if (parsed != null && parsed >= 15.0 && parsed <= 250.0) {
+                            setState(() {
+                              _weightKg = parsed.clamp(15.0, 120.0);
+                            });
+                            _triggerAutoSave();
+                          }
+                        },
+                        onSubmitted: (text) {
+                          final parsed = double.tryParse(text.trim());
+                          if (parsed != null && parsed >= 15.0 && parsed <= 250.0) {
+                            setState(() {
+                              _weightKg = parsed.clamp(15.0, 120.0);
+                            });
+                            _triggerAutoSave();
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -487,7 +598,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                       onTap: () {
                         setState(() {
                           _weightKg = preset;
+                          _weightController.text = _weightKg.toStringAsFixed(0);
                         });
+                        _triggerAutoSave();
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -531,7 +644,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
               onChanged: (val) {
                 setState(() {
                   _weightKg = val;
+                  _weightController.text = _weightKg.toStringAsFixed(0);
                 });
+                _triggerAutoSave();
               },
             ),
           ),
@@ -560,7 +675,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                     setState(() {
                       _isChild = false;
                       if (_weightKg < 40) _weightKg = 65.0;
+                      _weightController.text = _weightKg.toStringAsFixed(0);
                     });
+                    _triggerAutoSave();
                   },
                 ),
               ),
@@ -574,7 +691,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                     setState(() {
                       _isChild = true;
                       if (_weightKg > 45) _weightKg = 22.0;
+                      _weightController.text = _weightKg.toStringAsFixed(0);
                     });
+                    _triggerAutoSave();
                   },
                 ),
               ),

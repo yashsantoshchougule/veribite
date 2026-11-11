@@ -8,6 +8,7 @@ import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../camera/presentation/smart_camera_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../../profile/application/user_profile_manager.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
@@ -59,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    UserProfileManager.instance.addListener(_onProfileManagerUpdated);
     _dashboardService = widget.dashboardService ?? HomeDashboardService();
     _profileService = widget.profileService ?? UserProfileService();
     _searchService = widget.searchService ?? CatalogSearchService();
@@ -69,13 +71,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    UserProfileManager.instance.removeListener(_onProfileManagerUpdated);
     _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
+  void _onProfileManagerUpdated() {
+    if (mounted) {
+      setState(() {
+        _profile = UserProfileManager.instance.profile;
+      });
+      DailyConsumptionTracker.instance.updateProfile(UserProfileManager.instance.profile);
+    }
+  }
+
   Future<void> _loadAllData() async {
-    final profile = await _profileService.getProfile(widget.userId) ?? UserProfileModel.defaults(widget.userId);
+    final profile = await _profileService.getProfile(widget.userId) ??
+        (UserProfileManager.instance.isInitialized
+            ? UserProfileManager.instance.profile
+            : UserProfileModel.defaults(widget.userId));
     final data = await _dashboardService.getDashboardData(widget.userId, profile);
     await DailyConsumptionTracker.instance.initialize(profile: profile);
     if (DailyConsumptionTracker.instance.entries.isEmpty && data.consumedSugarGrams > 0) {
@@ -533,20 +548,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTopHeader() {
-    final weight = _profile?.weightKg ?? 65.0;
-    final isChild = _profile?.isChild ?? false;
-    final isDiabetic = _profile?.isDiabetic ?? false;
-    final isHypertensive = _profile?.isHypertensive ?? false;
-
-    String guardrailSummary = 'Safe Baseline';
-    if (isDiabetic) {
-      guardrailSummary = 'Diabetic Guard Active';
-    } else if (isHypertensive) {
-      guardrailSummary = 'Hypertension Guard';
-    } else if (isChild) {
-      guardrailSummary = 'Child Guard Active';
-    }
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: const BoxDecoration(
@@ -600,13 +601,38 @@ class _HomeScreenState extends State<HomeScreen> {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    '${weight.toStringAsFixed(0)} kg ${isChild ? "Child" : "Adult"} • $guardrailSummary',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textMutedMocha,
-                    ),
+                  child: ListenableBuilder(
+                    listenable: UserProfileManager.instance,
+                    builder: (context, _) {
+                      final effectiveProfile = _profile ??
+                          (UserProfileManager.instance.isInitialized
+                              ? UserProfileManager.instance.profile
+                              : UserProfileModel.defaults(widget.userId));
+                      final currentWeight = UserProfileManager.instance.isInitialized
+                          ? UserProfileManager.instance.weightKg
+                          : effectiveProfile.weightKg;
+                      final currentIsChild = UserProfileManager.instance.isInitialized
+                          ? UserProfileManager.instance.isChild
+                          : effectiveProfile.isChild;
+                      final currentGuardrailSummary = UserProfileManager.instance.isInitialized
+                          ? UserProfileManager.instance.baselineSummary
+                          : (effectiveProfile.isDiabetic
+                              ? 'Diabetic Guard Active'
+                              : (effectiveProfile.isHypertensive
+                                  ? 'Hypertension Guard'
+                                  : (effectiveProfile.isChild
+                                      ? 'Child Guard Active'
+                                      : 'Safe Baseline')));
+
+                      return Text(
+                        '${currentWeight.toStringAsFixed(0)} kg ${currentIsChild ? "Child" : "Adult"} • $currentGuardrailSummary',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMutedMocha,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],

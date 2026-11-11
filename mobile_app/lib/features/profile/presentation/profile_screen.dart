@@ -5,6 +5,7 @@ import '../../auth/application/supabase_auth_service.dart';
 import '../../camera/presentation/widgets/backend_settings_sheet.dart';
 import '../../legal/presentation/legal_policy_screen.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../application/user_profile_manager.dart';
 import '../application/user_profile_service.dart';
 import '../domain/user_profile_model.dart';
 import 'user_details_screen.dart';
@@ -40,14 +41,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _profileService = widget.profileService ?? UserProfileService();
     _authService = widget.authService ?? SupabaseAuthService();
+    UserProfileManager.instance.addListener(_onProfileManagerUpdated);
     _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    UserProfileManager.instance.removeListener(_onProfileManagerUpdated);
+    super.dispose();
+  }
+
+  void _onProfileManagerUpdated() {
+    if (mounted) {
+      setState(() {
+        _profile = UserProfileManager.instance.profile;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _loadProfile() async {
     final profile = await _profileService.getProfile(widget.userId);
     if (mounted) {
       setState(() {
-        _profile = profile ?? UserProfileModel.defaults(widget.userId);
+        _profile = profile ??
+            (UserProfileManager.instance.isInitialized
+                ? UserProfileManager.instance.profile
+                : UserProfileModel.defaults(widget.userId));
         _isLoading = false;
       });
     }

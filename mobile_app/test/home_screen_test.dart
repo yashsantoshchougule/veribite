@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/core/theme/app_colors.dart';
 import 'package:mobile_app/features/advisor/presentation/advisor_chat_screen.dart';
+import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart';
 import 'package:mobile_app/features/home/application/home_dashboard_service.dart';
 import 'package:mobile_app/features/home/domain/home_dashboard_data.dart';
+import 'package:mobile_app/features/home/application/daily_consumption_tracker.dart';
 import 'package:mobile_app/features/home/presentation/home_screen.dart';
+import 'package:mobile_app/features/profile/application/user_profile_manager.dart';
 import 'package:mobile_app/features/profile/application/user_profile_service.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
@@ -55,6 +58,7 @@ class MockHomeDashboardService extends HomeDashboardService {
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    UserProfileManager.instance.resetForTesting();
   });
 
   Widget buildTestableHomeScreen({
@@ -406,6 +410,110 @@ void main() {
 
       expect(find.text('No products found matching "UnknownItem12345"'), findsOneWidget);
       expect(find.text('Open Smart Camera'), findsOneWidget);
+    });
+  });
+
+  group('UserProfileManager Persistence & Reactivity on HomeScreen', () {
+    testWidgets('header subtitle updates dynamically when weight updates to 87 kg and survives tab switching', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      // Initially displays 65 kg Adult • Safe Baseline
+      expect(find.text('65 kg Adult • Safe Baseline'), findsOneWidget);
+
+      // User updates profile (e.g. from ProfileScreen or UserDetailsScreen)
+      final updatedProfile = UserProfileModel(
+        userId: 'local_user',
+        weightKg: 87.0,
+        age: 38,
+        isChild: false,
+        isCompleted: true,
+        updatedAt: DateTime.now(),
+      );
+      await UserProfileManager.instance.updateProfile(updatedProfile);
+      await tester.pumpAndSettle();
+
+      // Subtitle must update immediately to 87 kg Adult • Safe Baseline
+      expect(find.text('87 kg Adult • Safe Baseline'), findsOneWidget);
+
+      // Switch to Search tab
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+
+      // Switch back to Home tab
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+
+      // Subtitle must STILL be 87 kg Adult • Safe Baseline
+      expect(find.text('87 kg Adult • Safe Baseline'), findsOneWidget);
+    });
+
+    testWidgets('tapping Reset Today in Daily Intake log does not reset user profile from 87 kg to 65 kg', (tester) async {
+      // Set user to 87 kg in UserProfileManager
+      await UserProfileManager.instance.updateWeight(87.0);
+
+      // Log a sample intake item so entries is not empty and Reset Today button appears
+      final tracker = DailyConsumptionTracker.instance;
+      await tracker.logProductIntake(
+        const ScannedProductResult(
+          barcode: '8901063012117',
+          productName: 'Good Day Butter Cookies',
+          brandName: 'Britannia',
+          category: 'Biscuits & Cookies',
+          servingSizeG: 25.0,
+          packWeightG: 75.0,
+          caloriesPerServing: 125.0,
+          caloriesPer100g: 500.0,
+          sugarGPer100g: 24.5,
+          sugarGPerServing: 6.1,
+          satFatGPer100g: 11.2,
+          sodiumMgPer100g: 280.0,
+          totalFatGPer100g: 22.0,
+          carbsGPer100g: 68.0,
+          proteinGPer100g: 6.0,
+          fiberGPer100g: 1.8,
+          addedSugarGPer100g: 20.0,
+          transFatGPer100g: 0.1,
+          cholesterolMgPer100g: 10.0,
+          healthScore: 48,
+          novaGrade: 4,
+          redCapTriggered: false,
+          additives: [],
+          splitSugars: [],
+          safePortionGrams: 25,
+          limitingFactor: 'Sugar',
+          verdictTag: 'Moderate',
+          frequencySchedule: '2-3 times/week',
+          portionAdvice: 'Safe portion advice',
+          isExceededBudget: false,
+        ),
+      );
+
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+      expect(find.text('87 kg Adult • Safe Baseline'), findsOneWidget);
+
+      // Open Daily Intake Log bottom sheet
+      final budgetCard = find.textContaining('Daily Consumption Budget');
+      await tester.ensureVisible(budgetCard);
+      await tester.tap(budgetCard);
+      await tester.pumpAndSettle();
+
+      // Tap Reset Today
+      final resetBtn = find.text('Reset Today');
+      expect(resetBtn, findsOneWidget);
+      await tester.tap(resetBtn);
+      await tester.pumpAndSettle();
+
+      // Confirm reset dialog
+      final confirmBtn = find.widgetWithText(FilledButton, 'Reset');
+      expect(confirmBtn, findsOneWidget);
+      await tester.tap(confirmBtn);
+      await tester.pumpAndSettle();
+
+      // Subtitle must still remain 87 kg!
+      expect(find.text('87 kg Adult • Safe Baseline'), findsOneWidget);
+      expect(UserProfileManager.instance.weightKg, equals(87.0));
     });
   });
 }

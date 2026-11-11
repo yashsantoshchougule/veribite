@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/user_profile_model.dart';
+import 'user_profile_manager.dart';
 
 /// Service managing strict per-user profile persistence and account isolation.
 /// Profile data for user A is NEVER accessible or mixed with user B.
@@ -38,6 +39,14 @@ class UserProfileService {
   Future<bool> hasCompletedProfile(String userId) async {
     if (userId.isEmpty) return false;
 
+    // Check UserProfileManager singleton first (only if matching userId or local_user)
+    if (UserProfileManager.instance.isInitialized &&
+        (UserProfileManager.instance.profile.userId == userId ||
+         (userId == 'local_user' && UserProfileManager.instance.profile.userId == 'local_user')) &&
+        UserProfileManager.instance.profile.isCompleted) {
+      return true;
+    }
+
     // 1. Check memory cache first
     if (_memoryCache.containsKey(userId)) {
       return _memoryCache[userId]!.isCompleted;
@@ -45,7 +54,8 @@ class UserProfileService {
 
     // 2. Check local SharedPreferences
     final prefs = await _getPrefs();
-    final jsonStr = prefs.getString(_storageKey(userId));
+    final jsonStr = prefs.getString(_storageKey(userId)) ??
+        (userId == 'local_user' ? prefs.getString(UserProfileManager.primaryStorageKey) : null);
     if (jsonStr != null) {
       try {
         final profile = UserProfileModel.fromJson(jsonStr);
@@ -89,23 +99,36 @@ class UserProfileService {
   Future<UserProfileModel?> getProfile(String userId) async {
     if (userId.isEmpty) return null;
 
-    // 1. Check memory cache
+    // 1. Check UserProfileManager singleton if initialized and relevant
+    if (UserProfileManager.instance.isInitialized &&
+        (UserProfileManager.instance.profile.userId == userId ||
+         (userId == 'local_user' && UserProfileManager.instance.profile.userId == 'local_user'))) {
+      return UserProfileManager.instance.profile;
+    }
+
+    // 2. Check memory cache
     if (_memoryCache.containsKey(userId)) {
       return _memoryCache[userId];
     }
 
-    // 2. Check local SharedPreferences
+    // 3. Check local SharedPreferences
     final prefs = await _getPrefs();
-    final jsonStr = prefs.getString(_storageKey(userId));
+    final jsonStr = prefs.getString(_storageKey(userId)) ??
+        (userId == 'local_user' ? prefs.getString(UserProfileManager.primaryStorageKey) : null);
     if (jsonStr != null) {
       try {
         final profile = UserProfileModel.fromJson(jsonStr);
         _memoryCache[userId] = profile;
+        if (!UserProfileManager.instance.isInitialized ||
+            UserProfileManager.instance.profile.userId == userId ||
+            userId == 'local_user') {
+          await UserProfileManager.instance.updateProfile(profile, prefs: prefs);
+        }
         return profile;
       } catch (_) {}
     }
 
-    // 3. Check Supabase cloud if online
+    // 4. Check Supabase cloud if online
     final client = _client;
     if (client != null && client.auth.currentUser?.id == userId) {
       try {
@@ -119,6 +142,7 @@ class UserProfileService {
           final profile = UserProfileModel.fromMap(res);
           _memoryCache[userId] = profile;
           await prefs.setString(_storageKey(userId), profile.toJson());
+          await UserProfileManager.instance.updateProfile(profile, prefs: prefs);
           return profile;
         }
       } catch (e) {
@@ -137,7 +161,10 @@ class UserProfileService {
     // 1. Update isolated in-memory cache
     _memoryCache[userId] = profile;
 
-    // 2. Save to isolated SharedPreferences
+    // 2. Synchronize singleton UserProfileManager
+    await UserProfileManager.instance.updateProfile(profile, prefs: _injectedPrefs);
+
+    // 3. Save to isolated SharedPreferences
     final prefs = await _getPrefs();
     await prefs.setString(_storageKey(userId), profile.toJson());
 
@@ -170,10 +197,14 @@ class UserProfileService {
   /// Clears in-memory cache for a user on logout to prevent cross-account leak
   void clearUserCache(String userId) {
     _memoryCache.remove(userId);
+    if (UserProfileManager.instance.profile.userId == userId) {
+      UserProfileManager.instance.resetState();
+    }
   }
 
   /// Clears all caches (useful for testing or full app reset)
   static void resetAllCache() {
     _memoryCache.clear();
+    UserProfileManager.instance.resetState();
   }
 }

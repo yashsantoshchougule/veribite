@@ -13,6 +13,7 @@ import '../../health_intelligence/domain/health_intelligence_model.dart';
 import '../../home/application/daily_consumption_tracker.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
+import '../../profile/application/user_profile_manager.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../../swaps/presentation/healthier_swaps_screen.dart';
 import '../application/medical_report_pdf_service.dart';
@@ -390,7 +391,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
       MaterialPageRoute(
         builder: (_) => IngredientBreakdownScreen(
           product: widget.product,
-          userProfile: widget.userProfile,
+          userProfile: _activeUserProfile,
         ),
       ),
     );
@@ -402,7 +403,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AdvisorChatScreen(
-          userProfile: widget.userProfile,
+          userProfile: _activeUserProfile,
           initialProductContext: ProductAdvisorContext(
             productName: widget.product.productName,
             brandName: widget.product.brandName,
@@ -469,16 +470,21 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
       MaterialPageRoute(
         builder: (_) => HealthierSwapsScreen(
           currentProduct: widget.product,
-          userProfile: widget.userProfile,
+          userProfile: _activeUserProfile,
         ),
       ),
     );
   }
 
+  UserProfileModel get _activeUserProfile =>
+      UserProfileManager.instance.isInitialized
+          ? UserProfileManager.instance.profile
+          : widget.userProfile;
+
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
-    final maxSugarCeiling = _dashboardService.calculateMaxSugar(widget.userProfile);
+    final maxSugarCeiling = _dashboardService.calculateMaxSugar(_activeUserProfile);
     final sugarPercentage = ((_currentSugarGrams / maxSugarCeiling) * 100).round();
 
     return Scaffold(
@@ -2465,7 +2471,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                         await pdfService.shareReport(
                           context: context,
                           product: widget.product,
-                          userProfile: widget.userProfile,
+                          userProfile: _activeUserProfile,
                           currentServingGrams: _currentServingGrams,
                           currentSugarGrams: _currentSugarGrams,
                           currentCalories: _currentCalories,
@@ -2505,7 +2511,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                         await pdfService.printReport(
                           context: context,
                           product: widget.product,
-                          userProfile: widget.userProfile,
+                          userProfile: _activeUserProfile,
                           currentServingGrams: _currentServingGrams,
                           currentSugarGrams: _currentSugarGrams,
                           currentCalories: _currentCalories,
