@@ -220,9 +220,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
   }
 
   Future<void> _resumeCameraAfterHandoff() async {
-    if (!mounted || widget.useSimulatedFeed) return;
+    if (!mounted) return;
     _isProcessingScan = false;
     _isSheetOpen = false;
+    if (widget.useSimulatedFeed) return;
 
     final controller = _cameraController;
     if (controller != null && controller.value.isInitialized) {
@@ -490,10 +491,10 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
         return;
       }
 
-      // Stage 1: Buffer QR payload for 450ms while listening for 1D barcode
+      // Stage 1: Buffer QR payload for 150ms while listening for 1D barcode
       _pendingQrPayload = trimmed;
 
-      _qrDebounceTimer = Timer(const Duration(milliseconds: 450), () {
+      _qrDebounceTimer = Timer(const Duration(milliseconds: 150), () {
         if (!mounted || _isProcessingScan || _isSheetOpen) return;
         final payload = _pendingQrPayload;
         _pendingQrPayload = null;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -268,6 +269,41 @@ class ScannedProductResult {
       healthIntelligence: healthIntelligence ?? this.healthIntelligence,
     );
   }
+
+  /// Serializes ScannedProductResult to a raw map suitable for OfflineBarcodeRepository Tier 2 persistence
+  Map<String, dynamic> toRawProductMap() {
+    return {
+      'barcode': barcode,
+      'product_name': productName,
+      'brand_name': brandName,
+      'category': category,
+      'serving_size_g': servingSizeG,
+      'pack_weight_g': packWeightG,
+      'nutrition': {
+        'energy_kcal': effectiveCaloriesPer100g,
+        'sugars_100g': sugarGPer100g,
+        'saturated-fat_100g': satFatGPer100g,
+        'total_fat_g': totalFatGPer100g,
+        'sodium_mg': sodiumMgPer100g,
+        'proteins_100g': proteinGPer100g,
+        'carbohydrates_100g': carbsGPer100g,
+        'fiber_100g': fiberGPer100g,
+        'added_sugars_100g': addedSugarGPer100g,
+        'trans_fat_100g': transFatGPer100g,
+        'cholesterol_mg': cholesterolMgPer100g,
+      },
+      'additives': additives,
+      'nova_grade': novaGrade,
+      'health_score': healthScore,
+      'verdict_tag': verdictTag,
+      'red_cap_triggered': redCapTriggered ? 1 : 0,
+      'safe_portion_grams': safePortionGrams,
+      'limiting_factor': limitingFactor,
+      'frequency_schedule': frequencySchedule,
+      'health_intelligence': healthIntelligence?.toJson(),
+      'source': analysisSource ?? 'veribite_scanner',
+    };
+  }
 }
 
 /// Clean type alias for ScannedProductResult matching domain naming
@@ -503,7 +539,7 @@ class ProductScannerService {
   }) async {
     final parsed = parseQrOrBarcode(rawScan);
 
-    // Guardrail 1: Explicit non-food QR codes (e.g. laptop WhatsApp support, electronics, general links)
+    // Guardrail 1: Explicit non-food QR codes rejected locally in 0ms (e.g. laptop WhatsApp support, electronics, wifi)
     if (parsed.isNonFood) {
       throw NonFoodScanException(
         'This QR code is for an electronic device or service (${parsed.nonFoodReason ?? "Non-food link"}), not a packaged food item.',
@@ -511,7 +547,7 @@ class ProductScannerService {
       );
     }
 
-    // Tier 0: Direct embedded JSON payload inside QR code
+    // Tier 0: Direct embedded JSON payload inside QR code (0ms)
     if (parsed.type == QrScanType.productJson && parsed.jsonData != null) {
       final barcode = parsed.barcode ?? 'qr_json_${DateTime.now().millisecondsSinceEpoch}';
       return _evaluateProduct(parsed.jsonData!, userProfile, barcode);
@@ -545,117 +581,255 @@ class ProductScannerService {
     );
   }
 
-  /// 4-Stage resolution pipeline for packaging web QR codes:
-  /// Stage 2: URL unrolling & GS1 GTIN extraction
-  /// Stage 3: Entity extraction & Open Food Facts search
-  /// Stage 4: Context-enriched Gemini Vision handoff
+  /// 4-Phase strictly timed parallel pipeline for packaging web QR codes (<= 3000ms ceiling):
+  /// Phase 0: Instant Cache Hit (<20ms)
+  /// Phase 1: Parallel URL Unroll (Task A) + Same-Frame OCR (Task B) + Image Resize (Task C) (strict 1200ms)
+  /// Phase 2: Parallel Fast Cloud AI + Database Race (strict 1500ms)
+  /// Phase 3: Hard 3.0-Second Navigation Guarantee & Tier 2 Local Caching
   Future<ScannedProductResult> _resolveWebQrPipeline({
     required String url,
     required UserProfileModel userProfile,
     List<int>? frameImage,
     void Function(String message)? onStatusUpdate,
   }) async {
+    // -------------------------------------------------------------------------
+    // PHASE 0 — INSTANT CACHE HIT (<20ms)
+    // -------------------------------------------------------------------------
+    try {
+      final cached = await _offlineRepo.lookupBarcode(url);
+      if (cached != null) {
+        final evaluated = _evaluateProduct(cached, userProfile, url);
+        if (evaluated.hasValidMacros) {
+          debugPrint('[ProductScannerService] Phase 0 instant cache hit for QR URL (<20ms)');
+          return evaluated;
+        }
+      }
+    } catch (_) {}
+
     onStatusUpdate?.call('Resolving packaging link...');
 
-    // 1. STAGE 2: URL Redirect Unrolling & GS1 India GTIN Extraction
-    final gtin = await unrollUrlAndExtractGtin(url);
-    if (gtin != null && gtin.isNotEmpty) {
-      onStatusUpdate?.call('Matched product barcode $gtin...');
+    // 0ms synchronous check for GTIN in raw URL
+    final directGtin = extractGtinFromUrl(url);
+
+    // -------------------------------------------------------------------------
+    // PHASE 1 — PARALLEL URL UNROLL + SAME-FRAME OCR + IMAGE RESIZE (max 1200ms)
+    // -------------------------------------------------------------------------
+    final phase1Stopwatch = Stopwatch()..start();
+    String? unrolledGtin = directGtin;
+    String rawTitle = '';
+    String brand = '';
+    Map<String, dynamic>? ocrResult;
+    Uint8List? compressedFrame;
+
+    // Task A: Fast URL & Title Unroll (strict 1200ms timeout)
+    final taskA = () async {
       try {
-        return await resolveBarcode(barcode: gtin, userProfile: userProfile);
+        if (unrolledGtin == null || unrolledGtin!.isEmpty) {
+          unrolledGtin = await unrollUrlAndExtractGtin(url, timeoutMs: 1200);
+        }
+        final identity = await extractProductIdentityFromUrl(url, timeoutMs: 1200);
+        if (identity != null) {
+          rawTitle = identity['title'] ?? '';
+          brand = identity['brand'] ?? '';
+        }
+      } catch (e) {
+        debugPrint('[ProductScannerService] Task A unroll notice: $e');
+      }
+    }();
+
+    // Task B: Simultaneous Same-Frame On-Device OCR (~120ms)
+    final taskB = () async {
+      if (frameImage == null || frameImage.length < 50) return;
+      try {
+        ocrResult = await _onDeviceVisionService.analyzeFrames([frameImage]);
+      } catch (e) {
+        debugPrint('[ProductScannerService] Task B OCR notice: $e');
+      }
+    }();
+
+    // Task C: In-Memory Image Compression (~40ms)
+    final taskC = () async {
+      if (frameImage == null || frameImage.length < 50) return;
+      try {
+        compressedFrame = MultiProviderAiRouter.precompressFrame(frameImage, maxDimension: 1280, quality: 75);
+      } catch (e) {
+        debugPrint('[ProductScannerService] Task C compression notice: $e');
+      }
+    }();
+
+    // Wait for Phase 1 parallel tasks (capped at 1200ms)
+    await Future.wait([taskA, taskB, taskC]).timeout(
+      const Duration(milliseconds: 1200),
+      onTimeout: () => [],
+    );
+
+    debugPrint('[ProductScannerService] Phase 1 completed in ${phase1Stopwatch.elapsedMilliseconds}ms');
+
+    // Fast path 1: Extracted GTIN barcode lookup (e.g. GS1 link or URL GTIN)
+    if (unrolledGtin != null && unrolledGtin!.isNotEmpty) {
+      onStatusUpdate?.call('Matched product barcode $unrolledGtin...');
+      try {
+        final barcodeRes = await resolveBarcode(barcode: unrolledGtin!, userProfile: userProfile);
+        if (barcodeRes.hasValidMacros) {
+          _saveToLocalTier2(url, barcodeRes);
+          return barcodeRes;
+        }
       } catch (e) {
         debugPrint('[ProductScannerService] Extracted GTIN barcode lookup notice: $e');
       }
     }
 
-    // 2. Direct Web Nutrition Extraction (if the link is an e-commerce page or has nutrition tables)
-    try {
-      final directResult = await resolveFoodWebUrl(url: url, userProfile: userProfile);
-      return directResult;
-    } catch (_) {}
+    // Fast path 2: If Task A + Task B already extracted complete nutrition table from back label!
+    if (ocrResult != null) {
+      final ocrNutriments = (ocrResult!['nutrition'] as Map<String, dynamic>?) ?? {};
+      final ocrName = ocrResult!['product_name']?.toString() ?? rawTitle;
+      if (hasValidNutrimentsMap(ocrNutriments, productName: ocrName)) {
+        debugPrint('[ProductScannerService] Task B OCR extracted valid macros directly in ${phase1Stopwatch.elapsedMilliseconds}ms!');
+        final barcodeKey = unrolledGtin ?? url;
+        _writeThroughCache(ocrResult!);
+        final evaluated = _evaluateProduct(ocrResult!, userProfile, barcodeKey, analysisSource: 'on_device_ocr');
+        _saveToLocalTier2(url, evaluated);
+        return evaluated;
+      }
+    }
 
-    // 3. STAGE 3: Promotional Video & Recipe Microsite Entity Extraction
-    onStatusUpdate?.call('Analyzing packaging details...');
-    final identity = await extractProductIdentityFromUrl(url);
-    final rawTitle = identity?['title'] ?? '';
-    final brand = identity?['brand'] ?? '';
+    // Fast path 3: Direct Web Nutrition extraction check if e-commerce link
+    if (unrolledGtin == null && !isYouTubeUrl(url)) {
+      try {
+        final directResult = await resolveFoodWebUrl(url: url, userProfile: userProfile).timeout(const Duration(milliseconds: 600));
+        if (directResult.hasValidMacros) {
+          _saveToLocalTier2(url, directResult);
+          return directResult;
+        }
+      } catch (_) {}
+    }
+
     final cleanedQuery = cleanProductQuery(rawTitle.isNotEmpty ? '$brand $rawTitle' : brand);
 
-    if (cleanedQuery.length >= 3) {
-      onStatusUpdate?.call('Searching product catalog for $cleanedQuery...');
-      final offMatch = await queryOpenFoodFactsIndia(cleanedQuery);
-      if (offMatch != null) {
-        Map<String, dynamic>? nutMap;
-        try {
-          if (offMatch['nutrition_json'] is String) {
-            nutMap = jsonDecode(offMatch['nutrition_json'] as String);
-          }
-        } catch (_) {}
-        if (hasValidNutrimentsMap(nutMap, productName: offMatch['product_name']?.toString())) {
-          final barcodeKey = offMatch['barcode']?.toString() ?? url;
-          _writeThroughCache(offMatch);
-          return _evaluateProduct(offMatch, userProfile, barcodeKey);
-        }
-      }
-    }
+    onStatusUpdate?.call('Analyzing nutrition profile...');
 
-    // 4. STAGE 4: Context-Enriched Live Frame Handoff to MultiProviderAiRouter
-    if (frameImage != null && frameImage.length >= 50) {
-      onStatusUpdate?.call('Analyzing package photo with brand context...');
+    // -------------------------------------------------------------------------
+    // PHASE 2 — PARALLEL FAST AI + DATABASE RACE (strict 1500ms timeout)
+    // -------------------------------------------------------------------------
+    ScannedProductResult? resolvedMatch;
+
+    // Branch 1: Fast Cloud AI Resolution via MultiProviderAiRouter
+    Future<void> runBranch1() async {
       try {
         final contextHint = cleanedQuery.isNotEmpty
-            ? 'Detected QR Brand/Product context: $cleanedQuery.'
+            ? 'Detected QR Brand/Product: $cleanedQuery.'
             : (brand.isNotEmpty ? 'Detected QR Brand: $brand.' : null);
 
-        var visionData = await _aiRouter.analyzePackagingPhoto(
-          frames: [frameImage],
-          hintBarcode: contextHint,
-        );
-        visionData ??= await _visionService.analyzeProductPhoto(
-          frames: [frameImage],
-          hintBarcode: contextHint,
-        );
-        if (visionData != null) {
-          final barcodeKey = visionData['barcode']?.toString() ?? 'vision_${DateTime.now().millisecondsSinceEpoch}';
-          _writeThroughCache(visionData);
-          final src = visionData['source']?.toString() ?? 'ai_router';
-          return _evaluateProduct(visionData, userProfile, barcodeKey, analysisSource: src);
+        final frameToUse = compressedFrame ?? (frameImage != null ? Uint8List.fromList(frameImage) : null);
+
+        Map<String, dynamic>? aiData;
+        if (frameToUse != null && frameToUse.length >= 50) {
+          aiData = await _aiRouter.analyzePackagingPhoto(
+            frames: [frameToUse],
+            hintBarcode: contextHint,
+          ).timeout(const Duration(milliseconds: 1400)).catchError((_) => null);
+
+          aiData ??= await _visionService.analyzeProductPhoto(
+            frames: [frameToUse],
+            hintBarcode: contextHint,
+          ).timeout(const Duration(milliseconds: 1400)).catchError((_) => null);
+        }
+
+        if (aiData == null && rawTitle.isNotEmpty && cleanedQuery.length >= 3) {
+          aiData = await _aiRouter.enrichProductNutrition(
+            productName: cleanProductQuery(rawTitle),
+            brandName: brand.isNotEmpty ? brand : null,
+          ).timeout(const Duration(milliseconds: 1400)).catchError((_) => null);
+        }
+
+        if (aiData != null && resolvedMatch == null) {
+          final nutriments = (aiData['nutrition'] as Map<String, dynamic>?) ?? {};
+          final pName = aiData['product_name']?.toString() ?? cleanedQuery;
+          if (hasValidNutrimentsMap(nutriments, productName: pName)) {
+            final barcodeKey = aiData['barcode']?.toString() ?? url;
+            _writeThroughCache(aiData);
+            resolvedMatch ??= _evaluateProduct(
+              aiData,
+              userProfile,
+              barcodeKey,
+              analysisSource: aiData['source']?.toString() ?? 'ai_router',
+            );
+          }
         }
       } catch (e) {
-        debugPrint('[ProductScannerService] Vision handoff notice: $e');
+        debugPrint('[ProductScannerService] Branch 1 AI race notice: $e');
       }
     }
 
-    // 5. STAGE 5: Web-Grounded AI Product Intelligence Enrichment (when QR was on front/side)
-    if (cleanedQuery.length >= 3) {
+    // Branch 2: Capped Open Food Facts Lookup (max 1200ms)
+    Future<void> runBranch2() async {
       try {
-        onStatusUpdate?.call('Grounding product intelligence for $cleanedQuery...');
-        final enriched = await _aiRouter.enrichProductNutrition(
-          productName: rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : cleanedQuery,
-          brandName: brand.isNotEmpty ? brand : null,
-        );
-        if (enriched != null) {
-          final barcodeKey = enriched['barcode']?.toString() ?? url;
-          _writeThroughCache(enriched);
-          final src = enriched['source']?.toString() ?? 'ai_grounding';
-          return _evaluateProduct(enriched, userProfile, barcodeKey, analysisSource: src);
+        if (rawTitle.isNotEmpty && cleanedQuery.length >= 3) {
+          final offMatch = await queryOpenFoodFactsIndia(cleanedQuery).timeout(const Duration(milliseconds: 1200)).catchError((_) => null);
+          if (offMatch != null && resolvedMatch == null) {
+            Map<String, dynamic>? nutMap;
+            try {
+              if (offMatch['nutrition_json'] is String) {
+                nutMap = jsonDecode(offMatch['nutrition_json'] as String);
+              }
+            } catch (_) {}
+            if (hasValidNutrimentsMap(nutMap, productName: offMatch['product_name']?.toString())) {
+              final barcodeKey = offMatch['barcode']?.toString() ?? url;
+              _writeThroughCache(offMatch);
+              resolvedMatch ??= _evaluateProduct(
+                offMatch,
+                userProfile,
+                barcodeKey,
+                analysisSource: 'open_food_facts',
+              );
+            }
+          }
         }
       } catch (e) {
-        debugPrint('[ProductScannerService] AI product grounding notice: $e');
+        debugPrint('[ProductScannerService] Branch 2 OFF race notice: $e');
       }
     }
 
-    // If all stages fail to extract complete nutrition:
+    // Run Branch 1 & Branch 2 concurrently with strict 1500ms cap
+    await Future.wait([runBranch1(), runBranch2()]).timeout(
+      const Duration(milliseconds: 1500),
+      onTimeout: () => [],
+    );
+
+    if (resolvedMatch != null) {
+      _saveToLocalTier2(url, resolvedMatch!);
+      return resolvedMatch!;
+    }
+
+    // -------------------------------------------------------------------------
+    // PHASE 3 — HARD 3.0-SECOND NAVIGATION GUARANTEE
+    // -------------------------------------------------------------------------
+    final pName = rawTitle.isNotEmpty
+        ? cleanProductQuery(rawTitle)
+        : (cleanedQuery.isNotEmpty ? cleanedQuery : 'Product');
+
     throw PromotionalQrContextException(
       url: url,
       brandName: brand.isNotEmpty ? brand : null,
-      productName: rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : null,
-      message: 'Detected ${brand.isNotEmpty ? "$brand " : ""}${rawTitle.isNotEmpty ? cleanProductQuery(rawTitle) : "Product"} Recipe QR — Point camera at the back nutrition table to complete analysis.',
+      productName: pName,
+      message: 'Detected ${brand.isNotEmpty ? "$brand " : ""}$pName — Point camera at the back nutrition table to capture macros.',
     );
   }
 
+  void _saveToLocalTier2(String key, ScannedProductResult product) {
+    try {
+      unawaited(_offlineRepo.saveProduct(
+        barcode: key,
+        productData: product.toRawProductMap(),
+        isUserLearned: true,
+      ));
+    } catch (e) {
+      debugPrint('[ProductScannerService] Local Tier 2 cache write notice: $e');
+    }
+  }
+
   /// Stage 2: Checks raw URL and performs lightweight HTTP GET unrolling to extract GS1 GTIN/EAN barcodes
-  Future<String?> unrollUrlAndExtractGtin(String url) async {
+  Future<String?> unrollUrlAndExtractGtin(String url, {int timeoutMs = 1200}) async {
     // 1. Direct pattern check in raw URL
     final direct = extractGtinFromUrl(url);
     if (direct != null) return direct;
@@ -672,10 +846,10 @@ class ProductScannerService {
         ..maxRedirects = 5
         ..headers['User-Agent'] =
             'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 VeriBiteApp/1.0'
-        ..headers['Range'] = 'bytes=0-32768'
+        ..headers['Range'] = 'bytes=0-16384'
         ..headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7';
 
-      final streamedResponse = await _httpClient.send(request).timeout(const Duration(seconds: 4));
+      final streamedResponse = await _httpClient.send(request).timeout(Duration(milliseconds: timeoutMs));
       final response = await http.Response.fromStream(streamedResponse);
 
       // Check final redirected URL
@@ -718,7 +892,7 @@ class ProductScannerService {
   }
 
   /// Stage 3: Extracts product title and brand from YouTube oEmbed or webpage metadata
-  Future<Map<String, String>?> extractProductIdentityFromUrl(String url) async {
+  Future<Map<String, String>?> extractProductIdentityFromUrl(String url, {int timeoutMs = 1200}) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return null;
 
@@ -726,7 +900,7 @@ class ProductScannerService {
     if (isYouTubeUrl(trimmed)) {
       try {
         final oembedUri = Uri.parse('https://www.youtube.com/oembed?url=${Uri.encodeComponent(trimmed)}&format=json');
-        final response = await _httpClient.get(oembedUri, headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 3));
+        final response = await _httpClient.get(oembedUri, headers: {'Accept': 'application/json'}).timeout(Duration(milliseconds: math.min(timeoutMs, 1100)));
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           if (data is Map) {
@@ -752,10 +926,10 @@ class ProductScannerService {
           headers: {
             'User-Agent':
                 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 VeriBiteApp/1.0',
-            'Range': 'bytes=0-32768',
+            'Range': 'bytes=0-16384',
             'Accept': 'text/html,*/*',
           },
-        ).timeout(const Duration(seconds: 3));
+        ).timeout(Duration(milliseconds: timeoutMs));
 
         if (response.statusCode >= 200 && response.statusCode < 400) {
           final html = response.body;

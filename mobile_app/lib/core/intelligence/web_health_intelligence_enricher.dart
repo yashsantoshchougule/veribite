@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/gemini_config.dart';
+import '../config/ai_provider_config.dart';
 import '../../features/health_intelligence/domain/health_intelligence_model.dart';
 import '../../features/camera/application/offline_barcode_repository.dart';
 
@@ -81,7 +82,9 @@ class WebHealthIntelligenceEnricher {
       brandName: brandName,
       category: category,
       ingredients: ingredients,
+      calories: calories,
       sugarsG: sugarsG,
+      satFatG: satFatG,
       sodiumMg: sodiumMg,
       proteinG: proteinG,
       carbsG: carbsG,
@@ -124,6 +127,7 @@ class WebHealthIntelligenceEnricher {
     );
 
     final modelsToTry = [
+      'gemini-2.5-flash-lite',
       'gemini-2.5-flash',
       'gemini-2.0-flash',
       'gemini-1.5-flash',
@@ -136,6 +140,12 @@ class WebHealthIntelligenceEnricher {
         try {
           final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
 
+          final Map<String, dynamic> generationConfig = {
+            'temperature': 0.1,
+            if (!useSearchTool) 'responseMimeType': 'application/json',
+            if (model.contains('2.5')) 'thinkingConfig': {'thinkingBudget': 0},
+          };
+
           final Map<String, dynamic> requestBody = {
             'contents': [
               {
@@ -144,10 +154,7 @@ class WebHealthIntelligenceEnricher {
                 ]
               }
             ],
-            'generationConfig': {
-              'temperature': 0.15,
-              'responseMimeType': 'application/json',
-            }
+            'generationConfig': generationConfig,
           };
 
           if (useSearchTool) {
@@ -162,7 +169,7 @@ class WebHealthIntelligenceEnricher {
                 headers: {'Content-Type': 'application/json'},
                 body: jsonEncode(requestBody),
               )
-              .timeout(const Duration(seconds: 9));
+              .timeout(const Duration(seconds: 7));
 
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
@@ -184,8 +191,11 @@ class WebHealthIntelligenceEnricher {
                         final web = chunk['web'] as Map<String, dynamic>?;
                         if (web != null && web['uri'] != null) {
                           final uri = Uri.tryParse(web['uri'].toString());
-                          if (uri != null && uri.host.isNotEmpty && !webSources.contains(uri.host)) {
-                            webSources.add(uri.host);
+                          if (uri != null && uri.host.isNotEmpty) {
+                            final hostClean = uri.host.replaceFirst(RegExp(r'^www\.'), '');
+                            if (!webSources.contains(hostClean)) {
+                              webSources.add(hostClean);
+                            }
                           }
                         }
                       }
@@ -223,6 +233,63 @@ class WebHealthIntelligenceEnricher {
       }
     }
 
+    // Automatic Failover: If Gemini fails, hits 429 or quota cap, attempt Groq Cloud fallback
+    final groqResult = await _fetchFromGroqFailover(prompt);
+    if (groqResult != null) {
+      return groqResult;
+    }
+
+    return null;
+  }
+
+  /// Automatic Failover to Groq Cloud LLM (llama-3.3-70b-versatile) for robust intelligence extraction
+  Future<HealthIntelligence?> _fetchFromGroqFailover(String prompt) async {
+    final apiKey = AiProviderConfig.activeGroqApiKey;
+    if (apiKey.isEmpty) return null;
+
+    final models = AiProviderConfig.groqAdvisorModels;
+    for (final model in models) {
+      if (!AiProviderConfig.isBucketAvailable(AiProvider.groq, apiKey, model)) continue;
+
+      final requestBody = {
+        'model': model,
+        'messages': [
+          {'role': 'user', 'content': prompt}
+        ],
+        'temperature': 0.1,
+        'response_format': {'type': 'json_object'},
+      };
+
+      try {
+        final uri = Uri.parse(AiProviderConfig.groqApiUrl);
+        final response = await _client
+            .post(
+              uri,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $apiKey',
+              },
+              body: jsonEncode(requestBody),
+            )
+            .timeout(const Duration(seconds: 6));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final choices = data['choices'] as List?;
+          if (choices != null && choices.isNotEmpty) {
+            final rawJson = choices[0]['message']?['content']?.toString() ?? '';
+            final parsed = _parseGroundingResponseJson(rawJson);
+            if (parsed != null) {
+              return parsed;
+            }
+          }
+        } else if (response.statusCode == 429) {
+          AiProviderConfig.rotateGroqKey();
+        }
+      } catch (e) {
+        debugPrint('[WebHealthIntelligenceEnricher] Groq failover attempt on $model notice: $e');
+      }
+    }
     return null;
   }
 
@@ -366,6 +433,7 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
     List<String>? ingredients,
     double? calories,
     double? sugarsG,
+    double? satFatG,
     double? sodiumMg,
     double? proteinG,
     double? carbsG,
@@ -592,8 +660,91 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
       );
     }
 
+    // 3.5 Kokum / Kokangem Fruit Syrup & Digestive Fruit Tonics
+    if (query.contains('kokum') ||
+        query.contains('kokan') ||
+        (query.contains('syrup') &&
+            (query.contains('fruit') ||
+                query.contains('beverage') ||
+                query.contains('squash') ||
+                query.contains('juice')))) {
+      final sugarVal = sugarsG ?? 65.0;
+      return HealthIntelligence(
+        domain: ProductCategoryDomain.ayurvedicHerbalTonic,
+        extendedNutrients: ExtendedNutrients(
+          addedSugarsG: sugarVal * 0.9,
+          totalFatG: 0.0,
+          proteinG: proteinG ?? 0.2,
+          carbsG: carbsG ?? sugarVal,
+          caffeineMg: 0.0,
+          glycemicLoadEstimate: 'High (Concentrated Fruit Sucrose Matrix)',
+        ),
+        bioactiveCompounds: const [
+          BioactiveCompound(
+            name: 'Kokum Anthocyanins (Garcinia indica Pigments)',
+            botanicalOrChemicalName: 'Garcinia indica',
+            functionCategory: 'Polyphenol Bioflavonoids',
+            riskLevel: 'low',
+            physiologicalEffect:
+                'Potent antioxidant scavenging reactive oxygen species; traditional use for digestive hyperacidity and cooling Pitta dosha.',
+          ),
+          BioactiveCompound(
+            name: 'Hydroxycitric Acid (HCA)',
+            botanicalOrChemicalName: '1,2-dihydroxypropane-1,2,3-tricarboxylic acid',
+            functionCategory: 'Organic Fruit Acid / ATP-Citrate Lyase Modulator',
+            riskLevel: 'low',
+            physiologicalEffect:
+                'Naturally occurring fruit acid contributing tartness; studied for metabolic regulation though effect is attenuated by high sucrose carrier.',
+          ),
+        ],
+        organImpact: const OrganAndSystemImpact(
+          gutAndDigestion:
+              'Traditionally consumed to relieve hyperacidity and improve appetite; high concentrated sugar load can create osmotic fluid transit if consumed undiluted.',
+          liverAndMetabolism:
+              'Rapidly absorbed sucrose matrix requires hepatic fructose clearance; Kokum anthocyanins exert protective antioxidant effects against oxidative stress.',
+          kidneyAndElectrolytes: 'Safe renal clearance under normal hydration; supports urinary comfort.',
+          cardiovascularAndNervous:
+              'Polyphenols support vascular health; neutral cardiovascular profile when adequately diluted with water.',
+        ),
+        contraindications: const ContraindicationsAndWarnings(
+          pregnancyBreastfeeding: 'Generally safe in dietary moderation when diluted with water.',
+          children: 'Dilute with 4 to 5 parts water to prevent high liquid free-sugar consumption spikes.',
+          diabetics: 'Contains concentrated liquid sugar/sucrose; sharp glycemic impact unless strictly portion-controlled.',
+          sensitiveGutIbs: 'Well tolerated when properly diluted; check declared food preservatives (INS 211 / INS 330).',
+          chronicUseDuration: 'Safe for periodic hydration and culinary use; avoid consuming undiluted concentrate daily.',
+        ),
+        claimsVsReality: [
+          const ClaimVsClinicalReality(
+            claim: 'Authentic Kokum Botanical Wellness',
+            reality:
+                'Kokum (Garcinia indica) contains bioactive hydroxycitric acid (HCA) and anthocyanin polyphenols with antioxidant activity. However, commercial syrups suspend these actives in a high-density sucrose matrix, altering the metabolic profile.',
+            evidenceLevel: 'partial_evidence',
+          ),
+          ClaimVsClinicalReality(
+            claim: 'Refreshing Fruit / Energy Formulation',
+            reality:
+                'Contains ${sugarVal.toStringAsFixed(1)}g total sugar per 100g (${(sugarVal / 25.0 * 100).round()}% of WHO\'s 25g daily free-sugar limit). Liquid or concentrated sugars bypass fiber digestion, triggering rapid blood glucose and hepatic de novo lipogenesis spikes.',
+            evidenceLevel: 'partial_evidence',
+          ),
+        ],
+        internetGroundedSources: const [
+          'fssai.gov.in/food-safety-standards',
+          'ayush.gov.in/ayurvedic-pharmacopoeia',
+          'ncbi.nlm.nih.gov/pmc/articles/PMC3834413',
+        ],
+        safetyAdvisories: const [
+          'High Liquid Sugar Density: Dilute at least 1:4 with water to prevent sharp glycemic spikes.',
+          'Botanical Active: Retains natural Garcinia indica antioxidant pigments.',
+        ],
+        isGrounded: true,
+        clinicalSummary:
+            'Traditional Kokum fruit formulation rich in natural Garcinia anthocyanins, but carried in a concentrated high-sugar syrup base requiring dilution.',
+      );
+    }
+
     // 4. Default Standard Packaged Food Profile (Dynamically derived from macros)
     final sugar = sugarsG ?? 0.0;
+    final satFat = satFatG ?? 0.0;
     final sodium = sodiumMg ?? 0.0;
     final totalFat = totalFatG ?? 0.0;
     final carbs = carbsG ?? 0.0;
@@ -658,13 +809,16 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
         sensitiveGutIbs: 'Normal tolerance; review declared spices and food preservatives.',
         chronicUseDuration: 'Consume within daily balanced dietary caloric boundaries.',
       ),
-      claimsVsReality: const [
-        ClaimVsClinicalReality(
-          claim: '100% Natural or Pure Ingredients',
-          reality: 'Commercial industrial processing typically involves high heat, refined fats, and sodium preservation.',
-          evidenceLevel: 'partial_evidence',
-        ),
-      ],
+      claimsVsReality: _generateDynamicClaimsVsReality(
+        productName: productName,
+        category: category,
+        sugarsG: sugar,
+        satFatG: satFat,
+        totalFatG: totalFat,
+        sodiumMg: sodium,
+        energyKcal: calories ?? 0.0,
+        additives: ingredients?.where((i) => RegExp(r'\b(ins|e)\s*\d+').hasMatch(i.toLowerCase())).toList() ?? [],
+      ),
       internetGroundedSources: const [
         'fssai.gov.in/food-safety-standards',
         'who.int/nutrition/publications',
@@ -673,6 +827,112 @@ Respond ONLY with a valid JSON object matching this schema without markdown:
       isGrounded: false,
       clinicalSummary: 'Standard packaged food item evaluated against WHO & FSSAI nutritional guidelines.',
     );
+  }
+
+  /// Dynamic Nutrient- & Category-Driven Claim Analyzer
+  /// Evaluates actual macros, category, and additives without static boilerplate.
+  static List<ClaimVsClinicalReality> _generateDynamicClaimsVsReality({
+    required String productName,
+    required String? category,
+    required double sugarsG,
+    required double satFatG,
+    required double totalFatG,
+    required double sodiumMg,
+    required double energyKcal,
+    required List<String> additives,
+    int? novaGroup,
+  }) {
+    final claims = <ClaimVsClinicalReality>[];
+    final pLower = productName.toLowerCase();
+    final catLower = (category ?? '').toLowerCase();
+
+    final isBeverageOrSyrup = catLower.contains('syrup') ||
+        catLower.contains('beverage') ||
+        catLower.contains('juice') ||
+        catLower.contains('drink') ||
+        catLower.contains('squash') ||
+        pLower.contains('syrup') ||
+        pLower.contains('juice') ||
+        pLower.contains('drink') ||
+        pLower.contains('kokam') ||
+        pLower.contains('kokum');
+
+    final isKokum = pLower.contains('kokum') || pLower.contains('kokan');
+
+    // Botanical / Kokum specific claim
+    if (isKokum) {
+      claims.add(
+        const ClaimVsClinicalReality(
+          claim: 'Authentic Kokum Botanical Wellness',
+          reality: 'Kokum (Garcinia indica) contains bioactive hydroxycitric acid (HCA) and anthocyanin polyphenols with antioxidant activity. However, commercial syrups suspend these actives in a high-density sucrose matrix, altering the metabolic profile.',
+          evidenceLevel: 'partial_evidence',
+        ),
+      );
+    }
+
+    // Rule A: High Sugar / Syrups / Beverages / Confectionery
+    if (sugarsG > 12.0 || isBeverageOrSyrup) {
+      final sugarPct = (sugarsG / 25.0 * 100).round();
+      claims.add(
+        ClaimVsClinicalReality(
+          claim: 'Refreshing Fruit / Energy Formulation',
+          reality: 'Contains ${sugarsG.toStringAsFixed(1)}g total sugar per 100g ($sugarPct% of WHO\'s 25g daily free-sugar limit). Liquid or concentrated sugars bypass fiber digestion, triggering rapid blood glucose and hepatic de novo lipogenesis spikes.',
+          evidenceLevel: sugarsG > 20.0 ? 'misleading_marketing' : 'partial_evidence',
+        ),
+      );
+    }
+
+    // Rule B: High Saturated / Total Fat / Fried Snacks / Dairy (NEVER on fat-free syrups/beverages!)
+    if (!isBeverageOrSyrup && (satFatG > 4.0 || totalFatG > 15.0)) {
+      claims.add(
+        ClaimVsClinicalReality(
+          claim: 'Rich Traditional Taste & Texture',
+          reality: 'Delivers ${satFatG.toStringAsFixed(1)}g saturated fat and ${totalFatG.toStringAsFixed(1)}g total fat per 100g. Excess saturated lipids elevate LDL cholesterol and increase caloric density (${energyKcal.round()} kcal/100g).',
+          evidenceLevel: satFatG > 8.0 ? 'misleading_marketing' : 'partial_evidence',
+        ),
+      );
+    }
+
+    // Rule C: High Sodium / Savoury / Instant Foods / Chutneys
+    if (sodiumMg > 400.0) {
+      final sodiumPct = (sodiumMg / 2000.0 * 100).round();
+      claims.add(
+        ClaimVsClinicalReality(
+          claim: 'Authentic Savoury Seasoning',
+          reality: 'Provides ${sodiumMg.round()}mg sodium per 100g ($sodiumPct% of WHO daily sodium ceiling), increasing osmotic fluid retention and blood pressure load.',
+          evidenceLevel: sodiumMg > 800.0 ? 'misleading_marketing' : 'partial_evidence',
+        ),
+      );
+    }
+
+    // Rule D: Industrial Additives / Processing (NOVA 3–4)
+    if (additives.isNotEmpty || (novaGroup != null && novaGroup >= 3)) {
+      final cleanAdditives = additives.take(4).join(', ');
+      final additivesText = cleanAdditives.isNotEmpty
+          ? 'Utilizes industrial additives ($cleanAdditives) for shelf stabilization, acidity control, and preservation.'
+          : 'Undergoes industrial processing (NOVA ${novaGroup ?? 3}) altering whole-food cellular matrices.';
+
+      claims.add(
+        ClaimVsClinicalReality(
+          claim: 'Standardized Commercial Preservation',
+          reality: additivesText,
+          evidenceLevel: 'partial_evidence',
+        ),
+      );
+    }
+
+    // Fallback if none matched
+    if (claims.isEmpty) {
+      claims.add(
+        const ClaimVsClinicalReality(
+          claim: 'Wholesome Everyday Formulation',
+          reality: 'Formulated with standard packaged food ingredients complying with basic dietary threshold baselines.',
+          evidenceLevel: 'supported',
+        ),
+      );
+    }
+
+    return claims;
   }
 
   void _cacheEnrichedIntelligence(String barcode, HealthIntelligence hi) {

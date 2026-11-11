@@ -244,16 +244,26 @@ class OfflineBarcodeRepository {
   /// Exact O(1) Barcode Lookup (< 1ms)
   /// Checks Tier 2 (read-write cache) first, then Tier 1 (pre-bundled seed).
   Future<Map<String, dynamic>?> lookupBarcode(String barcode) async {
-    await ensureInitialized();
-
-    // 1. Check Tier 2 persistent cache
+    // 1. Fast in-memory check (0ms)
     if (_tier2Cache.containsKey(barcode)) {
       return Map<String, dynamic>.from(_tier2Cache[barcode]!);
     }
-
-    // 2. Check Tier 1 pre-bundled seed
     if (_tier1Seed.containsKey(barcode)) {
       return Map<String, dynamic>.from(_tier1Seed[barcode]!);
+    }
+
+    if (!_isInitialized) {
+      try {
+        await ensureInitialized().timeout(const Duration(milliseconds: 400));
+      } catch (_) {
+        _isInitialized = true;
+      }
+      if (_tier2Cache.containsKey(barcode)) {
+        return Map<String, dynamic>.from(_tier2Cache[barcode]!);
+      }
+      if (_tier1Seed.containsKey(barcode)) {
+        return Map<String, dynamic>.from(_tier1Seed[barcode]!);
+      }
     }
 
     return null;

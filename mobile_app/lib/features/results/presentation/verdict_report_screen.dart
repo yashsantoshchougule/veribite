@@ -8,6 +8,7 @@ import '../../advisor/application/tts_voice_service.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
+import '../../camera/application/offline_barcode_repository.dart';
 import '../../health_intelligence/domain/health_intelligence_model.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
@@ -281,6 +282,8 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   double get _currentTransFatGrams => double.parse((_product.transFatGPer100g * _portionRatio).toStringAsFixed(1));
   double get _currentCholesterolMg => double.parse((_product.cholesterolMgPer100g * _portionRatio).toStringAsFixed(0));
 
+  DateTime? _lastWebEnrichedAt;
+
   Future<void> _refreshWebHealthIntelligence() async {
     if (_isRefreshingIntelligence) return;
     setState(() => _isRefreshingIntelligence = true);
@@ -291,16 +294,29 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
         product: _product,
         forceRefresh: true,
       );
+
+      // Persist enriched intelligence to local Tier 2 cache
+      try {
+        await OfflineBarcodeRepository.instance.saveProduct(
+          barcode: _product.barcode,
+          productData: updated.toRawProductMap(),
+          isUserLearned: true,
+        );
+      } catch (e) {
+        debugPrint('[VerdictReportScreen] Tier 2 cache save notice: $e');
+      }
+
       if (mounted) {
         setState(() {
           _product = updated;
           _isRefreshingIntelligence = false;
+          _lastWebEnrichedAt = DateTime.now();
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Updated with live internet health intelligence!'),
+            content: Text('✓ Live Web & Clinical Intelligence Verified (Updated just now)'),
             backgroundColor: AppColors.safetyGreen,
-            duration: Duration(seconds: 2),
+            duration: Duration(seconds: 3),
           ),
         );
       }
@@ -1773,11 +1789,22 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                             )
                           : const Icon(Icons.travel_explore_rounded, size: 18),
                       label: Text(
-                        _isRefreshingIntelligence ? 'Querying Web Clinical Evidence...' : 'Deep-Search Live Web Intelligence',
+                        _isRefreshingIntelligence
+                            ? '⏳ Deep-Searching FSSAI, PubMed & Live Web for ${_product.productName}...'
+                            : 'Deep-Search Live Web Intelligence',
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
+                  if (_lastWebEnrichedAt != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '✓ Live Web Intelligence synced ${_lastWebEnrichedAt!.hour.toString().padLeft(2, '0')}:${_lastWebEnrichedAt!.minute.toString().padLeft(2, '0')}',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.safetyGreen),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ],
               ),
             ),
