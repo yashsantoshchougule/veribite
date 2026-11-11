@@ -508,6 +508,70 @@ void main() {
       );
     });
 
+    test('isNonFoodCategoryOrItem identifies non-food products and categories accurately', () {
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Electronics', 'HP Victus Laptop'), isTrue);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Computers', 'MacBook Air M2'), isTrue);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Gadgets', 'iPhone 15 Pro'), isTrue);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Furniture', 'Office Ergonomic Chair'), isTrue);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Vehicles', 'Motorcycle Helmet'), isTrue);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Stationery', 'Ballpoint Pen'), isTrue);
+
+      // Verify legitimate food items do NOT get falsely flagged as non-food
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Dairy', 'Amul Table Butter'), isFalse);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Condiments', 'Tata Table Salt'), isFalse);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Snacks & Namkeen', 'Kurkure Masala Munch'), isFalse);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Instant Noodles', '2-Minute Masala Noodles'), isFalse);
+      expect(ProductScannerService.isNonFoodCategoryOrItem('Beverages & Juices', 'Badam Drink Mix'), isFalse);
+    });
+
+    test('throws NonFoodScanException when Vision AI extracts a non-food item (e.g. HP Victus Laptop)', () async {
+      final mockGeminiNonFood = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'is_food_or_beverage': false,
+                    'non_food_reason': 'This is an HP laptop computer, which is an electronic device, not a packaged food item.',
+                    'detected_object_name': 'HP Victus Laptop',
+                    'detected_category': 'Electronics',
+                    'product_name': 'HP Victus Laptop',
+                    'brand_name': 'HP',
+                    'category': 'Electronics',
+                    'nutrition': {},
+                    'ingredients': [],
+                    'additives': [],
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        return http.Response(jsonEncode(mockGeminiNonFood), 200, headers: {'content-type': 'application/json'});
+      });
+
+      final service = ProductScannerService(httpClient: mockClient);
+      final frames = [
+        List<int>.generate(200, (i) => i % 255),
+      ];
+
+      expect(
+        () => service.resolveMultiAngleScan(
+          frames: frames,
+          userProfile: defaultUser,
+        ),
+        throwsA(isA<NonFoodScanException>().having(
+          (e) => e.message,
+          'message',
+          contains('electronic device'),
+        )),
+      );
+    });
+
     test('resolves Indian packaged product offline directly from Tier 1 seed database', () async {
       final service = ProductScannerService();
 

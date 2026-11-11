@@ -734,11 +734,11 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       _activeScanningStatus = 'Extracting nutrition facts & additives...';
     });
 
+    String? targetBarcode = _pendingBindingBarcode;
     try {
       final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
 
       // Opportunistically detect any visible 1D/2D barcode directly on the photographed frame
-      String? targetBarcode = _pendingBindingBarcode;
       if (targetBarcode == null || targetBarcode.isEmpty) {
         targetBarcode = await _detectBarcodeFromFrames([frameBytes]);
       }
@@ -799,6 +799,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
 
       if (mounted) setState(() => _isProcessingScan = false);
       await _showScanResultReport(resolvedProduct, activeProfile);
+    } on NonFoodScanException catch (e) {
+      debugPrint('[SmartCameraScreen] Non-food item detected in preview photo: ${e.message}');
+      if (mounted) {
+        setState(() => _isProcessingScan = false);
+        await _showNonFoodDialog(e.message, targetBarcode ?? 'camera_preview');
+      }
     } on VisionExtractionException catch (e) {
       debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
       if (mounted) {
@@ -952,12 +958,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
 
     setState(() => _isProcessingScan = true);
     final activeProfile = _profile ?? UserProfileModel.defaults(widget.userId ?? 'guest_user');
+    String? targetBarcode = _pendingBindingBarcode;
 
     try {
       unawaited(HapticFeedback.mediumImpact().catchError((_) => null));
 
       // Opportunistically detect any visible 1D/2D barcode directly on the photographed frames
-      String? targetBarcode = _pendingBindingBarcode;
       if (targetBarcode == null || targetBarcode.isEmpty) {
         targetBarcode = await _detectBarcodeFromFrames(frames);
       }
@@ -1020,6 +1026,12 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
       await _showScanResultReport(resolvedProduct, activeProfile);
 
       ref.read(cameraScanNotifierProvider.notifier).clearMultiAngleFrames();
+    } on NonFoodScanException catch (e) {
+      debugPrint('[SmartCameraScreen] Non-food item detected in multi-angle frames: ${e.message}');
+      if (mounted) {
+        setState(() => _isProcessingScan = false);
+        await _showNonFoodDialog(e.message, targetBarcode ?? 'multi_angle_photo');
+      }
     } on VisionExtractionException catch (e) {
       debugPrint('[SmartCameraScreen] Vision extraction failed: ${e.message}');
       if (mounted) {

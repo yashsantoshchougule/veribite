@@ -353,6 +353,71 @@ void main() {
     expect(find.textContaining('MTR'), findsWidgets);
   });
 
+  testWidgets('SmartCameraScreen capturing non-food item (HP Victus Laptop) displays Not a Food Product sheet and blocks VerdictReportScreen', (tester) async {
+    final mockGeminiNonFood = {
+      'candidates': [
+        {
+          'content': {
+            'parts': [
+              {
+                'text': jsonEncode({
+                  'is_food_or_beverage': false,
+                  'non_food_reason': 'This is an HP laptop computer, which is an electronic device, not a packaged food item.',
+                  'detected_object_name': 'HP Victus Laptop',
+                  'detected_category': 'Electronics',
+                  'product_name': 'HP Victus Laptop',
+                  'brand_name': 'HP',
+                  'category': 'Electronics',
+                  'nutrition': {},
+                  'ingredients': [],
+                  'additives': [],
+                })
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    final mockClient = MockClient((request) async {
+      return http.Response(jsonEncode(mockGeminiNonFood), 200, headers: {'content-type': 'application/json'});
+    });
+    final customProductService = ProductScannerService(httpClient: mockClient);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(
+            useSimulatedFeed: true,
+            disableResultSheet: false,
+            productService: customProductService,
+          ),
+        ),
+      ),
+    );
+
+    // Switch to Curved Bottle / Multi-Angle mode
+    await tester.tap(find.text('Curved Bottle'));
+    await tester.pumpAndSettle();
+
+    // Capture 1 frame via shutter
+    final shutter = find.byIcon(Icons.camera_alt_rounded);
+    await tester.tap(shutter);
+    await tester.pumpAndSettle();
+
+    // Submit Multi-Angle Cloud Scan
+    final submitBtn = find.text('Submit Multi-Angle Cloud Scan');
+    await tester.tap(submitBtn);
+    await tester.pumpAndSettle();
+
+    // Verify Not a Food Product sheet is shown
+    expect(find.text('Not a Food Product'), findsOneWidget);
+    expect(find.textContaining('HP laptop computer'), findsOneWidget);
+
+    // Verify VerdictReportScreen did NOT open
+    expect(find.byType(VerdictReportScreen), findsNothing);
+  });
+
   testWidgets('SmartCameraScreen simulated promotional QR scan surfaces context sheet and transitions to multi-angle mode', (tester) async {
     final mockClient = MockClient((request) async {
       return http.Response('Not Found', 404);

@@ -967,11 +967,21 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
 
   String _buildVisionExtractionPrompt({String? hintBarcode}) {
     return '''
-You are an expert food safety, toxicology, and clinical nutrition analyst.
-Analyze this photo of a packaged food product, bottle, can, or nutrition facts label.
+You are an expert food safety, toxicology, and clinical nutrition analyst for VeriBite.
+Analyze this photo to determine if it contains an edible food product, beverage, dietary supplement, or packaged grocery item.
 
-CRITICAL INSTRUCTIONS FOR NUTRITION EXTRACTION:
-1. FIRST, inspect the entire image for ANY printed Nutrition Information / Nutrition Facts table or Ingredients list. If visible anywhere in the frame (even if small, partial, angled, or adjacent to a QR code/barcode), extract the exact printed Per-100g values:
+CRITICAL STEP 1: FOOD CLASSIFICATION & GUARDRAILS
+1. Determine if the photographed object is an edible food product, beverage, dietary supplement, or packaged grocery item.
+2. If the image shows a NON-FOOD object (such as a laptop, computer, smartphone, electronics, gadget, person, animal, vehicle, furniture, clothing, footwear, book, document, stationery, tool, hardware, household cleaning chemical, cosmetic, or toy):
+   - Set "is_food_or_beverage": false
+   - Set "non_food_reason": "Clear explanation of what was detected and why it is not an edible food or beverage product (e.g. 'This is an HP laptop computer, which is an electronic device, not an edible food or drink.')"
+   - Set "detected_object_name": "<name of detected object, e.g. 'HP Victus Laptop'>"
+   - Set "detected_category": "<non-food category, e.g. 'Electronics'>"
+   - Leave nutrition and ingredients empty.
+3. ONLY if the image contains an edible food product, beverage, supplement, or grocery package, set "is_food_or_beverage": true.
+
+CRITICAL STEP 2: NUTRITION EXTRACTION (FOR FOOD PRODUCTS ONLY)
+1. Inspect the entire image for ANY printed Nutrition Information / Nutrition Facts table or Ingredients list. If visible anywhere in the frame (even if small, partial, angled, or adjacent to a QR code/barcode), extract the exact printed Per-100g values:
    - Energy (kcal and kJ)
    - Carbohydrates, Total Sugar, Added Sugar
    - Total Fat, Saturated Fat, Trans Fat
@@ -979,32 +989,39 @@ CRITICAL INSTRUCTIONS FOR NUTRITION EXTRACTION:
 2. Indian packaging frequently splits the nutrition table into TWO SIDE-BY-SIDE COLUMNS (e.g. Left table: Energy, Total Fat, Saturated Fat, Trans Fat, Carbohydrates; Right table: Total Sugar, Added Sugar, Protein, Cholesterol, Sodium, Dietary Fibre). Carefully read both columns!
 3. ALWAYS extract values from the "100g" / "Per 100g" column. DO NOT extract from "% RDA per 100g" or "% RDA per Serve" percentage columns!
 4. If "% RDA per 100g" and "% RDA per Serve" are printed, also extract them as "rda_per_100g" and "rda_per_serve" so exact serving size can be calculated: (rda_per_serve / rda_per_100g) * 100.
-5. SECOND, if this image was captured from a product front/side where the nutrition table is not clearly legible, but product identification/brand/packaging is visible (or indicated by the hint below), use your verified nutritional knowledge and web grounding to retrieve and populate the accurate Per-100g nutritional profile, ingredients, additives, and mark "is_ai_enriched": true.
+5. If this image was captured from a food product front/side where the nutrition table is not clearly legible, but product identification/brand/packaging is visible (or indicated by the hint below), use your verified nutritional knowledge and web grounding to retrieve and populate the accurate Per-100g nutritional profile, ingredients, additives, and mark "is_ai_enriched": true.
 
-Extract the exact information:
-1. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "Amul Butter", "Schezwan Chutney").
-2. "brand_name": Manufacturer brand (e.g., "Kwality", "Amul", "Britannia", "Ching's Secret").
-3. "category": Food category (e.g., "Bakery & Breads", "Sauces & Condiments", "Pickles & Chutneys", "Snacks & Namkeen").
-4. "serving_size_g": Serving size in grams or ml (default to 30.0 if not specified).
-5. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0, 250.0).
-6. "nutrition": Object with numeric values per 100g:
-   - "energy_kcal": Energy in kcal per 100g (e.g., 368.00)
-   - "energy_kj": Energy in kJ per 100g (if kcal printed, multiply kcal by 4.184)
-   - "sugar_g_per_100g": Total sugars in grams per 100g
-   - "added_sugar_g_per_100g": Added sugars in grams per 100g
-   - "total_fat_g_per_100g": Total fat in grams per 100g
-   - "sat_fat_g_per_100g": Saturated fat in grams per 100g
-   - "trans_fat_g_per_100g": Trans fat in grams per 100g
-   - "carbohydrates_g_per_100g": Total carbohydrate in grams per 100g
-   - "protein_g": Protein in grams per 100g
-   - "sodium_mg_per_100g": Sodium in mg per 100g (if salt in g printed, salt_g * 400)
-   - "cholesterol_mg_per_100g": Cholesterol in mg per 100g
-   - "fiber_g": Dietary fiber in grams per 100g
-7. "ingredients": List of ingredient strings printed on the package or known for this product.
-8. "additives": List of detected food additives with "ins_code", "primary_name", and "risk_tier" ("GREEN", "CAUTION", or "RED").
-9. "bioactive_compounds": List of detected herbs/alkaloids/bioactives (e.g., Senna, Caffeine, Ashwagandha) or empty list.
-10. "warnings": List of clinical cautions (e.g., "High Sodium", "Contains Gluten") or empty list.
-11. "is_ai_enriched": Boolean (true if values were enriched via nutritional knowledge because label was not fully readable, false if directly read from printed label).
+Extract the exact information in this JSON schema:
+{
+  "is_food_or_beverage": true,
+  "non_food_reason": "",
+  "detected_object_name": "Full name of detected item",
+  "detected_category": "Category name",
+  "product_name": "Full product name (e.g., 'Kreamy Magic Cream Pav', 'Amul Butter', 'Schezwan Chutney')",
+  "brand_name": "Manufacturer brand (e.g., 'Kwality', 'Amul', 'Britannia', 'Chings Secret')",
+  "category": "Food category (e.g., 'Bakery & Breads', 'Sauces & Condiments', 'Snacks & Namkeen')",
+  "serving_size_g": 30.0,
+  "pack_weight_g": 100.0,
+  "nutrition": {
+    "energy_kcal": 368.0,
+    "energy_kj": 1540.0,
+    "sugar_g_per_100g": 12.0,
+    "added_sugar_g_per_100g": 8.0,
+    "total_fat_g_per_100g": 10.0,
+    "sat_fat_g_per_100g": 4.0,
+    "trans_fat_g_per_100g": 0.1,
+    "carbohydrates_g_per_100g": 60.0,
+    "protein_g": 7.0,
+    "sodium_mg_per_100g": 450.0,
+    "cholesterol_mg_per_100g": 5.0,
+    "fiber_g": 2.0
+  },
+  "ingredients": ["List of ingredients"],
+  "additives": [{"ins_code": "500", "primary_name": "Sodium carbonates", "risk_tier": "GREEN"}],
+  "bioactive_compounds": [],
+  "warnings": [],
+  "is_ai_enriched": false
+}
 
 ${hintBarcode != null ? 'Note: Scanned QR/barcode and product context hint: $hintBarcode.' : ''}
 Respond ONLY with a valid JSON object matching this schema without any markdown formatting.

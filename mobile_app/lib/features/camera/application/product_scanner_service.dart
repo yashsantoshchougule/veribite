@@ -17,12 +17,17 @@ import '../../../services/product_health_scorer.dart';
 import '../../profile/domain/user_profile_model.dart';
 import 'offline_barcode_repository.dart';
 
-/// Thrown when a scanned QR code belongs to electronics, laptop support, or non-food services
+/// Thrown when a scanned QR code, barcode, or photo belongs to non-food items (electronics, laptops, furniture, etc.)
 class NonFoodScanException implements Exception {
   final String message;
   final String? domainOrType;
+  final String? detectedObjectName;
 
-  NonFoodScanException(this.message, {this.domainOrType});
+  NonFoodScanException(
+    this.message, {
+    this.domainOrType,
+    this.detectedObjectName,
+  });
 
   @override
   String toString() => message;
@@ -521,6 +526,150 @@ class ProductScannerService {
 
     return capitalized.isNotEmpty ? capitalized : 'Brand Not Listed';
   }
+
+  /// Universal guardrail detecting non-food categories or product titles
+  /// (e.g. Laptops, smartphones, electronics, appliances, furniture, vehicles, clothing, tools).
+  static bool isNonFoodCategoryOrItem(String? category, String? name) {
+    final cat = (category ?? '').toLowerCase().trim();
+    final nm = (name ?? '').toLowerCase().trim();
+    final combined = '$cat $nm';
+
+    if (combined.isEmpty) return false;
+
+    // Fast-path exact check for electronics and known hardware domains
+    const nonFoodExactOrPrefix = [
+      'electronics',
+      'electronic device',
+      'laptop',
+      'computer',
+      'hardware',
+      'smartphone',
+      'mobile phone',
+      'furniture',
+      'vehicle',
+      'automotive',
+      'apparel',
+      'clothing',
+      'stationery',
+    ];
+    for (final term in nonFoodExactOrPrefix) {
+      if (cat == term || cat.startsWith('$term ') || nm.startsWith('$term ')) {
+        return true;
+      }
+    }
+
+    const nonFoodKeywords = [
+      'laptop',
+      'notebook computer',
+      'macbook',
+      'chromebook',
+      'desktop pc',
+      'computer',
+      'monitor',
+      'display screen',
+      'keyboard',
+      'mouse pad',
+      'trackpad',
+      'electronics',
+      'electronic device',
+      'headphone',
+      'earphone',
+      'earbud',
+      'airpod',
+      'smartphone',
+      'smart phone',
+      'iphone',
+      'android phone',
+      'mobile phone',
+      'tablet',
+      'ipad',
+      'charger',
+      'powerbank',
+      'power bank',
+      'camera',
+      'dslr',
+      'television',
+      'smart tv',
+      'smartwatch',
+      'smart watch',
+      'speaker',
+      'gadget',
+      'hardware',
+      'software',
+      'processor',
+      'graphics card',
+      'router',
+      'modem',
+      'printer',
+      'automobile',
+      'vehicle',
+      'motorcycle',
+      'bicycle',
+      'scooter',
+      'tire',
+      'tyre',
+      'furniture',
+      'office chair',
+      'dining table',
+      'coffee table',
+      'study desk',
+      'desk',
+      'sofa',
+      'couch',
+      'mattress',
+      'wardrobe',
+      'bookshelf',
+      'clothing',
+      'apparel',
+      'garment',
+      't-shirt',
+      'jeans',
+      'trousers',
+      'jacket',
+      'sweater',
+      'sneakers',
+      'footwear',
+      'boots',
+      'sandals',
+      'stationery',
+      'document',
+      'paperwork',
+      'screwdriver',
+      'wrench',
+      'hammer',
+      'power drill',
+      'floor cleaner',
+      'toilet cleaner',
+      'detergent',
+      'bleach',
+      'disinfectant',
+      'shampoo',
+      'conditioner',
+      'body wash',
+      'perfume',
+      'cologne',
+      'lipstick',
+      'cosmetics',
+      'moisturizer',
+      'refrigerator',
+      'washing machine',
+      'vacuum cleaner',
+      'air conditioner',
+      'ceiling fan',
+    ];
+
+    for (final kw in nonFoodKeywords) {
+      if (kw.contains(' ')) {
+        if (combined.contains(kw)) return true;
+      } else {
+        final pattern = RegExp('\\b${RegExp.escape(kw)}\\b', caseSensitive: false);
+        if (pattern.hasMatch(cat) || pattern.hasMatch(nm)) return true;
+      }
+    }
+
+    return false;
+  }
+
   final SupabaseClient? _injectedClient;
   final http.Client? _injectedHttpClient;
   final GeminiVisionService? _injectedVisionService;
@@ -1329,6 +1478,25 @@ class ProductScannerService {
         }
       } catch (e) {
         debugPrint('[ProductScannerService] On-device vision fallback notice: $e');
+      }
+    }
+
+    // Food Classification Guardrail: Reject non-food objects (e.g. laptops, electronics, furniture, documents)
+    if (productData != null) {
+      final isFood = productData['is_food_or_beverage'];
+      final detectedName = (productData['detected_object_name'] ?? productData['product_name'] ?? '').toString();
+      final detectedCategory = (productData['detected_category'] ?? productData['category'] ?? '').toString();
+      final nonFoodReason = productData['non_food_reason']?.toString();
+
+      if (isFood == false || isNonFoodCategoryOrItem(detectedCategory, detectedName)) {
+        final reason = (nonFoodReason != null && nonFoodReason.isNotEmpty)
+            ? nonFoodReason
+            : 'This item (${detectedName.isNotEmpty ? detectedName : "scanned object"}) appears to be a non-food item (${detectedCategory.isNotEmpty ? detectedCategory : "non-edible"}), not an edible packaged food, beverage, or grocery product.';
+        throw NonFoodScanException(
+          reason,
+          domainOrType: detectedCategory.isNotEmpty ? detectedCategory : 'Non-Food',
+          detectedObjectName: detectedName.isNotEmpty ? detectedName : null,
+        );
       }
     }
 
