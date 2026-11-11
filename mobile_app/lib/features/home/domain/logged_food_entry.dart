@@ -59,3 +59,4 @@ class LoggedFoodEntry {
     return [];
   }
 }
+

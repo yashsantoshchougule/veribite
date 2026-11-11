@@ -176,3 +176,4 @@ void main() {
     expect(find.textContaining('0 Red-tier chemical additives consumed today. All safe.'), findsOneWidget);
   });
 }
+

@@ -51,6 +51,10 @@ android {
             } else {
                 signingConfig = signingConfigs.getByName("debugShared")
             }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
