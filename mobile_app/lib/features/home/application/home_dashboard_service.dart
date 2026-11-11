@@ -131,7 +131,9 @@ class HomeDashboardService {
         consumedSugarGrams: 0.0,
         maxSugarGrams: maxSugar,
         redAdditivesToday: 0,
-        recentProducts: featuredProducts,
+        recentProducts: featuredProducts.isNotEmpty
+            ? featuredProducts
+            : HomeDashboardData.defaultFeaturedProducts,
         isUserHistory: false,
       );
       await _saveToCache(userId, data);

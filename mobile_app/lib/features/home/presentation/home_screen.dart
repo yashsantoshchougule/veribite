@@ -204,6 +204,61 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openFeaturedProduct(DashboardProductItem item) async {
+    final now = DateTime.now();
+    if (_isNavigatingToProduct) return;
+    if (_lastProductTapTime != null &&
+        now.difference(_lastProductTapTime!) < const Duration(milliseconds: 500)) {
+      return;
+    }
+
+    _isNavigatingToProduct = true;
+    _lastProductTapTime = now;
+
+    try {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      FocusManager.instance.primaryFocus?.unfocus();
+
+      final activeProfile = _profile ??
+          (UserProfileManager.instance.isInitialized
+              ? UserProfileManager.instance.profile
+              : UserProfileModel.defaults(widget.userId));
+
+      final ScannedProductResult product;
+      if (item.evaluatedProduct != null) {
+        product = item.evaluatedProduct!;
+      } else {
+        final match = HomeDashboardData.defaultFeaturedProducts
+            .cast<DashboardProductItem?>()
+            .firstWhere((p) => p?.barcode == item.barcode, orElse: () => null);
+
+        if (match?.evaluatedProduct != null) {
+          product = match!.evaluatedProduct!;
+        } else {
+          final scannerService = ProductScannerService();
+          product = await scannerService.resolveBarcode(
+            barcode: item.barcode,
+            userProfile: activeProfile,
+          );
+        }
+      }
+
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VerdictReportScreen(
+            product: product,
+            userProfile: activeProfile,
+          ),
+        ),
+      );
+
+      await _loadAllData();
+    } finally {
+      _isNavigatingToProduct = false;
+    }
+  }
+
   void _onSearchChanged(String val) {
     _debounceTimer?.cancel();
     setState(() {
@@ -1271,13 +1326,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 final prod = products[index];
                 return GestureDetector(
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('${prod.productName} • Health Score: ${prod.healthScore}/100'),
-                        backgroundColor: AppColors.primaryObsidian,
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
+                    final now = DateTime.now();
+                    if (_isNavigatingToProduct) return;
+                    if (_lastProductTapTime != null &&
+                        now.difference(_lastProductTapTime!) < const Duration(milliseconds: 500)) {
+                      return;
+                    }
+                    _openFeaturedProduct(prod);
                   },
                   child: Container(
                     width: 160,

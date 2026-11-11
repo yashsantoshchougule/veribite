@@ -30,26 +30,7 @@ class MockHomeDashboardService extends HomeDashboardService {
       consumedSugarGrams: 4.2,
       maxSugarGrams: maxSugar,
       redAdditivesToday: 0,
-      recentProducts: const [
-        DashboardProductItem(
-          barcode: '8901030383786',
-          productName: 'Orange Cream Biscuits',
-          brandName: 'Britannia Treat',
-          healthScore: 22,
-          verdictTag: 'Capped 🔴',
-          safePortion: '20g',
-          color: AppColors.safetyRed,
-        ),
-        DashboardProductItem(
-          barcode: '8901234567890',
-          productName: '100% Wholegrain Rolled Oats',
-          brandName: 'Quaker',
-          healthScore: 88,
-          verdictTag: 'Nutri Safe 🟢',
-          safePortion: '40g',
-          color: AppColors.safetyGreen,
-        ),
-      ],
+      recentProducts: HomeDashboardData.defaultFeaturedProducts,
       isUserHistory: true,
     );
   }
@@ -209,7 +190,7 @@ void main() {
       expect(find.textContaining('3.0g / 10g (30%)'), findsOneWidget);
     });
 
-    testWidgets('tapping product card displays snackbar notification with health score', (tester) async {
+    testWidgets('tapping featured product card pushes VerdictReportScreen with accurate macros and NO placeholder snackbar', (tester) async {
       await tester.pumpWidget(buildTestableHomeScreen());
       await tester.pumpAndSettle();
 
@@ -219,9 +200,43 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(biscuitCard);
-      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('Orange Cream Biscuits • Health Score: 22/100'), findsOneWidget);
+      // Confirm NO SnackBar was shown
+      expect(find.byType(SnackBar), findsNothing);
+
+      // Confirm VerdictReportScreen was pushed
+      expect(find.byType(VerdictReportScreen), findsOneWidget);
+      expect(find.text('Orange Cream Biscuits'), findsAtLeastNWidgets(1));
+      expect(find.textContaining('22'), findsAtLeastNWidgets(1));
+
+      // Pop back to dashboard
+      Navigator.of(tester.element(find.byType(VerdictReportScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(VerdictReportScreen), findsNothing);
+    });
+
+    testWidgets('rapidly double-tapping featured product card pushes VerdictReportScreen only once', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      final biscuitCard = find.text('Orange Cream Biscuits');
+      expect(biscuitCard, findsOneWidget);
+      await tester.ensureVisible(biscuitCard);
+      await tester.pumpAndSettle();
+
+      // Rapid double tap
+      await tester.tap(biscuitCard);
+      await tester.tap(biscuitCard, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      // Exactly ONE VerdictReportScreen pushed
+      expect(find.byType(VerdictReportScreen), findsOneWidget);
+
+      // Popping once returns directly to HomeScreen
+      Navigator.of(tester.element(find.byType(VerdictReportScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(VerdictReportScreen), findsNothing);
     });
   });
 
