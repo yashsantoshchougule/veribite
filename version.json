@@ -1,0 +1,15 @@
+{
+  "latest_version": "1.0.1",
+  "latest_build_number": 2,
+  "release_date": "2026-11-12",
+  "apk_size_mb": "24.5 MB",
+  "webpage_url": "https://github.com/yashsantoshchougule/veribite",
+  "apk_download_url": "https://github.com/yashsantoshchougule/veribite/releases/latest/download/app-release.apk",
+  "force_update": false,
+  "release_notes": [
+    "Faster 3.0s parallel QR & barcode scanner",
+    "Live Web & FSSAI Clinical Intelligence deep-search",
+    "Non-food image upload guard",
+    "Interactive Today's Intake Log & persistent user profile"
+  ]
+}

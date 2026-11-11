@@ -14,6 +14,8 @@ import '../../profile/domain/user_profile_model.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../results/presentation/verdict_report_screen.dart';
 import '../../swaps/presentation/healthier_swaps_screen.dart';
+import '../../../services/app_update_service.dart';
+import 'widgets/update_available_bottom_sheet.dart';
 import '../application/catalog_search_service.dart';
 import '../application/daily_consumption_tracker.dart';
 import '../application/home_dashboard_service.dart';
@@ -67,6 +69,20 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchController = TextEditingController();
     _searchResults = _searchService.getStarterSuggestions(filter: _selectedCategory);
     _loadAllData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForInAppUpdate();
+    });
+  }
+
+  Future<void> _checkForInAppUpdate() async {
+    try {
+      final update = await AppUpdateService.instance.checkForUpdate(manual: false);
+      if (update != null && update.hasUpdate && mounted) {
+        await UpdateAvailableBottomSheet.show(context, update);
+      }
+    } catch (_) {
+      // Background auto-check is silent on error
+    }
   }
 
   @override

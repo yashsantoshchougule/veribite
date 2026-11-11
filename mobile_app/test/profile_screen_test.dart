@@ -86,6 +86,8 @@ void main() {
       // Offline Engine & Privacy Card
       expect(find.text('Offline Engine & Privacy Guard'), findsOneWidget);
       expect(find.textContaining('6,450+ chemical INS / E-numbers loaded offline in SQLite.'), findsOneWidget);
+      expect(find.textContaining('VeriBite v1.0.0'), findsOneWidget);
+      expect(find.text('Check'), findsOneWidget);
 
       // Sign Out Button
       expect(find.text('Sign Out of Account'), findsOneWidget);
@@ -173,6 +175,22 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ProfileScreen), findsOneWidget);
+    });
+
+    testWidgets('tapping Check for updates triggers manual update check and displays status snackbar', (tester) async {
+      await tester.pumpWidget(buildTestableProfileScreen());
+      await tester.pumpAndSettle();
+
+      final checkBtn = find.text('Check');
+      expect(checkBtn, findsOneWidget);
+      await tester.ensureVisible(checkBtn);
+      await tester.pumpAndSettle();
+
+      await tester.tap(checkBtn);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
     });
   });
 

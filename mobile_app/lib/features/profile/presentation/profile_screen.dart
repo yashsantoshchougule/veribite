@@ -3,7 +3,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../main.dart';
 import '../../auth/application/supabase_auth_service.dart';
 import '../../camera/presentation/widgets/backend_settings_sheet.dart';
+import '../../home/presentation/widgets/update_available_bottom_sheet.dart';
 import '../../legal/presentation/legal_policy_screen.dart';
+import '../../../services/app_update_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/user_profile_manager.dart';
 import '../application/user_profile_service.dart';
@@ -35,6 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   UserProfileModel? _profile;
   bool _isLoading = true;
+  bool _isCheckingForUpdates = false;
 
   @override
   void initState() {
@@ -70,6 +73,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : UserProfileModel.defaults(widget.userId));
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _handleManualUpdateCheck() async {
+    if (_isCheckingForUpdates) return;
+    setState(() => _isCheckingForUpdates = true);
+
+    try {
+      final info = await AppUpdateService.instance.checkForUpdate(manual: true);
+      if (!mounted) return;
+
+      if (info != null && info.hasUpdate) {
+        await UpdateAvailableBottomSheet.show(context, info);
+      } else if (info != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "You're on the latest version of VeriBite (v${AppUpdateService.currentVersion}).",
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: AppColors.primaryObsidian,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to check for updates. Please check your internet connection.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: AppColors.safetyAmber,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingForUpdates = false);
+      }
     }
   }
 
@@ -1073,6 +1116,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.stepPillBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.cardBorder, width: 1.0),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.cardBorder),
+                  ),
+                  child: const Icon(Icons.system_update_rounded, size: 18, color: AppColors.accentBronze),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'VeriBite v${AppUpdateService.currentVersion}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textObsidian,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Build #${AppUpdateService.currentBuildNumber} • Release Channel',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textMutedMocha,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: _isCheckingForUpdates ? null : _handleManualUpdateCheck,
+                  style: TextButton.styleFrom(
+                    backgroundColor: AppColors.primaryObsidian,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  child: _isCheckingForUpdates
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Text(
+                          'Check',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 10),
           SizedBox(
