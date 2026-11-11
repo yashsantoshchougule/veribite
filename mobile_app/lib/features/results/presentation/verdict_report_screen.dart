@@ -10,6 +10,7 @@ import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../camera/application/offline_barcode_repository.dart';
 import '../../health_intelligence/domain/health_intelligence_model.dart';
+import '../../home/application/daily_consumption_tracker.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
@@ -338,11 +339,19 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     setState(() => _isSubmitting = true);
     await HapticFeedback.mediumImpact();
 
+    // 1. Reactive Singleton State: Log intake with active portion and sugar scaling
+    await DailyConsumptionTracker.instance.logProductIntake(
+      _product,
+      portionGrams: _currentServingGrams,
+      profile: widget.userProfile,
+    );
+
+    // 2. Also record in background dashboard service / Supabase scan history
     await _dashboardService.logConsumedProduct(
       userId: widget.userProfile.userId,
-      barcode: widget.product.barcode,
+      barcode: _product.barcode,
       consumedSugarGrams: _currentSugarGrams,
-      hasRedAdditives: widget.product.redCapTriggered,
+      hasRedAdditives: _product.redCapTriggered,
     );
 
     if (mounted) {

@@ -13,6 +13,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../home/application/home_dashboard_service.dart';
 import '../../profile/application/user_profile_service.dart';
 import '../../profile/domain/user_profile_model.dart';
+import '../../home/application/daily_consumption_tracker.dart';
 import '../application/camera_scan_notifier.dart';
 import '../application/offline_barcode_repository.dart';
 import '../application/product_scanner_service.dart';
@@ -1667,7 +1668,14 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
           onLogConsumed: () async {
             Navigator.of(ctx).pop();
 
-            // Record scan in Supabase / Local History
+            // 1. Reactive Singleton State: Log intake with portion and sugar scaling
+            await DailyConsumptionTracker.instance.logProductIntake(
+              product,
+              portionGrams: product.servingSizeG > 0 ? product.servingSizeG : 100.0,
+              profile: _profile,
+            );
+
+            // 2. Record scan in Supabase / Local History
             if (widget.userId != null) {
               await HomeDashboardService().recordScan(
                 userId: widget.userId!,

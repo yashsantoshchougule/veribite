@@ -14,6 +14,7 @@ import '../../profile/presentation/profile_screen.dart';
 import '../../results/presentation/verdict_report_screen.dart';
 import '../../swaps/presentation/healthier_swaps_screen.dart';
 import '../application/catalog_search_service.dart';
+import '../application/daily_consumption_tracker.dart';
 import '../application/home_dashboard_service.dart';
 import '../domain/home_dashboard_data.dart';
 import '../domain/search_catalog_item.dart';
@@ -74,6 +75,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadAllData() async {
     final profile = await _profileService.getProfile(widget.userId) ?? UserProfileModel.defaults(widget.userId);
     final data = await _dashboardService.getDashboardData(widget.userId, profile);
+    await DailyConsumptionTracker.instance.initialize(profile: profile);
+    if (DailyConsumptionTracker.instance.entries.isEmpty && data.consumedSugarGrams > 0) {
+      DailyConsumptionTracker.instance.syncFromDashboardData(
+        consumedSugar: data.consumedSugarGrams,
+        redAdditives: data.redAdditivesToday,
+      );
+    }
     if (mounted) {
       setState(() {
         _profile = profile;
@@ -724,146 +732,327 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDailyBudgetMeter() {
-    final consumedSugarGrams = _dashboardData?.consumedSugarGrams ?? 0.0;
-    final maxSugarGrams = _dashboardData?.maxSugarGrams ?? (_profile?.isDiabetic == true ? 10.0 : 25.0);
-    final percentUsed = (consumedSugarGrams / (maxSugarGrams > 0 ? maxSugarGrams : 25.0)).clamp(0.0, 1.5);
-    final redAdditives = _dashboardData?.redAdditivesToday ?? 0;
-    final isExceeded = consumedSugarGrams > maxSugarGrams;
+    return ListenableBuilder(
+      listenable: DailyConsumptionTracker.instance,
+      builder: (context, _) {
+        final tracker = DailyConsumptionTracker.instance;
+        final consumedSugarGrams = tracker.consumedSugarGrams;
+        final maxSugarGrams = tracker.dailySugarCeilingGrams;
+        final redAdditives = tracker.redTierAdditivesCount;
+        final percentRatio = (maxSugarGrams > 0 ? (consumedSugarGrams / maxSugarGrams) : 0.0).clamp(0.0, 1.0);
+        final percentage = (maxSugarGrams > 0 ? (consumedSugarGrams / maxSugarGrams * 100) : 0.0).round();
 
-    Color progressColor = AppColors.safetyGreen;
-    if (percentUsed >= 1.0) {
-      progressColor = AppColors.safetyRed;
-    } else if (percentUsed >= 0.75) {
-      progressColor = AppColors.safetyAmber;
-    }
+        // 3-Stage Progress Color
+        final Color progressColor;
+        if (percentage >= 100) {
+          progressColor = AppColors.safetyRed;
+        } else if (percentage >= 60) {
+          progressColor = AppColors.safetyAmber;
+        } else {
+          progressColor = AppColors.safetyGreen;
+        }
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.cardSurface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.cardBorder, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Expanded(
-                child: Row(
-                  children: [
-                    Icon(Icons.pie_chart_outline_rounded, size: 18, color: AppColors.accentBronze),
-                    SizedBox(width: 8),
-                    Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
+        // Status Badge:
+        // < 60% & 0 red -> WHO Safe (Green)
+        // 60%-99% or 1 red -> Moderate Load (Amber)
+        // >= 100% or >= 2 red -> Exceeded (Red)
+        final String badgeText;
+        final Color badgeColor;
+        if (percentage >= 100 || redAdditives >= 2) {
+          badgeText = 'Exceeded ⚠️';
+          badgeColor = AppColors.safetyRed;
+        } else if (percentage >= 60 || redAdditives == 1) {
+          badgeText = 'Moderate Load';
+          badgeColor = AppColors.safetyAmber;
+        } else {
+          badgeText = 'WHO Safe';
+          badgeColor = AppColors.safetyGreen;
+        }
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _showDailyIntakeBottomSheet,
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.cardBorder, width: 1.2),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: Row(
+                          children: [
+                            Icon(Icons.pie_chart_outline_rounded, size: 18, color: AppColors.accentBronze),
+                            SizedBox(width: 8),
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Daily Consumption Budget',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textObsidian,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: badgeColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         child: Text(
-                          'Daily Consumption Budget',
+                          badgeText,
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: badgeColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Free Sugar Ceiling',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMutedMocha,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '${consumedSugarGrams.toStringAsFixed(1)}g / ${maxSugarGrams.toInt()}g ($percentage%)',
+                          style: const TextStyle(
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: AppColors.textObsidian,
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: (isExceeded ? AppColors.safetyRed : AppColors.safetyGreen).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  isExceeded ? 'Exceeded ⚠️' : 'WHO Safe',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: isExceeded ? AppColors.safetyRed : AppColors.safetyGreen,
+                    ],
                   ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Free Sugar Ceiling',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textMutedMocha,
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: const BorderRadius.all(Radius.circular(6)),
+                    child: LinearProgressIndicator(
+                      value: percentRatio,
+                      minHeight: 8,
+                      backgroundColor: AppColors.stepPillBorder,
+                      valueColor: AlwaysStoppedAnimation<Color>(progressColor),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '${consumedSugarGrams.toStringAsFixed(1)}g / ${maxSugarGrams.toStringAsFixed(0)}g (${(percentUsed * 100).toStringAsFixed(0)}%)',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textObsidian,
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(
+                        redAdditives == 0 ? Icons.shield_outlined : Icons.warning_amber_rounded,
+                        size: 14,
+                        color: redAdditives == 0 ? AppColors.safetyGreen : AppColors.safetyRed,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          redAdditives == 0
+                              ? '0 Red-tier chemical additives consumed today. All safe.'
+                              : '⚠️ $redAdditives Red-tier chemical additive(s) consumed today! Limit ultra-processed intake.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500,
+                            color: redAdditives == 0 ? AppColors.textMutedMocha : AppColors.safetyRed,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: const BorderRadius.all(Radius.circular(6)),
-            child: LinearProgressIndicator(
-              value: percentUsed,
-              minHeight: 8,
-              backgroundColor: AppColors.stepPillBorder,
-              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
             ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(
-                redAdditives == 0 ? Icons.shield_outlined : Icons.warning_amber_rounded,
-                size: 14,
-                color: redAdditives == 0 ? AppColors.safetyGreen : AppColors.safetyRed,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  redAdditives == 0
-                      ? '0 Red-tier chemical additives consumed today. All safe.'
-                      : '⚠️ $redAdditives Red-tier chemical additive(s) consumed today!',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
-                    color: redAdditives == 0 ? AppColors.textMutedMocha : AppColors.safetyRed,
+        );
+      },
+    );
+  }
+
+  void _showDailyIntakeBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => ListenableBuilder(
+        listenable: DailyConsumptionTracker.instance,
+        builder: (sheetCtx, _) {
+          final tracker = DailyConsumptionTracker.instance;
+          final entries = tracker.entries;
+
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(sheetCtx).size.height * 0.75,
+            ),
+            decoration: const BoxDecoration(
+              color: AppColors.cardSurface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border(top: BorderSide(color: AppColors.cardBorder, width: 1.5)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Today's Intake Log",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textObsidian,
+                      ),
+                    ),
+                    if (entries.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (dCtx) => AlertDialog(
+                              title: const Text('Reset Today\'s Intake?'),
+                              content: const Text('This will clear all logged items and reset today\'s consumption budget back to 0g.'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dCtx, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(dCtx, true),
+                                  style: FilledButton.styleFrom(backgroundColor: AppColors.safetyRed),
+                                  child: const Text('Reset'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            await tracker.resetToday();
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          }
+                        },
+                        icon: const Icon(Icons.refresh_rounded, size: 16, color: AppColors.safetyRed),
+                        label: const Text(
+                          'Reset Today',
+                          style: TextStyle(color: AppColors.safetyRed, fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (entries.isEmpty) ...[
+                  const SizedBox(height: 24),
+                  const Icon(Icons.restaurant_outlined, size: 48, color: AppColors.textMutedMocha),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No food items logged today yet.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Scan any product and tap "I Ate This" on the verdict screen to track your daily free sugar and chemical additive budget.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: AppColors.textMutedMocha),
+                  ),
+                  const SizedBox(height: 24),
+                ] else ...[
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: entries.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.cardBorder),
+                      itemBuilder: (itemCtx, index) {
+                        final entry = entries[index];
+                        final timeStr = '${entry.timestamp.hour.toString().padLeft(2, '0')}:${entry.timestamp.minute.toString().padLeft(2, '0')}';
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: entry.redTierAdditivesCount > 0
+                                ? AppColors.safetyRed.withValues(alpha: 0.12)
+                                : AppColors.safetyGreen.withValues(alpha: 0.12),
+                            child: Icon(
+                              entry.redTierAdditivesCount > 0 ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
+                              color: entry.redTierAdditivesCount > 0 ? AppColors.safetyRed : AppColors.safetyGreen,
+                              size: 20,
+                            ),
+                          ),
+                          title: Text(
+                            entry.productName,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                          subtitle: Text(
+                            'Portion: ${entry.portionGrams.toStringAsFixed(0)}g • ${entry.sugarGrams.toStringAsFixed(1)}g sugar • $timeStr${entry.redTierAdditivesCount > 0 ? " • ${entry.redTierAdditivesCount} Red Additive" : ""}',
+                            style: const TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.textMutedMocha),
+                            onPressed: () => tracker.removeEntry(index),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
