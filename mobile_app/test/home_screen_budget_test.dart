@@ -7,6 +7,7 @@ import 'package:mobile_app/features/home/application/daily_consumption_tracker.d
 import 'package:mobile_app/features/home/application/home_dashboard_service.dart';
 import 'package:mobile_app/features/home/domain/home_dashboard_data.dart';
 import 'package:mobile_app/features/home/presentation/home_screen.dart';
+import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
 
 class StubHomeDashboardService extends HomeDashboardService {
   @override
@@ -174,6 +175,78 @@ void main() {
     expect(find.textContaining('0.0g / 25g (0%)'), findsOneWidget);
     expect(find.text('WHO Safe'), findsOneWidget);
     expect(find.textContaining('0 Red-tier chemical additives consumed today. All safe.'), findsOneWidget);
+  });
+
+  testWidgets('Tapping product row in Today\'s Intake Log navigates to VerdictReportScreen, while trash icon deletes it', (tester) async {
+    await tester.pumpWidget(createHomeScreen());
+    await tester.pumpAndSettle();
+
+    // 1. Log 2-Minute Masala Noodles
+    const noodlesProduct = ScannedProductResult(
+      barcode: '8901058852461',
+      productName: '2-Minute Masala Noodles',
+      brandName: 'Maggi',
+      category: 'Instant Noodles',
+      servingSizeG: 70.0,
+      packWeightG: 70.0,
+      caloriesPerServing: 310.0,
+      caloriesPer100g: 442.0,
+      sugarGPer100g: 3.2,
+      sugarGPerServing: 2.2,
+      satFatGPer100g: 6.8,
+      sodiumMgPer100g: 850.0,
+      healthScore: 42,
+      verdictTag: 'Moderate',
+      novaGrade: 4,
+      redCapTriggered: false,
+      additives: [],
+      splitSugars: [],
+      safePortionGrams: 35,
+      limitingFactor: 'Sodium',
+      frequencySchedule: 'Once a month',
+      portionAdvice: 'Limit to half pack',
+      isExceededBudget: false,
+    );
+
+    await DailyConsumptionTracker.instance.logProductIntake(noodlesProduct, portionGrams: 70.0);
+    await tester.pump();
+
+    // 2. Open Today's Intake Log
+    await tester.tap(find.text('Daily Consumption Budget'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Today's Intake Log"), findsOneWidget);
+    expect(find.text('2-Minute Masala Noodles'), findsOneWidget);
+
+    // Verify chevron exists on the row
+    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
+
+    // 3. Tap the product row (e.g. on the product name text)
+    await tester.tap(find.text('2-Minute Masala Noodles'));
+    await tester.pumpAndSettle();
+
+    // 4. Verify bottom sheet was dismissed and VerdictReportScreen opened!
+    expect(find.text("Today's Intake Log"), findsNothing);
+    expect(find.byType(VerdictReportScreen), findsOneWidget);
+
+    // 5. Navigate back to Home Dashboard
+    Navigator.of(tester.element(find.byType(VerdictReportScreen))).pop();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Daily Consumption Budget'), findsOneWidget);
+
+    // 6. Open sheet again and verify tapping the trash icon deletes without opening VerdictReportScreen
+    await tester.tap(find.text('Daily Consumption Budget'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('2-Minute Masala Noodles'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pumpAndSettle();
+
+    // Item deleted, sheet still open, VerdictReportScreen not pushed
+    expect(find.text('2-Minute Masala Noodles'), findsNothing);
+    expect(find.text('No food items logged today yet.'), findsOneWidget);
+    expect(find.byType(VerdictReportScreen), findsNothing);
   });
 }
 

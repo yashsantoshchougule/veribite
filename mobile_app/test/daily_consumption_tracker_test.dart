@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/home/application/daily_consumption_tracker.dart';
+import 'package:mobile_app/features/home/domain/logged_food_entry.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 
 void main() {
@@ -193,6 +194,128 @@ void main() {
       expect(tracker.consumedSugarGrams, 0.0);
       expect(tracker.redTierAdditivesCount, 0);
       expect(tracker.entries, isEmpty);
+    });
+
+    test('ScannedProductResult toJson and fromJson round-trips losslessly', () {
+      const original = ScannedProductResult(
+        barcode: '8901058852461',
+        productName: '2-Minute Masala Noodles',
+        brandName: 'Maggi',
+        category: 'Instant Noodles',
+        servingSizeG: 70.0,
+        packWeightG: 70.0,
+        caloriesPerServing: 310.0,
+        caloriesPer100g: 442.0,
+        sugarGPer100g: 3.2,
+        sugarGPerServing: 2.2,
+        satFatGPer100g: 6.8,
+        sodiumMgPer100g: 850.0,
+        healthScore: 42,
+        verdictTag: 'Moderate',
+        novaGrade: 4,
+        redCapTriggered: true,
+        additives: [
+          {'ins_code': '635', 'name': 'Disodium 5-ribonucleotides', 'risk_tier': 'RED'}
+        ],
+        splitSugars: ['Sugar'],
+        safePortionGrams: 35,
+        limitingFactor: 'Sodium & Additives',
+        frequencySchedule: 'Once a month',
+        portionAdvice: 'Limit to half pack',
+        isExceededBudget: false,
+      );
+
+      final json = original.toJson();
+      final restored = ScannedProductResult.fromJson(json);
+
+      expect(restored.barcode, original.barcode);
+      expect(restored.productName, original.productName);
+      expect(restored.brandName, original.brandName);
+      expect(restored.servingSizeG, original.servingSizeG);
+      expect(restored.sugarGPer100g, original.sugarGPer100g);
+      expect(restored.caloriesPerServing, original.caloriesPerServing);
+      expect(restored.sodiumMgPer100g, original.sodiumMgPer100g);
+      expect(restored.healthScore, original.healthScore);
+      expect(restored.novaGrade, original.novaGrade);
+      expect(restored.redCapTriggered, isTrue);
+      expect(restored.additives.length, 1);
+    });
+
+    test('LoggedFoodEntry backward compatibility: safely handles absent productJson', () {
+      final legacyJson = {
+        'product_name': 'Old Legacy Food',
+        'barcode': '12345678',
+        'portion_grams': 100.0,
+        'sugar_grams': 5.0,
+        'red_tier_additives_count': 1,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      final entry = LoggedFoodEntry.fromJson(legacyJson);
+      expect(entry.productName, 'Old Legacy Food');
+      expect(entry.barcode, '12345678');
+      expect(entry.productJson, isNull);
+      expect(entry.product, isNull);
+
+      // Serializing it back does not crash
+      final serialized = entry.toJson();
+      expect(serialized['product_name'], 'Old Legacy Food');
+      expect(serialized.containsKey('product_json'), isFalse);
+    });
+
+    test('resolveLoggedProduct handles Priority 1 (Embedded Product)', () async {
+      final tracker = DailyConsumptionTracker.instance;
+      const product = ScannedProductResult(
+        barcode: '8901058852461',
+        productName: '2-Minute Masala Noodles',
+        brandName: 'Maggi',
+        category: 'Instant Noodles',
+        servingSizeG: 70.0,
+        packWeightG: 70.0,
+        caloriesPerServing: 310.0,
+        caloriesPer100g: 442.0,
+        sugarGPer100g: 3.2,
+        sugarGPerServing: 2.2,
+        satFatGPer100g: 6.8,
+        sodiumMgPer100g: 850.0,
+        healthScore: 42,
+        verdictTag: 'Moderate',
+        novaGrade: 4,
+        redCapTriggered: false,
+        additives: [],
+        splitSugars: [],
+        safePortionGrams: 35,
+        limitingFactor: 'Sodium',
+        frequencySchedule: 'Once a month',
+        portionAdvice: 'Limit to half pack',
+        isExceededBudget: false,
+      );
+
+      await tracker.logProductIntake(product, portionGrams: 70.0);
+      final loggedEntry = tracker.entries.first;
+
+      final resolved = await tracker.resolveLoggedProduct(loggedEntry);
+      expect(resolved.productName, '2-Minute Masala Noodles');
+      expect(resolved.barcode, '8901058852461');
+      expect(resolved.sugarGPer100g, 3.2);
+    });
+
+    test('resolveLoggedProduct handles Priority 3 (Fallback Reconstruction)', () async {
+      final tracker = DailyConsumptionTracker.instance;
+      final fallbackEntry = LoggedFoodEntry(
+        productName: 'Mystery Baked Snack',
+        barcode: '',
+        portionGrams: 50.0,
+        sugarGrams: 4.0,
+        redTierAdditivesCount: 1,
+        timestamp: DateTime.now(),
+      );
+
+      final resolved = await tracker.resolveLoggedProduct(fallbackEntry);
+      expect(resolved.productName, 'Mystery Baked Snack');
+      expect(resolved.sugarGPer100g, 8.0); // 4g in 50g -> 8g per 100g
+      expect(resolved.redCapTriggered, isTrue);
+      expect(resolved.additives.length, 1);
     });
   });
 }

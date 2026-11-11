@@ -304,6 +304,97 @@ class ScannedProductResult {
       'source': analysisSource ?? 'veribite_scanner',
     };
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'barcode': barcode,
+      'product_name': productName,
+      'brand_name': brandName,
+      'category': category,
+      'serving_size_g': servingSizeG,
+      'sugar_g_per_100g': sugarGPer100g,
+      'sugar_g_per_serving': sugarGPerServing,
+      'calories_per_serving': caloriesPerServing,
+      'calories_per_100g': caloriesPer100g,
+      'protein_g_per_100g': proteinGPer100g,
+      'carbs_g_per_100g': carbsGPer100g,
+      'fiber_g_per_100g': fiberGPer100g,
+      'added_sugar_g_per_100g': addedSugarGPer100g,
+      'trans_fat_g_per_100g': transFatGPer100g,
+      'total_fat_g_per_100g': totalFatGPer100g,
+      'cholesterol_mg_per_100g': cholesterolMgPer100g,
+      'sat_fat_g_per_100g': satFatGPer100g,
+      'sat_fat_g_per_serving': satFatGPerServing,
+      'sodium_mg_per_100g': sodiumMgPer100g,
+      'sodium_mg_per_serving': sodiumMgPerServing,
+      'pack_weight_g': packWeightG,
+      'health_score': healthScore,
+      'verdict_tag': verdictTag,
+      'nova_grade': novaGrade,
+      'red_cap_triggered': redCapTriggered,
+      'safe_portion_grams': safePortionGrams,
+      'safe_pieces': safePieces,
+      'limiting_factor': limitingFactor,
+      'frequency_schedule': frequencySchedule,
+      'additives': additives,
+      'split_sugars': splitSugars,
+      'portion_advice': portionAdvice,
+      'is_exceeded_budget': isExceededBudget,
+      'analysis_source': analysisSource,
+      'score_breakdown': scoreBreakdown,
+      'is_ingredient_only_score': isIngredientOnlyScore,
+      'health_intelligence': healthIntelligence?.toJson(),
+    };
+  }
+
+  factory ScannedProductResult.fromJson(Map<String, dynamic> json) {
+    final nutrition = json['nutrition'] is Map ? json['nutrition'] as Map : null;
+    return ScannedProductResult(
+      barcode: (json['barcode'] ?? '').toString(),
+      productName: (json['product_name'] ?? json['productName'] ?? 'Packaged Food').toString(),
+      brandName: (json['brand_name'] ?? json['brandName'] ?? '').toString(),
+      category: (json['category'] ?? 'Packaged Food').toString(),
+      servingSizeG: (json['serving_size_g'] ?? json['servingSizeG'] as num?)?.toDouble() ?? 100.0,
+      sugarGPer100g: (json['sugar_g_per_100g'] ?? nutrition?['sugars_100g'] as num?)?.toDouble() ?? 0.0,
+      sugarGPerServing: (json['sugar_g_per_serving'] as num?)?.toDouble() ?? 0.0,
+      caloriesPerServing: (json['calories_per_serving'] as num?)?.toDouble() ?? 0.0,
+      caloriesPer100g: (json['calories_per_100g'] ?? nutrition?['energy_kcal'] as num?)?.toDouble() ?? 0.0,
+      proteinGPer100g: (json['protein_g_per_100g'] ?? nutrition?['proteins_100g'] as num?)?.toDouble() ?? 0.0,
+      carbsGPer100g: (json['carbs_g_per_100g'] ?? nutrition?['carbohydrates_100g'] as num?)?.toDouble() ?? 0.0,
+      fiberGPer100g: (json['fiber_g_per_100g'] ?? nutrition?['fiber_100g'] as num?)?.toDouble() ?? 0.0,
+      addedSugarGPer100g: (json['added_sugar_g_per_100g'] ?? nutrition?['added_sugars_100g'] as num?)?.toDouble() ?? 0.0,
+      transFatGPer100g: (json['trans_fat_g_per_100g'] ?? nutrition?['trans_fat_100g'] as num?)?.toDouble() ?? 0.0,
+      totalFatGPer100g: (json['total_fat_g_per_100g'] ?? nutrition?['total_fat_g'] as num?)?.toDouble() ?? 0.0,
+      cholesterolMgPer100g: (json['cholesterol_mg_per_100g'] ?? nutrition?['cholesterol_mg'] as num?)?.toDouble() ?? 0.0,
+      satFatGPer100g: (json['sat_fat_g_per_100g'] ?? nutrition?['saturated-fat_100g'] as num?)?.toDouble() ?? 0.0,
+      satFatGPerServing: (json['sat_fat_g_per_serving'] as num?)?.toDouble() ?? 0.0,
+      sodiumMgPer100g: (json['sodium_mg_per_100g'] ?? nutrition?['sodium_mg'] as num?)?.toDouble() ?? 0.0,
+      sodiumMgPerServing: (json['sodium_mg_per_serving'] as num?)?.toDouble() ?? 0.0,
+      packWeightG: (json['pack_weight_g'] ?? json['packWeightG'] as num?)?.toDouble() ?? 100.0,
+      healthScore: (json['health_score'] as num?)?.toInt(),
+      verdictTag: (json['verdict_tag'] ?? 'Nutri Safe 🟢').toString(),
+      novaGrade: (json['nova_grade'] as num?)?.toInt() ?? 3,
+      redCapTriggered: json['red_cap_triggered'] == true || json['red_cap_triggered'] == 1,
+      safePortionGrams: (json['safe_portion_grams'] as num?)?.toInt() ?? 100,
+      safePieces: (json['safe_pieces'] as num?)?.toInt(),
+      limitingFactor: (json['limiting_factor'] ?? 'Standard Serving').toString(),
+      frequencySchedule: (json['frequency_schedule'] ?? 'Moderate Consumption').toString(),
+      additives: (json['additives'] is List)
+          ? (json['additives'] as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList()
+          : const [],
+      splitSugars: (json['split_sugars'] is List)
+          ? (json['split_sugars'] as List).map((e) => e.toString()).toList()
+          : const [],
+      portionAdvice: (json['portion_advice'] ?? 'Enjoy in moderation.').toString(),
+      isExceededBudget: json['is_exceeded_budget'] == true,
+      analysisSource: json['analysis_source']?.toString() ?? json['source']?.toString(),
+      scoreBreakdown: json['score_breakdown']?.toString(),
+      isIngredientOnlyScore: json['is_ingredient_only_score'] == true,
+      healthIntelligence: json['health_intelligence'] != null && json['health_intelligence'] is Map
+          ? HealthIntelligence.fromJson(Map<String, dynamic>.from(json['health_intelligence'] as Map))
+          : null,
+    );
+  }
 }
 
 /// Clean type alias for ScannedProductResult matching domain naming
@@ -1671,7 +1762,12 @@ class ProductScannerService {
       }
     }
 
-    final sugarPer100 = (nutritionMap['sugar_g_per_100g'] ?? nutritionMap['total_sugars_g'] ?? 0.0 as num).toDouble();
+    final sugarPer100 = (nutritionMap['sugar_g_per_100g'] ??
+            nutritionMap['sugars_100g'] ??
+            nutritionMap['sugars'] ??
+            nutritionMap['total_sugars_g'] ??
+            0.0 as num)
+        .toDouble();
     final sugarPerServing = double.parse((sugarPer100 * (servingSize / 100.0)).toStringAsFixed(1));
 
     double caloriesPer100;

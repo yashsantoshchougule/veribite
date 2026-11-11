@@ -1,6 +1,8 @@
 import 'dart:convert';
+import '../../camera/application/product_scanner_service.dart';
 
 /// Represents a single food item logged into the user's daily consumption budget.
+/// Stores full product serialization to enable instant navigation to VerdictReportScreen.
 class LoggedFoodEntry {
   final String productName;
   final String barcode;
@@ -8,6 +10,8 @@ class LoggedFoodEntry {
   final double sugarGrams;
   final int redTierAdditivesCount;
   final DateTime timestamp;
+  final Map<String, dynamic>? productJson;
+  final Product? product;
 
   const LoggedFoodEntry({
     required this.productName,
@@ -16,6 +20,8 @@ class LoggedFoodEntry {
     required this.sugarGrams,
     required this.redTierAdditivesCount,
     required this.timestamp,
+    this.productJson,
+    this.product,
   });
 
   Map<String, dynamic> toJson() {
@@ -26,10 +32,31 @@ class LoggedFoodEntry {
       'sugar_grams': sugarGrams,
       'red_tier_additives_count': redTierAdditivesCount,
       'timestamp': timestamp.toIso8601String(),
+      if (productJson != null || product != null)
+        'product_json': productJson ?? product?.toJson(),
     };
   }
 
   factory LoggedFoodEntry.fromJson(Map<String, dynamic> json) {
+    Map<String, dynamic>? parsedProductJson;
+    if (json['product_json'] is Map) {
+      parsedProductJson = Map<String, dynamic>.from(json['product_json'] as Map);
+    } else if (json['product_json'] is String) {
+      try {
+        final decoded = jsonDecode(json['product_json'] as String);
+        if (decoded is Map) {
+          parsedProductJson = Map<String, dynamic>.from(decoded);
+        }
+      } catch (_) {}
+    }
+
+    Product? parsedProduct;
+    if (parsedProductJson != null) {
+      try {
+        parsedProduct = Product.fromJson(parsedProductJson);
+      } catch (_) {}
+    }
+
     return LoggedFoodEntry(
       productName: (json['product_name'] ?? 'Packaged Food').toString(),
       barcode: (json['barcode'] ?? '').toString(),
@@ -39,6 +66,8 @@ class LoggedFoodEntry {
       timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'].toString())?.toLocal() ?? DateTime.now()
           : DateTime.now(),
+      productJson: parsedProductJson,
+      product: parsedProduct,
     );
   }
 
@@ -59,4 +88,3 @@ class LoggedFoodEntry {
     return [];
   }
 }
-

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../camera/application/offline_barcode_repository.dart';
 import '../../camera/application/product_scanner_service.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/logged_food_entry.dart';
@@ -167,6 +168,8 @@ class DailyConsumptionTracker extends ChangeNotifier {
       sugarGrams: addedSugarForPortion,
       redTierAdditivesCount: productRedCount,
       timestamp: DateTime.now().toLocal(),
+      productJson: product.toJson(),
+      product: product,
     );
 
     _entries.add(entry);
@@ -178,6 +181,109 @@ class DailyConsumptionTracker extends ChangeNotifier {
 
     // 7. Persist to SharedPreferences asynchronously
     await _saveToStorage(todayKey);
+  }
+
+  /// Resolves the full Product model for an entry to navigate to VerdictReportScreen.
+  /// Priority 1 (0ms): Embedded Product / ProductJson
+  /// Priority 2 (< 5ms): OfflineBarcodeRepository Tier 1/2 lookup by barcode or product name
+  /// Priority 3 (Fallback): Reconstruct valid Product model from logged macros
+  Future<Product> resolveLoggedProduct(
+    LoggedFoodEntry entry, {
+    UserProfileModel? profile,
+    ProductScannerService? scannerService,
+  }) async {
+    final activeProfile = profile ?? UserProfileModel.defaults('guest_user');
+    final service = scannerService ?? ProductScannerService();
+
+    // Priority 1: Embedded Product / ProductJson (0ms)
+    if (entry.product != null) {
+      return entry.product!;
+    }
+    if (entry.productJson != null && entry.productJson!.isNotEmpty) {
+      try {
+        return Product.fromJson(entry.productJson!);
+      } catch (e) {
+        debugPrint('[DailyConsumptionTracker] Notice deserializing productJson: $e');
+      }
+    }
+
+    // Priority 2: Local Seed & Tier 2 Cache Lookup by Barcode or Name
+    try {
+      final offlineRepo = OfflineBarcodeRepository.instance;
+      await offlineRepo.ensureInitialized();
+
+      // Check by barcode first
+      if (entry.barcode.isNotEmpty) {
+        final cached = await offlineRepo.lookupBarcode(entry.barcode);
+        if (cached != null) {
+          return service.evaluateProductData(
+            productData: cached,
+            userProfile: activeProfile,
+            barcode: entry.barcode,
+          );
+        }
+      }
+
+      // Check by product name in local repository
+      if (entry.productName.isNotEmpty && entry.productName != 'Packaged Food') {
+        final matches = await offlineRepo.searchByQuery(entry.productName);
+        if (matches.isNotEmpty) {
+          final bestMatch = matches.first;
+          return service.evaluateProductData(
+            productData: bestMatch,
+            userProfile: activeProfile,
+            barcode: bestMatch['barcode']?.toString() ?? entry.barcode,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[DailyConsumptionTracker] Notice resolving product from offline repo: $e');
+    }
+
+    // Priority 3: Fallback Reconstruction
+    final portion = entry.portionGrams > 0 ? entry.portionGrams : 100.0;
+    final sugarPer100g = double.parse((entry.sugarGrams / (portion / 100.0)).toStringAsFixed(1));
+    final estimatedCalories = (sugarPer100g * 4.0) + 150.0;
+
+    final rawFallback = {
+      'barcode': entry.barcode.isNotEmpty ? entry.barcode : 'logged_${entry.timestamp.millisecondsSinceEpoch}',
+      'product_name': entry.productName,
+      'brand_name': 'Packaged Brand',
+      'category': 'Packaged Food',
+      'serving_size_g': portion,
+      'pack_weight_g': portion,
+      'nutrition': {
+        'energy_kcal': estimatedCalories,
+        'sugar_g_per_100g': sugarPer100g,
+        'sugars_100g': sugarPer100g,
+        'added_sugar_g_per_100g': sugarPer100g,
+        'added_sugars_100g': sugarPer100g,
+      },
+      'additives': entry.redTierAdditivesCount > 0
+          ? [
+              {
+                'ins_code': 'INS ???',
+                'name': 'Red-tier Additive',
+                'risk_tier': 'RED',
+                'hazard_level': 'HIGH',
+                'is_hazardous': true,
+              }
+            ]
+          : <Map<String, dynamic>>[],
+      'nova_grade': entry.redTierAdditivesCount > 0 ? 4 : 3,
+      'red_cap_triggered': entry.redTierAdditivesCount > 0 ? 1 : 0,
+      'health_score': entry.redTierAdditivesCount > 0 ? 35 : 65,
+      'verdict_tag': entry.redTierAdditivesCount > 0 ? 'Toxic / Capped 🔴' : 'Caution 🟠',
+      'safe_portion_grams': portion.round(),
+      'limiting_factor': entry.redTierAdditivesCount > 0 ? 'Toxic Additives' : 'Sugar Content',
+      'frequency_schedule': 'Consume with Caution',
+    };
+
+    return service.evaluateProductData(
+      productData: rawFallback,
+      userProfile: activeProfile,
+      barcode: entry.barcode,
+    );
   }
 
   /// Removes a logged item at [index], subtracting its sugar and red-tier count

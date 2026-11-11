@@ -1020,29 +1020,81 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (itemCtx, index) {
                         final entry = entries[index];
                         final timeStr = '${entry.timestamp.hour.toString().padLeft(2, '0')}:${entry.timestamp.minute.toString().padLeft(2, '0')}';
-                        return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                          leading: CircleAvatar(
-                            backgroundColor: entry.redTierAdditivesCount > 0
-                                ? AppColors.safetyRed.withValues(alpha: 0.12)
-                                : AppColors.safetyGreen.withValues(alpha: 0.12),
-                            child: Icon(
-                              entry.redTierAdditivesCount > 0 ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
-                              color: entry.redTierAdditivesCount > 0 ? AppColors.safetyRed : AppColors.safetyGreen,
-                              size: 20,
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () async {
+                              final navigator = Navigator.of(context);
+                              Navigator.of(sheetCtx).pop();
+
+                              final resolvedProduct = await tracker.resolveLoggedProduct(
+                                entry,
+                                profile: _profile,
+                              );
+
+                              if (!mounted) return;
+                              await navigator.push(
+                                MaterialPageRoute(
+                                  builder: (_) => VerdictReportScreen(
+                                    product: resolvedProduct,
+                                    userProfile: _profile ?? UserProfileModel.defaults(widget.userId),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: entry.redTierAdditivesCount > 0
+                                        ? AppColors.safetyRed.withValues(alpha: 0.12)
+                                        : AppColors.safetyGreen.withValues(alpha: 0.12),
+                                    child: Icon(
+                                      entry.redTierAdditivesCount > 0
+                                          ? Icons.warning_amber_rounded
+                                          : Icons.check_circle_outline_rounded,
+                                      color: entry.redTierAdditivesCount > 0
+                                          ? AppColors.safetyRed
+                                          : AppColors.safetyGreen,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          entry.productName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                            color: AppColors.textObsidian,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Portion: ${entry.portionGrams.toStringAsFixed(0)}g • ${entry.sugarGrams.toStringAsFixed(1)}g sugar • $timeStr${entry.redTierAdditivesCount > 0 ? " • ${entry.redTierAdditivesCount} Red Additive" : ""}',
+                                          style: const TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.textMutedMocha),
+                                    tooltip: 'Remove entry',
+                                    onPressed: () => tracker.removeEntry(index),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    size: 20,
+                                    color: AppColors.textMutedMocha,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          title: Text(
-                            entry.productName,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                          ),
-                          subtitle: Text(
-                            'Portion: ${entry.portionGrams.toStringAsFixed(0)}g • ${entry.sugarGrams.toStringAsFixed(1)}g sugar • $timeStr${entry.redTierAdditivesCount > 0 ? " • ${entry.redTierAdditivesCount} Red Additive" : ""}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.textMutedMocha),
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.textMutedMocha),
-                            onPressed: () => tracker.removeEntry(index),
                           ),
                         );
                       },
