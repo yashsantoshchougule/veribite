@@ -838,7 +838,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             runSpacing: 8,
             children: () {
               final rawTokens = _product.scoreBreakdown!
-                  .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:)'))
+                  .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:|\d+)'))
                   .map((t) => t.trim())
                   .where((t) => t.isNotEmpty)
                   .toList();
@@ -852,13 +852,17 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               bool hasRedCapToken = false;
 
               for (final token in rawTokens) {
-                if (token.startsWith('Score:') || token.startsWith('Final Score:')) {
+                final isScoreToken = token.startsWith('Score:') ||
+                    token.startsWith('Final Score:') ||
+                    token.startsWith('Score =') ||
+                    token.startsWith('Final Score =') ||
+                    RegExp(r'^(Final\s+)?Score\s*[:=]?\s*\d+$', caseSensitive: false).hasMatch(token) ||
+                    RegExp(r'^=?\s*\d+$').hasMatch(token);
+
+                if (isScoreToken) {
                   hasScoreToken = true;
-                  if (gaugeScore != null) {
-                    displayTokens.add('Final Score: $gaugeScore');
-                  } else {
-                    displayTokens.add(token.startsWith('Score:') ? 'Final $token' : token);
-                  }
+                  // Skip raw uncapped score tokens; we append the single authoritative gauge score pill below
+                  continue;
                 } else {
                   if (token.contains('Red-Cap') ||
                       token.contains('Capped') ||
@@ -871,16 +875,14 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
               // If red-cap override is active but omitted from summary tokens, insert it right before final score
               if (isRedCapped && !hasRedCapToken) {
-                final scoreIdx = displayTokens.indexWhere((t) => t.startsWith('Final Score:'));
-                if (scoreIdx >= 0) {
-                  displayTokens.insert(scoreIdx, 'Red-Tier Cap: Enforced');
-                } else {
-                  displayTokens.add('Red-Tier Cap: Enforced');
-                }
+                displayTokens.add('Red-Tier Cap (≤39)');
               }
 
-              if (!hasScoreToken && gaugeScore != null) {
+              // Always append the authoritative final score dark pill matching the gauge score exactly
+              if (gaugeScore != null) {
                 displayTokens.add('Final Score: $gaugeScore');
+              } else if (hasScoreToken) {
+                displayTokens.add('Final Score: N/A');
               }
 
               return displayTokens.map((token) {

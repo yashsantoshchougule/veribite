@@ -34,10 +34,11 @@ class UserProfileModel {
     this.isLowSugar = false,
     this.allergens = const [],
     this.dietaryPreference,
-    this.language = 'en',
+    String language = 'en',
+    String? voiceLanguage,
     this.isCompleted = true,
     required this.updatedAt,
-  });
+  }) : language = voiceLanguage ?? language;
 
   /// Standard safe baseline profile (used on Skip)
   factory UserProfileModel.defaults(String userId) {

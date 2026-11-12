@@ -3,16 +3,17 @@
   "latest_version": "1.0.1",
   "latest_build_number": 2,
   "release_date": "2026-11-12",
-  "apk_size_mb": "116.5 MB",
-  "sha256": "53093145da2a803b9e402fd2b971a195752aab0c700bfb77ebb7363b2c8ace5a",
+  "apk_size_mb": "116.6 MB",
+  "sha256": "5acffacd7d0c930ddcaccc50d61f1257dc429ce31916d0da34c589fa71076f8a",
   "webpage_url": "https://veribite.vercel.app",
   "apk_download_url": "https://github.com/yashsantoshchougule/VeriBite/releases/latest/download/app-release.apk",
   "force_update": false,
   "release_notes": [
+    "Native multilingual voice readout in Hindi, Marathi, Tamil, Telugu, and English",
+    "Instant voice language preference persistence directly on chip tap",
+    "Synchronized scientific score breakdown with authoritative circular gauge and red-tier cap",
     "3.0s parallel QR & barcode scanner with instant local cache recall",
     "Live Web & FSSAI/WHO Clinical Intelligence deep-search with clickable citations",
-    "Non-food upload protection guard & high-density macro slider support",
-    "Interactive Today's Intake Log, Featured Products routing & INS Decoder filter",
-    "Persistent user profile (height, weight, diabetes/hypertension guardrails) & single-tap navigation lock"
+    "Persistent user profile with health guardrails & single-tap navigation lock"
   ]
 }

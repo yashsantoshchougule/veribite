@@ -53,37 +53,9 @@ class TtsVoiceService {
 
   Future<void> _initTts() async {
     try {
-      // Natural conversational cadence and pitch for female voice
-      await _flutterTts.setSpeechRate(0.46).catchError((_) => null);
+      await _flutterTts.setSpeechRate(0.48).catchError((_) => null);
       await _flutterTts.setVolume(1.0).catchError((_) => null);
-      await _flutterTts.setPitch(1.08).catchError((_) => null); // Warm, friendly female pitch
-      await _flutterTts.setLanguage('en-US').catchError((_) => null);
-
-      // Attempt to select high quality female voice if available on device
-      try {
-        final dynamic voices = await _flutterTts.getVoices;
-        if (voices is List && voices.isNotEmpty) {
-          for (final voice in voices) {
-            if (voice is Map) {
-              final name = (voice['name'] ?? '').toString().toLowerCase();
-              final locale = (voice['locale'] ?? '').toString().toLowerCase();
-              if (locale.contains('en')) {
-                if (name.contains('female') ||
-                    name.contains('samantha') ||
-                    name.contains('ava') ||
-                    name.contains('karen') ||
-                    name.contains('serena') ||
-                    name.contains('victoria') ||
-                    name.contains('sfg') ||
-                    name.contains('tpf')) {
-                  await _flutterTts.setVoice(Map<String, String>.from(voice));
-                  break;
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
+      await _flutterTts.setPitch(1.0).catchError((_) => null);
 
       _flutterTts.setCompletionHandler(() {
         currentlySpeakingIdNotifier.value = null;
@@ -216,6 +188,15 @@ class TtsVoiceService {
           if (voices is List && voices.isNotEmpty) {
             final targetLangPrefix = localeCode.split('-').first.toLowerCase();
             final targetLocaleNorm = localeCode.toLowerCase().replaceAll('_', '-');
+            final iso3 = targetLangPrefix == 'hi'
+                ? 'hin'
+                : (targetLangPrefix == 'mr'
+                    ? 'mar'
+                    : (targetLangPrefix == 'ta'
+                        ? 'tam'
+                        : (targetLangPrefix == 'te'
+                            ? 'tel'
+                            : 'eng')));
             Map<String, String>? matchingVoice;
 
             for (final v in voices) {
@@ -226,8 +207,10 @@ class TtsVoiceService {
                 if (vLocale == targetLocaleNorm ||
                     vLocale.startsWith('$targetLangPrefix-') ||
                     vLocale.startsWith('${targetLangPrefix}_') ||
+                    vLocale.contains(iso3) ||
                     vName.contains(targetLocaleNorm) ||
-                    vName.contains(targetLangPrefix)) {
+                    vName.contains(targetLangPrefix) ||
+                    vName.contains(iso3)) {
                   matchingVoice = Map<String, String>.from(
                     v.map((k, val) => MapEntry(k.toString(), val.toString())),
                   );

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../application/user_profile_manager.dart';
@@ -247,6 +248,11 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
                       // Optional Allergens & Dietary Preferences
                       _buildAllergenAndDietSection(),
+
+                      const SizedBox(height: 18),
+
+                      // Regional Voice Read-Out Language Selector
+                      _buildLanguageSelectorCard(),
 
                       const SizedBox(height: 32),
                     ],
@@ -1135,6 +1141,116 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                   ),
                 ),
                 showCheckmark: false,
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateLanguage(String langCode) async {
+    final normalized = RegionalVoiceLanguage.fromString(langCode).code;
+    setState(() {
+      _language = normalized;
+    });
+
+    // Immediate persistence on tap - do NOT wait for Done button!
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(UserProfileManager.voiceLanguageKey, normalized);
+      final profile = _buildCurrentProfile();
+      await UserProfileManager.instance.updateProfile(profile, prefs: prefs);
+      await _profileService.saveProfile(profile);
+    } catch (e) {
+      debugPrint('[UserDetailsScreen] Immediate language persistence notice: $e');
+    }
+  }
+
+  Widget _buildLanguageSelectorCard() {
+    final currentLang = RegionalVoiceLanguage.fromString(_language).code;
+
+    final languages = [
+      {'code': 'en', 'label': 'English'},
+      {'code': 'hi', 'label': 'Hindi (हिंदी)'},
+      {'code': 'mr', 'label': 'Marathi (मराठी)'},
+      {'code': 'ta', 'label': 'Tamil (தமிழ்)'},
+      {'code': 'te', 'label': 'Telugu (తెలుగు)'},
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.cardBorder, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8C7A6B).withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.record_voice_over_rounded, size: 20, color: AppColors.accentBronze),
+              SizedBox(width: 8),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Regional Voice Read-Out Language',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textObsidian,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Audible toxicology analysis and safe dosage reports will speak in this language:',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppColors.textMutedMocha,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: languages.map((lang) {
+              final isSelected = currentLang == lang['code'];
+              return GestureDetector(
+                onTap: () => _updateLanguage(lang['code']!),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.primaryObsidian : AppColors.stepPillBg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected ? AppColors.primaryObsidian : AppColors.stepPillBorder,
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Text(
+                    lang['label']!,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                      color: isSelected ? Colors.white : AppColors.textObsidian,
+                    ),
+                  ),
+                ),
               );
             }).toList(),
           ),

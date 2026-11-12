@@ -20,36 +20,35 @@ enum RegionalVoiceLanguage {
       return RegionalVoiceLanguage.english;
     }
 
-    final normalized = input.trim().toLowerCase();
+    final normalized = input.trim().toLowerCase().replaceAll('_', '-');
 
-    // Specific Indian language alias checks
+    // Specific Indian language alias checks (supporting ISO codes, BCP-47 locales, and native scripts)
     if (normalized == 'hi' ||
-        normalized == 'hi-in' ||
+        normalized.startsWith('hi-') ||
         normalized.contains('hindi') ||
         normalized.contains('हिंदी')) {
       return RegionalVoiceLanguage.hindi;
     }
     if (normalized == 'mr' ||
-        normalized == 'mr-in' ||
+        normalized.startsWith('mr-') ||
         normalized.contains('marathi') ||
         normalized.contains('मराठी')) {
       return RegionalVoiceLanguage.marathi;
     }
     if (normalized == 'ta' ||
-        normalized == 'ta-in' ||
+        normalized.startsWith('ta-') ||
         normalized.contains('tamil') ||
         normalized.contains('தமிழ்')) {
       return RegionalVoiceLanguage.tamil;
     }
     if (normalized == 'te' ||
-        normalized == 'te-in' ||
+        normalized.startsWith('te-') ||
         normalized.contains('telugu') ||
         normalized.contains('తెలుగు')) {
       return RegionalVoiceLanguage.telugu;
     }
     if (normalized == 'en' ||
-        normalized == 'en-in' ||
-        normalized == 'en-us' ||
+        normalized.startsWith('en-') ||
         normalized.contains('english')) {
       return RegionalVoiceLanguage.english;
     }

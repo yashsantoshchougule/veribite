@@ -2217,11 +2217,13 @@ class ProductScannerService {
     // Synchronize score breakdown string with final score and red cap status
     String synchronizedBreakdown = scoreBreakdown;
     if (finalScore != null) {
-      if (synchronizedBreakdown.contains('Final Score:')) {
+      if (synchronizedBreakdown.contains(RegExp(r'(Final\s+)?Score:\s*\d+'))) {
         synchronizedBreakdown = synchronizedBreakdown.replaceFirst(
-          RegExp(r'Final Score:\s*\d+'),
+          RegExp(r'(Final\s+)?Score:\s*\d+'),
           'Final Score: $finalScore',
         );
+      } else {
+        synchronizedBreakdown = '$synchronizedBreakdown | Final Score: $finalScore';
       }
       if (scoreResult.isRedCapped &&
           !synchronizedBreakdown.contains('Red-Cap') &&
