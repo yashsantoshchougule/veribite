@@ -2214,6 +2214,26 @@ class ProductScannerService {
     final maxSugar = profile.isDiabetic ? 10.0 : (profile.isChild ? 15.0 : 25.0);
     final isExceededBudget = sugarPerServing > maxSugar;
 
+    // Synchronize score breakdown string with final score and red cap status
+    String synchronizedBreakdown = scoreBreakdown;
+    if (finalScore != null) {
+      if (synchronizedBreakdown.contains('Final Score:')) {
+        synchronizedBreakdown = synchronizedBreakdown.replaceFirst(
+          RegExp(r'Final Score:\s*\d+'),
+          'Final Score: $finalScore',
+        );
+      }
+      if (scoreResult.isRedCapped &&
+          !synchronizedBreakdown.contains('Red-Cap') &&
+          !synchronizedBreakdown.contains('Capped') &&
+          !synchronizedBreakdown.contains('Red-Tier Cap')) {
+        synchronizedBreakdown = synchronizedBreakdown.replaceFirst(
+          'Final Score:',
+          'Red-Tier Cap | Final Score:',
+        );
+      }
+    }
+
     return ScannedProductResult(
       barcode: barcode,
       productName: productName,
@@ -2249,7 +2269,7 @@ class ProductScannerService {
       portionAdvice: portionAdvice,
       isExceededBudget: isExceededBudget,
       analysisSource: analysisSource ?? raw['source']?.toString(),
-      scoreBreakdown: scoreBreakdown,
+      scoreBreakdown: synchronizedBreakdown,
       isIngredientOnlyScore: isIngredientOnly,
       healthIntelligence: healthIntelligence,
     );

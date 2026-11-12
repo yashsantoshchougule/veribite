@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../main.dart';
 import '../../auth/application/supabase_auth_service.dart';
@@ -133,12 +134,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _updateLanguage(String langCode) async {
-    if (_profile == null) return;
-    final updated = _profile!.copyWith(language: langCode);
+    final normalized = RegionalVoiceLanguage.fromString(langCode).code;
+    final current = _profile ?? UserProfileManager.instance.profile;
+    final updated = current.copyWith(language: normalized, updatedAt: DateTime.now());
     setState(() {
       _profile = updated;
     });
-    await _profileService.saveProfile(updated);
+
+    // Immediate persistence on tap - do NOT wait for Done button!
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(UserProfileManager.voiceLanguageKey, normalized);
+      await UserProfileManager.instance.updateProfile(updated, prefs: prefs);
+      await _profileService.saveProfile(updated);
+    } catch (e) {
+      debugPrint('[ProfileScreen] Immediate language persistence notice: $e');
+    }
   }
 
   Future<void> _handleSignOut() async {
@@ -917,7 +928,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildLanguageSelectorCard(UserProfileModel profile) {
-    final currentLang = profile.language;
+    final currentLang = RegionalVoiceLanguage.fromString(profile.language).code;
 
     final languages = [
       {'code': 'en', 'label': 'English'},

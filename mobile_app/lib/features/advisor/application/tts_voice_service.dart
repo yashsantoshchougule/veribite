@@ -4,7 +4,9 @@ import 'package:edge_tts/edge_tts.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../../camera/application/product_scanner_service.dart';
+import '../../profile/application/user_profile_manager.dart';
 import '../../profile/domain/user_profile_model.dart';
+import 'regional_voice_script_builder.dart';
 
 /// Text-to-Speech Voice Service powering the conversational AI advisor.
 /// Features a hyper-realistic, emotionally expressive human female voice
@@ -20,6 +22,16 @@ class TtsVoiceService {
 
   /// Top-tier natural, conversational female neural voice
   static const String naturalFemaleVoice = 'en-US-AriaNeural';
+
+  /// Multilingual Microsoft Edge Neural TTS voices mapped to supported Indian locales
+  static const Map<String, String> _edgeNeuralVoices = {
+    'hi-IN': 'hi-IN-SwaraNeural',
+    'mr-IN': 'mr-IN-AarohiNeural',
+    'ta-IN': 'ta-IN-PallaviNeural',
+    'te-IN': 'te-IN-ShrutiNeural',
+    'en-IN': 'en-IN-NeerjaNeural',
+    'en-US': 'en-US-AriaNeural',
+  };
 
   TtsVoiceService({FlutterTts? tts, AudioPlayer? audioPlayer})
       : _flutterTts = tts ?? FlutterTts(),
@@ -109,63 +121,29 @@ class TtsVoiceService {
   }
 
   /// Formats an evidence-based clinical speech summary for a scanned product verdict
+  /// matching the user's selected regional voice readout language.
   static String buildVerdictSpeechSummary({
     required ScannedProductResult product,
     required UserProfileModel userProfile,
+    RegionalVoiceLanguage? language,
   }) {
-    final buffer = StringBuffer();
-
-    // 1. Product Name & Health Score
-    final cleanVerdict = product.verdictTag
-        .replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}]', unicode: true), '')
-        .trim();
-    buffer.write('Here is the safety verdict for ${product.productName}. ');
-    if (product.healthScore != null) {
-      buffer.write('Overall health score is ${product.healthScore} out of 100, classified as $cleanVerdict. ');
-    } else {
-      buffer.write('Overall health score has insufficient data. ');
-    }
-
-    // 2. Toxic Red-Cap Override Status
-    if (product.redCapTriggered) {
-      final redAdditives = product.additives
-          .where((a) => a['risk_tier'] == 'RED' || a['triggers_red_cap'] == 1)
-          .map((a) => a['primary_name'] ?? 'INS ${a["ins_code"]}')
-          .take(3)
-          .join(', ');
-      buffer.write('Warning: A strict red-cap toxic override is triggered. ');
-      if (redAdditives.isNotEmpty) {
-        buffer.write('This product contains hazardous additives: $redAdditives. ');
-      }
-      buffer.write('Health score is restricted to 39 or below. ');
-    } else {
-      buffer.write('No toxic red-cap chemical additives were detected. ');
-    }
-
-    // 3. Sugar Splitting Cluster Alert
-    if (product.splitSugars.isNotEmpty) {
-      buffer.write(
-        'Be aware: Hidden sugar splitting was detected across ${product.splitSugars.length} sweetener aliases, including ${product.splitSugars.take(2).join(" and ")}. ',
-      );
-    }
-
-    // 4. Prescribed Safe Portion & Ceilings
-    buffer.write('Your prescribed safe consumption limit is ${product.safePortionGrams} grams');
-    if (product.safePieces != null) {
-      buffer.write(', or about ${product.safePieces} pieces');
-    }
-    buffer.write('. Recommended frequency: ${product.frequencySchedule}. ');
-    buffer.write('Limiting constraint: ${product.limitingFactor}.');
-
-    return buffer.toString();
+    return RegionalVoiceScriptBuilder.build(
+      product: product,
+      userProfile: userProfile,
+      language: language,
+    );
   }
 
   /// Speaks the provided text aloud. If the same message is already playing, stops it.
-  Future<void> toggleSpeak(String text, {required String messageId}) async {
+  Future<void> toggleSpeak(
+    String text, {
+    required String messageId,
+    RegionalVoiceLanguage? language,
+  }) async {
     if (currentlySpeakingIdNotifier.value == messageId) {
       await stop();
     } else {
-      await speak(text, messageId: messageId);
+      await speak(text, messageId: messageId, language: language);
     }
   }
 
@@ -181,29 +159,42 @@ class TtsVoiceService {
     }
   }
 
-  /// Speaks text aloud using hyper-realistic female neural voice (en-US-AriaNeural)
-  /// with automatic fallback to high-quality on-device neural voice.
-  Future<void> speak(String text, {required String messageId}) async {
+  /// Speaks text aloud using hyper-realistic neural voice matching the user's
+  /// regional voice language preference with automatic fallback to high-quality
+  /// on-device neural voice via FlutterTts.
+  Future<void> speak(
+    String text, {
+    required String messageId,
+    RegionalVoiceLanguage? language,
+  }) async {
     final cleanText = cleanMarkdownForSpeech(text);
     if (cleanText.isEmpty) return;
 
     try {
+      // 1. Immediately stop any active audio playback
       await _stopAudioOutputs();
+
+      // 2. Read latest selected language directly from UserProfileManager.instance
+      final activeProfile = UserProfileManager.instance.profile;
+      final voiceLang = language ??
+          RegionalVoiceLanguage.fromString(activeProfile.language);
+      final localeCode = voiceLang.localeCode; // e.g. 'hi-IN', 'mr-IN', 'ta-IN', 'te-IN', 'en-IN'
+
       currentlySpeakingIdNotifier.value = messageId;
 
       bool playedWithNeural = false;
 
-      // Tier 1: Microsoft Edge Neural TTS (en-US-AriaNeural)
-      // Highly regarded in the AI community for realistic emotional warmth and human prosody.
+      // Tier 1: Microsoft Edge Neural TTS with language-specific neural voice
       try {
+        final edgeVoice = _edgeNeuralVoices[localeCode] ?? 'en-IN-NeerjaNeural';
         final communicate = Communicate(
           text: cleanText,
-          voice: naturalFemaleVoice,
+          voice: edgeVoice,
           rate: '+0%',
           pitch: '+0Hz',
           volume: '+0%',
         );
-        final bytes = await communicate.toBytes().timeout(const Duration(seconds: 5));
+        final bytes = await communicate.toBytes().timeout(const Duration(milliseconds: 3500));
         if (bytes.isNotEmpty && _audioPlayer != null) {
           await _audioPlayer!.play(BytesSource(bytes, mimeType: 'audio/mpeg'));
           playedWithNeural = true;
@@ -212,9 +203,51 @@ class TtsVoiceService {
         debugPrint('[TtsVoiceService] Neural audio streaming notice: $neuralErr. Using on-device fallback.');
       }
 
-      // Tier 2: Seamless zero-latency fallback to on-device female neural voice
+      // Tier 2: Seamless zero-latency fallback to on-device FlutterTts with locale configuration
       if (!playedWithNeural) {
-        await _flutterTts.speak(cleanText).catchError((_) => null);
+        await _flutterTts.stop().catchError((_) => null);
+        await _flutterTts.setSpeechRate(0.48).catchError((_) => null);
+        await _flutterTts.setPitch(1.0).catchError((_) => null);
+        await _flutterTts.setLanguage(localeCode).catchError((_) => null);
+
+        // Query available voices and bind matching native voice if installed
+        try {
+          final dynamic voices = await _flutterTts.getVoices;
+          if (voices is List && voices.isNotEmpty) {
+            final targetLangPrefix = localeCode.split('-').first.toLowerCase();
+            final targetLocaleNorm = localeCode.toLowerCase().replaceAll('_', '-');
+            Map<String, String>? matchingVoice;
+
+            for (final v in voices) {
+              if (v is Map) {
+                final vLocale = (v['locale'] ?? '').toString().toLowerCase().replaceAll('_', '-');
+                final vName = (v['name'] ?? '').toString().toLowerCase();
+
+                if (vLocale == targetLocaleNorm ||
+                    vLocale.startsWith('$targetLangPrefix-') ||
+                    vLocale.startsWith('${targetLangPrefix}_') ||
+                    vName.contains(targetLocaleNorm) ||
+                    vName.contains(targetLangPrefix)) {
+                  matchingVoice = Map<String, String>.from(
+                    v.map((k, val) => MapEntry(k.toString(), val.toString())),
+                  );
+                  break;
+                }
+              }
+            }
+
+            if (matchingVoice != null) {
+              await _flutterTts.setVoice(matchingVoice).catchError((_) => null);
+            }
+          }
+        } catch (voiceErr) {
+          debugPrint('[TtsVoiceService] Voice binding error: $voiceErr');
+        }
+
+        await _flutterTts.speak(cleanText).catchError((e) {
+          debugPrint('[TtsVoiceService] FlutterTts speak error: $e');
+          return null;
+        });
       }
     } catch (e) {
       debugPrint('[TtsVoiceService] Speak notice: $e');

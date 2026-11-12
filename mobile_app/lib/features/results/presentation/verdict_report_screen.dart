@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../services/product_health_scorer.dart';
 import '../../../../services/multi_provider_ai_router.dart';
 import '../../advisor/application/tts_voice_service.dart';
+import '../../advisor/application/regional_voice_script_builder.dart';
 import '../../advisor/domain/advisor_chat_model.dart';
 import '../../advisor/presentation/advisor_chat_screen.dart';
 import '../../camera/application/product_scanner_service.dart';
@@ -201,11 +202,23 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
   Future<void> _toggleListenVerdict() async {
     unawaited(HapticFeedback.lightImpact());
-    final summary = TtsVoiceService.buildVerdictSpeechSummary(
+    if (_ttsService.isSpeaking(_speakingMessageId)) {
+      await _ttsService.stop();
+      return;
+    }
+    // Read the latest selected language directly from UserProfileManager.instance
+    final latestProfile = UserProfileManager.instance.profile;
+    final lang = RegionalVoiceLanguage.fromString(latestProfile.language);
+    final summary = RegionalVoiceScriptBuilder.build(
       product: _product,
-      userProfile: widget.userProfile,
+      userProfile: latestProfile,
+      language: lang,
     );
-    await _ttsService.toggleSpeak(summary, messageId: _speakingMessageId);
+    await _ttsService.speak(
+      summary,
+      messageId: _speakingMessageId,
+      language: lang,
+    );
   }
 
   double get _packWeight => _product.packWeightG > 0
@@ -823,57 +836,105 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _product.scoreBreakdown!
-                .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:)'))
-                .map((t) => t.trim())
-                .where((t) => t.isNotEmpty)
-                .map((token) {
-                  final isBase = token.startsWith('Base');
-                  final isScore = token.startsWith('Score:') || token.startsWith('Final Score:');
-                  final isNegative = !isScore && (token.contains(':-') || token.contains('Capped') || token.contains('NOVA 4') || token.contains('NOVA 3'));
-                  final isPositive = !isScore && token.contains(':+');
+            children: () {
+              final rawTokens = _product.scoreBreakdown!
+                  .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:)'))
+                  .map((t) => t.trim())
+                  .where((t) => t.isNotEmpty)
+                  .toList();
 
-                  Color bg = Colors.white;
-                  Color text = AppColors.textObsidian;
-                  Color border = AppColors.cardBorder;
+              // Synchronize the breakdown tokens with the gauge score and red-cap status
+              final gaugeScore = _product.healthScore;
+              final isRedCapped = _product.redCapTriggered;
 
-                  if (isBase) {
-                    bg = const Color(0xFFF0EFEB);
-                    text = AppColors.textObsidian;
-                  } else if (isScore) {
-                    bg = AppColors.primaryObsidian;
-                    text = Colors.white;
-                    border = AppColors.primaryObsidian;
-                  } else if (isNegative) {
-                    bg = AppColors.safetyRedBg;
-                    text = AppColors.safetyRed;
-                    border = AppColors.safetyRedBorder;
-                  } else if (isPositive) {
-                    bg = const Color(0xFFE6F4EA);
-                    text = AppColors.safetyGreen;
-                    border = const Color(0xFF34A853).withValues(alpha: 0.35);
+              final displayTokens = <String>[];
+              bool hasScoreToken = false;
+              bool hasRedCapToken = false;
+
+              for (final token in rawTokens) {
+                if (token.startsWith('Score:') || token.startsWith('Final Score:')) {
+                  hasScoreToken = true;
+                  if (gaugeScore != null) {
+                    displayTokens.add('Final Score: $gaugeScore');
+                  } else {
+                    displayTokens.add(token.startsWith('Score:') ? 'Final $token' : token);
                   }
+                } else {
+                  if (token.contains('Red-Cap') ||
+                      token.contains('Capped') ||
+                      token.contains('Red-Tier Cap')) {
+                    hasRedCapToken = true;
+                  }
+                  displayTokens.add(token);
+                }
+              }
 
-                  final cleanToken = token.startsWith('Score:') ? 'Final $token' : token;
+              // If red-cap override is active but omitted from summary tokens, insert it right before final score
+              if (isRedCapped && !hasRedCapToken) {
+                final scoreIdx = displayTokens.indexWhere((t) => t.startsWith('Final Score:'));
+                if (scoreIdx >= 0) {
+                  displayTokens.insert(scoreIdx, 'Red-Tier Cap: Enforced');
+                } else {
+                  displayTokens.add('Red-Tier Cap: Enforced');
+                }
+              }
 
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: border, width: 1.0),
+              if (!hasScoreToken && gaugeScore != null) {
+                displayTokens.add('Final Score: $gaugeScore');
+              }
+
+              return displayTokens.map((token) {
+                final isBase = token.startsWith('Base');
+                final isScore = token.startsWith('Score:') || token.startsWith('Final Score:');
+                final isNegative = !isScore &&
+                    (token.contains(':-') ||
+                        token.contains('Capped') ||
+                        token.contains('Red-Cap') ||
+                        token.contains('Red-Tier') ||
+                        token.contains('Cap:') ||
+                        token.contains('NOVA 4') ||
+                        token.contains('NOVA 3'));
+                final isPositive = !isScore && token.contains(':+');
+
+                Color bg = Colors.white;
+                Color text = AppColors.textObsidian;
+                Color border = AppColors.cardBorder;
+
+                if (isBase) {
+                  bg = const Color(0xFFF0EFEB);
+                  text = AppColors.textObsidian;
+                } else if (isScore) {
+                  bg = AppColors.primaryObsidian;
+                  text = Colors.white;
+                  border = AppColors.primaryObsidian;
+                } else if (isNegative) {
+                  bg = AppColors.safetyRedBg;
+                  text = AppColors.safetyRed;
+                  border = AppColors.safetyRedBorder;
+                } else if (isPositive) {
+                  bg = const Color(0xFFE6F4EA);
+                  text = AppColors.safetyGreen;
+                  border = const Color(0xFF34A853).withValues(alpha: 0.35);
+                }
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: border, width: 1.0),
+                  ),
+                  child: Text(
+                    token,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: text,
                     ),
-                    child: Text(
-                      cleanToken,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: text,
-                      ),
-                    ),
-                  );
-                })
-                .toList(),
+                  ),
+                );
+              }).toList();
+            }(),
           ),
         ],
       ),

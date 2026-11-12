@@ -22,6 +22,7 @@ class UserProfileManager extends ChangeNotifier {
   static const String backupBaselineKey = 'veribite_user_baseline';
   static const String backupConditionsKey = 'veribite_user_conditions';
   static const String backupSugarCeilingKey = 'veribite_user_sugar_ceiling_g';
+  static const String voiceLanguageKey = 'veribite_voice_language';
 
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
@@ -42,6 +43,7 @@ class UserProfileManager extends ChangeNotifier {
   List<String> get allergens => _profile.allergens;
   String? get dietaryPreference => _profile.dietaryPreference;
   String get language => _profile.language;
+  String get voiceLanguage => _profile.language;
   bool get isCompleted => _profile.isCompleted;
 
   String get baselineSummary {
@@ -100,6 +102,7 @@ class UserProfileManager extends ChangeNotifier {
     final backupWeight = p.getDouble(backupWeightKey);
     final backupAge = p.getInt(backupAgeKey);
     final backupConditions = p.getStringList(backupConditionsKey) ?? const [];
+    final backupVoiceLang = p.getString(voiceLanguageKey);
 
     if (loadedProfile != null) {
       // Reconcile: If primitive backup has a valid non-default weight and loaded had 65, prefer backup
@@ -108,6 +111,9 @@ class UserProfileManager extends ChangeNotifier {
           loadedProfile.weightKg == 65.0 &&
           backupWeight != 65.0) {
         loadedProfile = loadedProfile.copyWith(weightKg: backupWeight);
+      }
+      if (backupVoiceLang != null && backupVoiceLang.isNotEmpty) {
+        loadedProfile = loadedProfile.copyWith(language: backupVoiceLang);
       }
       _profile = loadedProfile;
     } else if (backupWeight != null && backupWeight > 0) {
@@ -121,11 +127,15 @@ class UserProfileManager extends ChangeNotifier {
         isHypertensive: backupConditions.contains('hypertensive'),
         isPregnancySafe: backupConditions.contains('pregnancy_safe'),
         isLowSugar: backupConditions.contains('low_sugar'),
+        language: backupVoiceLang ?? 'en',
         isCompleted: true,
         updatedAt: DateTime.now(),
       );
     } else {
       _profile = UserProfileModel.defaults(effectiveUserId);
+      if (backupVoiceLang != null && backupVoiceLang.isNotEmpty) {
+        _profile = _profile.copyWith(language: backupVoiceLang);
+      }
     }
 
     _isInitialized = true;
@@ -172,9 +182,20 @@ class UserProfileManager extends ChangeNotifier {
       await p.setStringList(backupConditionsKey, conditions);
 
       await p.setDouble(backupSugarCeilingKey, maxSugarCeilingG);
+      await p.setString(voiceLanguageKey, newProfile.language);
     } catch (e) {
       debugPrint('[UserProfileManager] Error persisting profile: $e');
     }
+  }
+
+  /// Fast helper to update voice language with immediate persistence.
+  Future<void> updateVoiceLanguage(String languageInput) async {
+    final normalized = RegionalVoiceLanguage.fromString(languageInput).code;
+    final updated = _profile.copyWith(
+      language: normalized,
+      updatedAt: DateTime.now(),
+    );
+    await updateProfile(updated);
   }
 
   /// Fast helper to update weight with validation and immediate persistence.

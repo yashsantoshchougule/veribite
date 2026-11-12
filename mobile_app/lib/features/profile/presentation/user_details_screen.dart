@@ -54,6 +54,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
   // Optional Dietary Preference
   String? _selectedDiet;
 
+  // Regional Voice Read-Out Language preference
+  String _language = 'en';
+
   bool _isSaving = false;
 
   @override
@@ -92,6 +95,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
       isLowSugar: _isLowSugar,
       allergens: _selectedAllergens.toList(),
       dietaryPreference: _selectedDiet,
+      language: _language,
       isCompleted: isCompleted,
       updatedAt: DateTime.now(),
     );
@@ -125,6 +129,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
         _selectedAllergens.clear();
         _selectedAllergens.addAll(existing.allergens);
         _selectedDiet = existing.dietaryPreference;
+        _language = existing.language;
         _weightController.text = existing.weightKg.toStringAsFixed(0);
       });
     }

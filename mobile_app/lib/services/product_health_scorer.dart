@@ -406,10 +406,15 @@ class ProductHealthScorer {
     // 5. CLAMPING & RED-CAP ENFORCEMENT (Clamp 5 to 98)
     int finalScore = currentScore.round().clamp(5, 98);
 
-    if (isRedCapped && finalScore > 39) {
-      finalScore = 39;
-      breakdown['red_cap_enforced'] = true;
-      summaryTokens.add(hasBioactiveRisk ? 'Chronic Caution: Capped to 39' : 'Red-Cap: Capped to 39');
+    if (isRedCapped) {
+      if (finalScore > 39) {
+        finalScore = 39;
+        breakdown['red_cap_enforced'] = true;
+        summaryTokens.add(hasBioactiveRisk ? 'Chronic Caution: Capped to 39' : 'Red-Cap: Capped to 39');
+      } else {
+        breakdown['red_cap_enforced'] = true;
+        summaryTokens.add(hasBioactiveRisk ? 'Chronic Caution (≤39)' : 'Red-Tier Cap (≤39)');
+      }
     }
 
     final String verdictTag = _deriveVerdictTag(finalScore, isRedCapped);
@@ -485,9 +490,13 @@ class ProductHealthScorer {
     }
 
     int finalScore = score.round().clamp(10, 70);
-    if (isRedCapped && finalScore > 39) {
-      finalScore = 39;
-      tokens.add('Red-Cap: Capped to 39');
+    if (isRedCapped) {
+      if (finalScore > 39) {
+        finalScore = 39;
+        tokens.add('Red-Cap: Capped to 39');
+      } else {
+        tokens.add('Red-Tier Cap (≤39)');
+      }
     }
 
     final summary = 'Scored from ingredients only — nutrition table not reported | ${tokens.join(' | ')} | Final Score: $finalScore';

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+export 'regional_voice_language.dart';
 
 /// Domain model representing a user's isolated health profile and biometrics.
 /// Strictly partitioned by [userId] to ensure zero data bleeding across accounts.
@@ -55,6 +56,9 @@ class UserProfileModel {
     );
   }
 
+  /// Convenient alias for regional voice language
+  String get voiceLanguage => language;
+
   UserProfileModel copyWith({
     String? userId,
     double? weightKg,
@@ -69,6 +73,7 @@ class UserProfileModel {
     List<String>? allergens,
     String? dietaryPreference,
     String? language,
+    String? voiceLanguage,
     bool? isCompleted,
     DateTime? updatedAt,
   }) {
@@ -85,7 +90,7 @@ class UserProfileModel {
       isLowSugar: isLowSugar ?? this.isLowSugar,
       allergens: allergens ?? this.allergens,
       dietaryPreference: dietaryPreference ?? this.dietaryPreference,
-      language: language ?? this.language,
+      language: voiceLanguage ?? language ?? this.language,
       isCompleted: isCompleted ?? this.isCompleted,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -106,6 +111,8 @@ class UserProfileModel {
       'allergens': allergens,
       'dietary_preference': dietaryPreference,
       'language': language,
+      'voice_language': language,
+      'veribite_voice_language': language,
       'is_completed': isCompleted,
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -139,7 +146,10 @@ class UserProfileModel {
           const [],
       dietaryPreference:
           map['dietary_preference'] as String? ?? map['dietaryPreference'] as String?,
-      language: map['language'] as String? ?? 'en',
+      language: map['voice_language'] as String? ??
+          map['veribite_voice_language'] as String? ??
+          map['language'] as String? ??
+          'en',
       isCompleted:
           map['is_completed'] as bool? ?? map['isCompleted'] as bool? ?? true,
       updatedAt: map['updated_at'] != null
