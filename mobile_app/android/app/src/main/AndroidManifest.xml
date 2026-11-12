@@ -61,6 +61,10 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Required by FlutterTts on Android 11+ (API 30+) to discover and bind regional TTS engines -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <!-- Required by url_launcher & Supabase OAuth to open Chrome / default browser -->
         <intent>
             <action android:name="android.intent.action.VIEW" />

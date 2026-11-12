@@ -53,6 +53,7 @@ class TtsVoiceService {
 
   Future<void> _initTts() async {
     try {
+      await _flutterTts.awaitSpeakCompletion(true).catchError((_) => null);
       await _flutterTts.setSpeechRate(0.48).catchError((_) => null);
       await _flutterTts.setVolume(1.0).catchError((_) => null);
       await _flutterTts.setPitch(1.0).catchError((_) => null);
@@ -178,16 +179,31 @@ class TtsVoiceService {
       // Tier 2: Seamless zero-latency fallback to on-device FlutterTts with locale configuration
       if (!playedWithNeural) {
         await _flutterTts.stop().catchError((_) => null);
+        await _flutterTts.awaitSpeakCompletion(true).catchError((_) => null);
         await _flutterTts.setSpeechRate(0.48).catchError((_) => null);
         await _flutterTts.setPitch(1.0).catchError((_) => null);
-        await _flutterTts.setLanguage(localeCode).catchError((_) => null);
+
+        final targetLangPrefix = localeCode.split('-').first.toLowerCase();
+        final targetLocaleNorm = localeCode.toLowerCase().replaceAll('_', '-');
+
+        // Dynamic locale validation with graceful prefix fallback
+        String effectiveLocale = localeCode;
+        try {
+          final dynamic isAvailable = await _flutterTts.isLanguageAvailable(localeCode);
+          if (isAvailable == false || isAvailable == 0) {
+            final dynamic prefixAvail = await _flutterTts.isLanguageAvailable(targetLangPrefix);
+            if (prefixAvail == true || prefixAvail == 1) {
+              effectiveLocale = targetLangPrefix;
+            }
+          }
+        } catch (_) {}
+
+        await _flutterTts.setLanguage(effectiveLocale).catchError((_) => null);
 
         // Query available voices and bind matching native voice if installed
         try {
           final dynamic voices = await _flutterTts.getVoices;
           if (voices is List && voices.isNotEmpty) {
-            final targetLangPrefix = localeCode.split('-').first.toLowerCase();
-            final targetLocaleNorm = localeCode.toLowerCase().replaceAll('_', '-');
             final iso3 = targetLangPrefix == 'hi'
                 ? 'hin'
                 : (targetLangPrefix == 'mr'
