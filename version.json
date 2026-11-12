@@ -1,10 +1,10 @@
 {
   "app_name": "VeriBite",
   "latest_version": "1.0.1",
-  "latest_build_number": 2,
+  "latest_build_number": 3,
   "release_date": "2026-11-12",
   "apk_size_mb": "116.6 MB",
-  "sha256": "defab42c7336535a1627d73efd9e062605cab0d4968965ecbeac917e946ddb30",
+  "sha256": "6934e5a7e074eecf660834545e607aff76b83e4900f0f20c340f9876c99c1fae",
   "webpage_url": "https://veribite.vercel.app",
   "apk_download_url": "https://github.com/yashsantoshchougule/VeriBite/releases/latest/download/app-release.apk",
   "force_update": false,
