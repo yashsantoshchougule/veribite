@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../core/scoring/offline_additive_knowledge_base.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../camera/application/offline_barcode_repository.dart';
 import '../../onboarding/presentation/widgets/watermark_painter.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../application/advisor_service.dart';
@@ -47,6 +50,10 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
     _textController = TextEditingController();
     _scrollController = ScrollController();
     _activeProductContext = widget.initialProductContext;
+
+    // Warm up offline additive & barcode caches asynchronously for Tier 0 <10ms instant lookups
+    unawaited(OfflineAdditiveKnowledgeBase.instance.ensureInitialized());
+    unawaited(OfflineBarcodeRepository.instance.ensureInitialized());
 
     _seedWelcomeMessage();
   }
@@ -99,21 +106,32 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
 
     _scrollToBottom();
 
-    final reply = await _service.askAdvisor(
-      userMessage: query,
-      productContext: _activeProductContext,
-      userProfile: widget.userProfile,
-    );
+    ChatMessage? reply;
+    try {
+      reply = await _service.askAdvisor(
+        userMessage: query,
+        productContext: _activeProductContext,
+        userProfile: widget.userProfile,
+      );
+    } catch (e) {
+      debugPrint('[AdvisorChatScreen] Error querying advisor: $e');
+      reply = ChatMessage.advisor(
+        text: 'A temporary connection issue occurred. Please ask your question again!',
+        source: 'local_offline',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (reply != null) {
+            _messages.add(reply);
+          }
+          _isLoading = false;
+        });
+        _scrollToBottom();
 
-    if (mounted) {
-      setState(() {
-        _messages.add(reply);
-        _isLoading = false;
-      });
-      _scrollToBottom();
-
-      if (_ttsService.autoSpeakEnabledNotifier.value) {
-        await _ttsService.speak(reply.text, messageId: reply.id);
+        if (reply != null && _ttsService.autoSpeakEnabledNotifier.value) {
+          await _ttsService.speak(reply.text, messageId: reply.id);
+        }
       }
     }
   }
@@ -188,7 +206,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
 
               // 4. Quick Contextual Prompts Carousel
               QuickPromptCarousel(
-                onPromptSelected: _handleSendMessage,
+                onPromptSelected: _isLoading ? (_) {} : _handleSendMessage,
                 productContext: _activeProductContext,
               ),
               const SizedBox(height: 8),
@@ -350,7 +368,7 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
             ),
             SizedBox(width: 10),
             Text(
-              'Searching verified regulatory citations...',
+              'Analyzing clinical profile & toxicology...',
               style: TextStyle(
                 color: AppColors.textMutedMocha,
                 fontSize: 12,
@@ -397,18 +415,27 @@ class _AdvisorChatScreenState extends State<AdvisorChatScreen> {
                   ),
                   border: InputBorder.none,
                 ),
-                onSubmitted: _handleSendMessage,
+                onSubmitted: _isLoading ? null : _handleSendMessage,
               ),
             ),
           ),
           const SizedBox(width: 8),
           CircleAvatar(
-            backgroundColor: AppColors.primaryObsidian,
+            backgroundColor: _isLoading ? AppColors.textMutedMocha.withValues(alpha: 0.5) : AppColors.primaryObsidian,
             radius: 20,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-              onPressed: () => _handleSendMessage(_textController.text),
+              icon: _isLoading
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+              onPressed: _isLoading ? null : () => _handleSendMessage(_textController.text),
             ),
           ),
         ],

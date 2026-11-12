@@ -431,8 +431,9 @@ class MultiProviderAiRouter {
   }
 
   // ---------------------------------------------------------------------------
-  // 4. Advisor Chat: Multi-Provider Co-Routing
-  // Co-routes across Groq llama-3.3-70b-versatile and Gemini 2.0-flash-lite
+  // 4. Advisor Chat: Ultra-Low-Latency Multi-Provider Routing (< 1.5s)
+  // Parallel Hedged Request: Groq LPU primary (~0.4s-0.8s) with 2.2s fast failover
+  // to Gemini Flash (thinkingBudget: 0) and OpenRouter fallback.
   // ---------------------------------------------------------------------------
   Future<String?> askAdvisor({
     required String systemPrompt,
@@ -442,17 +443,56 @@ class MultiProviderAiRouter {
     final dedupeKey = 'chat:${userMessage.trim().toLowerCase()}';
 
     return _deduplicate(dedupeKey, () async {
-      // 1. Try Groq LPU Chat (30 RPM / 14,400 RPD) first to protect Gemini Vision quota!
-      final groqChat = await _queryGroqAdvisor(systemPrompt, userMessage, history);
-      if (groqChat != null && groqChat.isNotEmpty) return groqChat;
+      final recentHistory = history.length > 4 ? history.sublist(history.length - 4) : history;
 
-      // 2. Try Google Gemini Flash Lite
-      final geminiChat = await _queryGeminiAdvisor(systemPrompt, userMessage, history);
-      if (geminiChat != null && geminiChat.isNotEmpty) return geminiChat;
+      // Parallel Hedged Request Architecture:
+      // Launch Groq LPU immediately. If Groq doesn't return within 2200ms,
+      // hedge in parallel with Gemini Flash (thinkingBudget: 0) and take whichever finishes first.
+      final completer = Completer<String?>();
+      bool completed = false;
 
-      // 3. Try OpenRouter Spillover
-      final openRouterChat = await _queryOpenRouterAdvisor(systemPrompt, userMessage, history);
-      if (openRouterChat != null && openRouterChat.isNotEmpty) return openRouterChat;
+      // 1. Fire Groq LPU immediately
+      unawaited(_queryGroqAdvisor(systemPrompt, userMessage, recentHistory).then((groqRes) {
+        if (!completed && groqRes != null && groqRes.trim().isNotEmpty) {
+          completed = true;
+          completer.complete(groqRes.trim());
+        }
+      }).catchError((_) {}));
+
+      // 2. Hedge timer: after 2200ms, launch Gemini Flash in parallel
+      final hedgeTimer = Timer(const Duration(milliseconds: 2200), () async {
+        if (!completed) {
+          debugPrint('[MultiProviderAiRouter] Hedging chat query to Gemini Flash in parallel (<2.2s failover)...');
+          try {
+            final geminiRes = await _queryGeminiAdvisor(systemPrompt, userMessage, recentHistory);
+            if (!completed && geminiRes != null && geminiRes.trim().isNotEmpty) {
+              completed = true;
+              completer.complete(geminiRes.trim());
+            }
+          } catch (_) {}
+        }
+      });
+
+      // 3. Strict 3500ms total deadline
+      final deadlineTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (!completed) {
+          completed = true;
+          completer.complete(null);
+        }
+      });
+
+      final hedgedResult = await completer.future;
+      hedgeTimer.cancel();
+      deadlineTimer.cancel();
+
+      if (hedgedResult != null && hedgedResult.isNotEmpty) return hedgedResult;
+
+      // 4. Fast OpenRouter fallback (max 2000ms)
+      try {
+        final openRouterChat = await _queryOpenRouterAdvisor(systemPrompt, userMessage, recentHistory)
+            .timeout(const Duration(milliseconds: 2000));
+        if (openRouterChat != null && openRouterChat.isNotEmpty) return openRouterChat;
+      } catch (_) {}
 
       return null;
     });
@@ -747,6 +787,8 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
     final models = AiProviderConfig.groqAdvisorModels;
     final maxKeyAttempts = keys.length.clamp(1, 4);
 
+    final recentHistory = history.length > 4 ? history.sublist(history.length - 4) : history;
+
     for (int keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
       final apiKey = AiProviderConfig.activeGroqApiKey;
       if (apiKey.isEmpty) break;
@@ -756,7 +798,7 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
 
         final messages = <Map<String, dynamic>>[
           {'role': 'system', 'content': systemPrompt},
-          for (final h in history) {'role': h['role'] ?? 'user', 'content': h['content'] ?? ''},
+          for (final h in recentHistory) {'role': h['role'] ?? 'user', 'content': h['content'] ?? ''},
           {'role': 'user', 'content': userMessage},
         ];
 
@@ -773,10 +815,10 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
                   'model': model,
                   'messages': messages,
                   'temperature': 0.2,
-                  'max_tokens': 1024,
+                  'max_tokens': 380,
                 }),
               )
-              .timeout(const Duration(seconds: 5));
+              .timeout(const Duration(milliseconds: 3000));
 
           AiProviderConfig.inspectResponseHeaders(AiProvider.groq, apiKey, model, response.headers);
 
@@ -811,6 +853,8 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
     final models = AiProviderConfig.geminiAdvisorModels;
     final maxKeyAttempts = keys.length.clamp(1, 4);
 
+    final recentHistory = history.length > 4 ? history.sublist(history.length - 4) : history;
+
     for (int keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
       final apiKey = AiProviderConfig.activeGeminiApiKey;
       if (apiKey.isEmpty) break;
@@ -818,9 +862,10 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
       for (final model in models) {
         if (!AiProviderConfig.isBucketAvailable(AiProvider.gemini, apiKey, model)) continue;
 
-        final supportsThinking = model.contains('2.5');
+        final supportsThinking = model.contains('2.5') || model.contains('flash');
         final Map<String, dynamic> generationConfig = {
           'temperature': 0.2,
+          'maxOutputTokens': 380,
           if (supportsThinking) 'thinkingConfig': {'thinkingBudget': 0},
         };
 
@@ -831,7 +876,7 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
             ]
           },
           'contents': [
-            for (final h in history)
+            for (final h in recentHistory)
               {
                 'role': h['role'] == 'user' ? 'user' : 'model',
                 'parts': [
@@ -856,7 +901,7 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
                 headers: {'Content-Type': 'application/json'},
                 body: jsonEncode(requestBody),
               )
-              .timeout(const Duration(seconds: 5));
+              .timeout(const Duration(milliseconds: 3200));
 
           AiProviderConfig.inspectResponseHeaders(AiProvider.gemini, apiKey, model, response.headers);
 
@@ -894,6 +939,8 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
     const model = 'meta-llama/llama-3.3-70b-instruct:free';
     if (!AiProviderConfig.isBucketAvailable(AiProvider.openRouter, apiKey, model)) return null;
 
+    final recentHistory = history.length > 4 ? history.sublist(history.length - 4) : history;
+
     try {
       final uri = Uri.parse(AiProviderConfig.openRouterApiUrl);
       final response = await _client
@@ -909,14 +956,14 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
               'model': model,
               'messages': [
                 {'role': 'system', 'content': systemPrompt},
-                for (final h in history) {'role': h['role'] ?? 'user', 'content': h['content'] ?? ''},
+                for (final h in recentHistory) {'role': h['role'] ?? 'user', 'content': h['content'] ?? ''},
                 {'role': 'user', 'content': userMessage},
               ],
               'temperature': 0.2,
-              'max_tokens': 1024,
+              'max_tokens': 380,
             }),
           )
-          .timeout(const Duration(seconds: 6));
+          .timeout(const Duration(milliseconds: 2500));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);

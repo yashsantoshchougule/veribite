@@ -44,7 +44,7 @@ class AdvisorRules {
     buffer.writeln('   - DO NOT refuse, and DO NOT simply say "Data missing".');
     buffer.writeln('   - Instead, provide the exact scanned value if present, OR provide the scientifically deduced value based on the product formulation.');
     buffer.writeln('   - Example: For plant-based or Ayurvedic herbal tonics (like Hamdard Safi), confirm that as a 100% botanical Unani formulation, it contains 0 mg Cholesterol (cholesterol only exists in animal products). Its carbohydrates (~7g-8g per 10ml serving, ~70-80g per 100ml) stem from its Invert Sugar Syrup / Qand Safaid base.');
-    buffer.writeln('5. CONCISENESS & BREVITY: Give ONLY the details requested. Keep your response direct, practical, and focused strictly on the user query (under 150 words unless a detailed breakdown is explicitly requested).');
+    buffer.writeln('5. CONCISE CLINICAL BULLETS: Give ONLY the details requested. Answer directly with 3-5 punchy, high-density bullet points followed by a 1-sentence safe portion verdict. Keep total response under 120 words. Avoid conversational fluff or boilerplate.');
     buffer.writeln('6. NO MEDICAL DIAGNOSIS: Never diagnose clinical illnesses or prescribe pharmaceuticals. Base evaluations on published regulatory monographs (WHO, EFSA, FSSAI, JECFA, ICMR).');
     buffer.writeln('');
     buffer.writeln('USER HEALTH PROFILE & BIOMETRIC GUARDRAILS:');

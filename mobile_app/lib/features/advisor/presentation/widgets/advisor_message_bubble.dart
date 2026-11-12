@@ -63,31 +63,37 @@ class AdvisorMessageBubble extends StatelessWidget {
   }
 
   Widget _buildAdvisorBubble(BuildContext context) {
+    final isClinical = message.source == 'local_clinical_engine';
     final isOffline = message.source == 'local_offline';
     final isGuardrail = message.source == 'veribite_guardrail';
     final isAppGuide = message.source == 'veribite_app_guide';
+    final isCloud = message.source == 'cloud_ai_pool' || message.source == 'gemini_flash';
 
-    final String? badgeLabel = isOffline
-        ? 'Offline Scientific Engine'
-        : isGuardrail
-            ? 'VeriBite Guardrail'
-            : isAppGuide
-                ? 'VeriBite App Guide'
-                : null;
+    final String? badgeLabel = isClinical
+        ? 'On-Device Clinical Engine'
+        : isOffline
+            ? 'Offline Scientific Engine'
+            : isGuardrail
+                ? 'VeriBite Guardrail'
+                : isAppGuide
+                    ? 'VeriBite App Guide'
+                    : isCloud
+                        ? 'VeriBite AI Advisor'
+                        : null;
 
-    final badgeColor = isAppGuide
+    final badgeColor = isClinical || isAppGuide
         ? AppColors.safetyMint
         : isGuardrail || isOffline
             ? AppColors.accentBronze
             : AppColors.textObsidian;
 
-    final badgeBg = isAppGuide
+    final badgeBg = isClinical || isAppGuide
         ? AppColors.safetyMintBg
         : isGuardrail || isOffline
             ? AppColors.ceilingCardBg
             : AppColors.stepPillBg;
 
-    final badgeBorder = isAppGuide
+    final badgeBorder = isClinical || isAppGuide
         ? AppColors.safetyMintBorder
         : isGuardrail || isOffline
             ? AppColors.ceilingCardBorder

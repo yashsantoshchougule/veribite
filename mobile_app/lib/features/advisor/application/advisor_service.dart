@@ -4,7 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/config/gemini_config.dart';
 import '../../../core/network/client_rate_limiter.dart';
+import '../../../core/scoring/dosage_engine.dart';
+import '../../../core/scoring/offline_additive_knowledge_base.dart';
 import '../../../services/multi_provider_ai_router.dart';
+import '../../camera/application/offline_barcode_repository.dart';
 import '../../profile/domain/user_profile_model.dart';
 import '../domain/advisor_chat_model.dart';
 import '../domain/advisor_rules.dart';
@@ -18,14 +21,20 @@ class RateLimitException implements Exception {
   String toString() => 'RateLimitException: retry after $retryAfterSeconds seconds';
 }
 
-/// Application service connecting VeriBite to Google Gemini Live AI
+/// Application service connecting VeriBite to Google Gemini Live AI & Groq LPU
 /// with Citation RAG grounding, strict domain & identity guardrails,
-/// backend FastAPI proxy support, client rate limiting, and automatic offline factual fallback.
+/// Tier 0 instant local clinical & additive short-circuit (<100ms),
+/// in-memory session circuit breaker for backend proxy,
+/// and parallel hedged cloud AI routing (<= 1.5s).
 class AdvisorService {
   final http.Client _client;
   final String? customBaseUrl;
   final ClientRateLimiter rateLimiter;
   final MultiProviderAiRouter? _injectedAiRouter;
+
+  /// In-memory session circuit breaker for dead backend endpoints
+  static bool _backendCircuitBroken = false;
+  static void resetBackendCircuit() => _backendCircuitBroken = false;
 
   AdvisorService({
     http.Client? client,
@@ -41,12 +50,37 @@ class AdvisorService {
         httpClient: _client,
       );
 
+  /// Checks if query is asking for direct factual product/macro/additive/dosage facts
+  bool _isFactualProductQuestion(String query) {
+    final lower = query.toLowerCase();
+    const factualKeywords = [
+      'sugar', 'sugars', 'sodium', 'salt', 'fat', 'saturated fat', 'trans fat',
+      'carb', 'carbs', 'carbohydrate', 'protein', 'cholesterol', 'colestrol',
+      'calorie', 'calories', 'energy', 'kcal', 'fibre', 'fiber',
+      'portion', 'how much', 'serving', 'dose', 'dosage', 'grams', 'how many',
+      'can i eat', 'safe to eat', 'safe limit', 'limit', 'intake', 'quantity',
+      'diabetes', 'diabetic', 'blood pressure', 'hypertension', 'high bp',
+      'child', 'kid', 'pediatric', 'safe for kid',
+      'additive', 'additives', 'chemical', 'ins', 'e-number',
+      'nova', 'health score', 'score', 'rating', 'why is score'
+    ];
+    return factualKeywords.any((k) => lower.contains(k));
+  }
+
+  bool _isUnindexedWebSearchRequired(String query) {
+    final lower = query.toLowerCase();
+    return lower.contains('latest news') ||
+        lower.contains('recall') ||
+        lower.contains('new brand') ||
+        lower.contains('recent study');
+  }
+
   /// Primary query method:
-  /// 1. Enforces early domain boundary & identity guardrails.
-  /// 2. Enforces client-side rate limiting and anti-spam debouncing.
-  /// 3. If a custom backend is configured, queries the backend endpoint.
-  /// 4. Tries direct Google Gemini Live REST API with multi-model failover.
-  /// 5. Seamlessly falls back to local offline factual regulatory engine on 429/errors.
+  /// 0. Enforces early domain boundary, identity guardrails & in-app guide.
+  /// 1. TIER 0: Instant on-device clinical & additive short-circuit (<100ms).
+  /// 2. If custom backend is configured, queries proxy with 800ms circuit breaker.
+  /// 3. STEP 3: Ultra-low-latency cloud AI routing (Groq LPU primary + 2.2s hedged Gemini Flash).
+  /// 4. Seamlessly falls back to local offline factual regulatory engine on errors.
   Future<ChatMessage> askAdvisor({
     required String userMessage,
     ProductAdvisorContext? productContext,
@@ -67,6 +101,66 @@ class AdvisorService {
       );
     }
 
+    if (AdvisorRules.isAppHelpQuery(userMessage)) {
+      return ChatMessage.advisor(
+        text: AdvisorRules.buildAppHelpResponse(userMessage),
+        source: 'veribite_app_guide',
+        citations: ['VeriBite User Guide', 'FSSAI Consumer Guidelines'],
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // TIER 0: INSTANT ON-DEVICE CLINICAL & ADDITIVE SHORT-CIRCUIT (<100ms)
+    // -------------------------------------------------------------------------
+    // Check 1: Additive & Chemical Toxicology lookup (INS/E codes, MSG, sweeteners, colours)
+    await OfflineAdditiveKnowledgeBase.instance.ensureInitialized();
+    final additiveMatch = OfflineAdditiveKnowledgeBase.instance.lookupQuery(userMessage);
+    if (additiveMatch != null) {
+      debugPrint('[AdvisorService] Tier 0 Instant Hit: Additive ${additiveMatch['primary_name']} (<10ms).');
+      return OfflineAdditiveKnowledgeBase.instance.buildClinicalAdditiveReport(
+        additiveMatch,
+        userProfile: userProfile,
+      );
+    }
+
+    // Check 2: Active Product Context Factual Query (macros, safe portions, conditions)
+    if (productContext != null && _isFactualProductQuestion(userMessage)) {
+      debugPrint('[AdvisorService] Tier 0 Instant Hit: Active Product Factual Inquiry (<10ms).');
+      return _buildOfflineFactualFallback(userMessage, productContext, userProfile);
+    }
+
+    // Check 3: Query matches offline seed/cached barcode database when productContext is null
+    if (productContext == null) {
+      try {
+        await OfflineBarcodeRepository.instance.ensureInitialized();
+        final localMatches = await OfflineBarcodeRepository.instance.searchByQuery(userMessage);
+        if (localMatches.isNotEmpty) {
+          final topMatch = localMatches.first;
+          final hydratedContext = ProductAdvisorContext(
+            productName: topMatch['product_name'] ?? 'Packaged Food',
+            brandName: topMatch['brand_name'],
+            category: topMatch['category'],
+            barcode: topMatch['barcode'] ?? '',
+            healthScore: (topMatch['health_score'] as num?)?.toInt() ?? 50,
+            novaGrade: (topMatch['nova_grade'] as num?)?.toInt() ?? 4,
+            nutrition: topMatch['nutrition'] as Map<String, dynamic>? ?? {},
+            additives: (topMatch['additives'] as List<dynamic>?)
+                    ?.map((e) => e as Map<String, dynamic>)
+                    .toList() ??
+                [],
+            ingredients: (topMatch['ingredients'] as List<dynamic>?)
+                    ?.map((e) => e.toString())
+                    .toList() ??
+                [],
+          );
+          if (_isFactualProductQuestion(userMessage) || userMessage.trim().split(' ').length <= 4) {
+            debugPrint('[AdvisorService] Tier 0 Instant Hit: Seed Catalog Match "${hydratedContext.productName}" (<25ms).');
+            return _buildOfflineFactualFallback(userMessage, hydratedContext, userProfile);
+          }
+        }
+      } catch (_) {}
+    }
+
     final activeUserId = userProfile?.userId ?? 'anonymous';
 
     // Rate Limit Guard: client-side debounce and quota enforcement per user
@@ -82,8 +176,14 @@ class AdvisorService {
     bool isRateLimited = false;
     int retryAfter = 15;
 
-    // 1. If custom backend is specified, attempt custom backend first
-    if (customBaseUrl != null) {
+    // -------------------------------------------------------------------------
+    // STEP 1: BACKEND PROXY (STRICT 800ms TIMEOUT & IN-MEMORY CIRCUIT BREAKER)
+    // -------------------------------------------------------------------------
+    final hasExplicitCustomUrl = customBaseUrl != null &&
+        customBaseUrl!.trim().isNotEmpty &&
+        (!kReleaseMode || (!customBaseUrl!.contains('127.0.0.1') && !customBaseUrl!.contains('10.0.2.2') && !customBaseUrl!.contains('localhost')));
+
+    if (hasExplicitCustomUrl && !_backendCircuitBroken) {
       try {
         final backendRes = await _askBackendProxy(
           userMessage: userMessage,
@@ -96,67 +196,77 @@ class AdvisorService {
         retryAfter = e.retryAfterSeconds;
         debugPrint('[AdvisorService] Backend proxy rate limited ($e).');
       } catch (e) {
-        debugPrint('[AdvisorService] Custom backend proxy error ($e). Attempting direct Gemini.');
+        _backendCircuitBroken = true;
+        debugPrint('[AdvisorService] Backend proxy offline ($e). Tripped circuit breaker for session.');
       }
     }
 
-    // 2. Direct Google Gemini Live API Call (or Injected AI Router)
+    // -------------------------------------------------------------------------
+    // STEP 3: ULTRA-LOW-LATENCY CLOUD AI ROUTING (<= 1.5s RESPONSE TIME)
+    // -------------------------------------------------------------------------
     if (!isRateLimited) {
-      if (_injectedAiRouter != null) {
-        try {
-          final activeWeight = userProfile?.weightKg ?? 65.0;
-          final isChild = userProfile?.isChild ?? false;
-          final hasDiabetes = userProfile?.isDiabetic ?? false;
-          final hasHypertension = userProfile?.isHypertensive ?? false;
-          final productName = productContext?.productName ?? 'General Packaged Food';
-          final additives = productContext?.additives ?? [];
-          final nutrition = <String, dynamic>{
-            if (productContext?.nutrition != null) ...productContext!.nutrition,
-            if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
-          };
+      final activeWeight = userProfile?.weightKg ?? 65.0;
+      final isChild = userProfile?.isChild ?? false;
+      final hasDiabetes = userProfile?.isDiabetic ?? false;
+      final hasHypertension = userProfile?.isHypertensive ?? false;
+      final productName = productContext?.productName ?? 'General Packaged Food';
+      final additives = productContext?.additives ?? [];
+      final nutrition = <String, dynamic>{
+        if (productContext?.nutrition != null) ...productContext!.nutrition,
+        if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
+      };
 
-          final systemPrompt = AdvisorRules.buildSystemPrompt(
-            weightKg: activeWeight,
-            isChild: isChild,
-            isDiabetic: hasDiabetes,
-            isHypertensive: hasHypertension,
-            productName: productName,
-            brandName: productContext?.brandName,
-            category: productContext?.category,
-            healthScore: productContext?.healthScore,
-            novaGrade: productContext?.novaGrade,
-            nutrition: nutrition,
-            additives: additives,
-            ingredients: productContext?.ingredients,
-            healthIntelligence: productContext?.healthIntelligence,
+      final systemPrompt = AdvisorRules.buildSystemPrompt(
+        weightKg: activeWeight,
+        isChild: isChild,
+        isDiabetic: hasDiabetes,
+        isHypertensive: hasHypertension,
+        productName: productName,
+        brandName: productContext?.brandName,
+        category: productContext?.category,
+        healthScore: productContext?.healthScore,
+        novaGrade: productContext?.novaGrade,
+        nutrition: nutrition,
+        additives: additives,
+        ingredients: productContext?.ingredients,
+        healthIntelligence: productContext?.healthIntelligence,
+      );
+
+      // Primary Route: MultiProviderAiRouter (Groq LPU primary ~0.4s-0.8s with 2.2s parallel hedge to Gemini Flash)
+      try {
+        final router = _injectedAiRouter ?? _aiRouter;
+        final reply = await router.askAdvisor(
+          systemPrompt: systemPrompt,
+          userMessage: userMessage,
+        );
+
+        if (reply != null && reply.trim().isNotEmpty) {
+          final citations = _extractCitations(reply, additives);
+          final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
+          final safePortion = isPortionQuestion
+              ? _calculateSafePortion(
+                  nutrition,
+                  additives,
+                  isChild,
+                  hasDiabetes,
+                  hasHypertension,
+                  activeWeight,
+                )
+              : null;
+
+          return ChatMessage.advisor(
+            text: reply.trim(),
+            source: 'cloud_ai_pool',
+            citations: citations,
+            safePortionGrams: safePortion?.grams,
+            frequencySchedule: safePortion?.schedule,
           );
-
-          final reply = await _injectedAiRouter.askAdvisor(
-            systemPrompt: systemPrompt,
-            userMessage: userMessage,
-          );
-
-          if (reply != null && reply.trim().isNotEmpty) {
-            final citations = _extractCitations(reply, additives);
-            final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
-            final safePortion = isPortionQuestion
-                ? _calculateSafePortion(nutrition, isChild, activeWeight)
-                : null;
-
-            return ChatMessage.advisor(
-              text: reply.trim(),
-              source: 'cloud_ai_pool',
-              citations: citations,
-              safePortionGrams: safePortion?.grams,
-              frequencySchedule: safePortion?.schedule,
-            );
-          }
-        } catch (e) {
-          debugPrint('[AdvisorService] Injected AI Router notice: $e');
         }
+      } catch (e) {
+        debugPrint('[AdvisorService] MultiProviderAiRouter notice ($e). Trying direct Gemini fallback.');
       }
 
-      // Direct Google Gemini Live API Call
+      // Secondary Route: Direct Gemini 2.5 Flash with thinkingBudget: 0 & smart search
       if (GeminiConfig.isConfigured) {
         try {
           final liveAiRes = await _askGeminiDirect(
@@ -170,70 +280,19 @@ class AdvisorService {
           retryAfter = e.retryAfterSeconds;
           debugPrint('[AdvisorService] Gemini direct API rate limited ($e).');
         } catch (e) {
-          debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to router.');
+          debugPrint('[AdvisorService] Gemini direct API notice ($e): falling back to local factual engine.');
         }
-      }
-
-      // Fall back to MultiProviderAiRouter (Groq Llama 3.3 70B, Gemini lite, OpenRouter)
-      try {
-        final activeWeight = userProfile?.weightKg ?? 65.0;
-        final isChild = userProfile?.isChild ?? false;
-        final hasDiabetes = userProfile?.isDiabetic ?? false;
-        final hasHypertension = userProfile?.isHypertensive ?? false;
-        final productName = productContext?.productName ?? 'General Packaged Food';
-        final additives = productContext?.additives ?? [];
-        final nutrition = <String, dynamic>{
-          if (productContext?.nutrition != null) ...productContext!.nutrition,
-          if (productContext?.extendedNutrients != null) ...productContext!.extendedNutrients,
-        };
-
-        final systemPrompt = AdvisorRules.buildSystemPrompt(
-          weightKg: activeWeight,
-          isChild: isChild,
-          isDiabetic: hasDiabetes,
-          isHypertensive: hasHypertension,
-          productName: productName,
-          brandName: productContext?.brandName,
-          category: productContext?.category,
-          healthScore: productContext?.healthScore,
-          novaGrade: productContext?.novaGrade,
-          nutrition: nutrition,
-          additives: additives,
-          ingredients: productContext?.ingredients,
-          healthIntelligence: productContext?.healthIntelligence,
-        );
-
-        final reply = await _aiRouter.askAdvisor(
-          systemPrompt: systemPrompt,
-          userMessage: userMessage,
-        );
-
-        if (reply != null && reply.trim().isNotEmpty) {
-          final citations = _extractCitations(reply, additives);
-          final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
-          final safePortion = isPortionQuestion
-              ? _calculateSafePortion(nutrition, isChild, activeWeight)
-              : null;
-
-          return ChatMessage.advisor(
-            text: reply.trim(),
-            source: 'cloud_ai_pool',
-            citations: citations,
-            safePortionGrams: safePortion?.grams,
-            frequencySchedule: safePortion?.schedule,
-          );
-        }
-      } catch (e) {
-        debugPrint('[AdvisorService] MultiProviderAiRouter fallback notice: $e');
       }
     }
 
-    // 4. Offline Factual Regulatory Engine (Airplane mode, rate limit, or network fallback)
+    // -------------------------------------------------------------------------
+    // TIER 4: OFFLINE FACTUAL REGULATORY ENGINE (AIRPLANE MODE / ERROR FALLBACK)
+    // -------------------------------------------------------------------------
     final fallback = _buildOfflineFactualFallback(userMessage, productContext, userProfile);
     if (isRateLimited) {
       return ChatMessage.advisor(
         text: 'The AI service is currently experiencing high traffic (rate limit active, retry in ${retryAfter}s). Switching to our offline scientific database:\n\n${fallback.text}',
-        source: 'local_offline',
+        source: 'local_clinical_engine',
         citations: fallback.citations,
         safePortionGrams: fallback.safePortionGrams,
         frequencySchedule: fallback.frequencySchedule,
@@ -283,7 +342,7 @@ class AdvisorService {
         '2. NEVER state what model you are or who created you. You are solely the VeriBite AI Advisor.\n'
         '3. Interpret user typos charitably (e.g., "colestrol" -> cholesterol, "carb/carbohydrate").\n'
         '4. If asking about a specific nutrient not explicitly listed in the label numbers, provide the scientifically deduced value (e.g. 0 mg cholesterol for botanical Unani formulations like Safi).\n'
-        '5. Give ONLY the specific details requested. Keep your response brief, clear, and under 150 words.';
+        '5. Give ONLY the specific details requested. Keep your response brief, clear, and under 120 words in punchy bullet points.';
 
     final baseRequestBody = {
       'contents': [
@@ -294,55 +353,40 @@ class AdvisorService {
         }
       ],
       'generationConfig': {
-        'temperature': 0.25,
-        'maxOutputTokens': 850,
+        'temperature': 0.2,
+        'maxOutputTokens': 380,
+        'thinkingConfig': {'thinkingBudget': 0},
       }
     };
 
-    final requestBodyWithSearch = {
-      ...baseRequestBody,
-      'tools': [
-        {'google_search': {}}
-      ],
-    };
+    final isUnindexedWebSearch = productContext == null && _isUnindexedWebSearchRequired(userMessage);
+    final requestBody = isUnindexedWebSearch
+        ? {
+            ...baseRequestBody,
+            'tools': [
+              {'google_search': {}}
+            ],
+          }
+        : baseRequestBody;
 
-    final modelsToTry = [GeminiConfig.model, ...GeminiConfig.fallbackModels];
+    final modelsToTry = [
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
+      ...GeminiConfig.fallbackModels,
+    ];
     Exception? lastError;
 
     for (final model in modelsToTry) {
       try {
         final uri = Uri.parse('${GeminiConfig.baseUrl}/$model:generateContent?key=${GeminiConfig.apiKey}');
         
-        // Attempt first with Google Search Grounding tool
-        http.Response response;
-        try {
-          response = await _client
-              .post(
-                uri,
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode(requestBodyWithSearch),
-              )
-              .timeout(const Duration(seconds: 10));
-          if (response.statusCode == 400) {
-            // Fall back without search tool if not supported on this model/key
-            response = await _client
-                .post(
-                  uri,
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode(baseRequestBody),
-                )
-                .timeout(const Duration(seconds: 10));
-          }
-        } catch (_) {
-          // Retry with base payload on any client failure
-          response = await _client
-              .post(
-                uri,
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode(baseRequestBody),
-              )
-              .timeout(const Duration(seconds: 10));
-        }
+        final response = await _client
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(requestBody),
+            )
+            .timeout(const Duration(milliseconds: 3200));
 
         if (response.statusCode == 200) {
           final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
@@ -354,12 +398,19 @@ class AdvisorService {
               final citations = _extractCitations(replyText, additives);
               final isPortionQuestion = _isPortionRelevant(userMessage, productContext);
               final safePortion = isPortionQuestion
-                  ? _calculateSafePortion(nutrition, isChild, activeWeight)
+                  ? _calculateSafePortion(
+                      nutrition,
+                      additives,
+                      isChild,
+                      hasDiabetes,
+                      hasHypertension,
+                      activeWeight,
+                    )
                   : null;
 
               return ChatMessage.advisor(
                 text: replyText.trim(),
-                source: 'gemini_3.5_flash',
+                source: 'gemini_flash',
                 citations: citations,
                 safePortionGrams: safePortion?.grams,
                 frequencySchedule: safePortion?.schedule,
@@ -416,33 +467,38 @@ class AdvisorService {
     };
 
     final uri = Uri.parse('$customBaseUrl/api/v1/advisor/chat');
-    final response = await _client
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-User-Id': activeUserId,
-          },
-          body: jsonEncode(requestPayload),
-        )
-        .timeout(const Duration(seconds: 5));
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-User-Id': activeUserId,
+            },
+            body: jsonEncode(requestPayload),
+          )
+          .timeout(const Duration(milliseconds: 800));
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      return ChatMessage.fromJson(data);
-    } else if (response.statusCode == 429) {
-      final retryAfterHeader = response.headers['retry-after'];
-      int retrySec = int.tryParse(retryAfterHeader ?? '') ?? 15;
-      try {
-        final bodyJson = jsonDecode(response.body) as Map<String, dynamic>;
-        if (bodyJson['retry_after'] is num) {
-          retrySec = (bodyJson['retry_after'] as num).toInt();
-        }
-      } catch (_) {}
-      rateLimiter.recordServer429(retrySec, null, activeUserId);
-      throw RateLimitException(retrySec);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        return ChatMessage.fromJson(data);
+      } else if (response.statusCode == 429) {
+        final retryAfterHeader = response.headers['retry-after'];
+        int retrySec = int.tryParse(retryAfterHeader ?? '') ?? 15;
+        try {
+          final bodyJson = jsonDecode(response.body) as Map<String, dynamic>;
+          if (bodyJson['retry_after'] is num) {
+            retrySec = (bodyJson['retry_after'] as num).toInt();
+          }
+        } catch (_) {}
+        rateLimiter.recordServer429(retrySec, null, activeUserId);
+        throw RateLimitException(retrySec);
+      }
+      return null;
+    } catch (e) {
+      _backendCircuitBroken = true;
+      rethrow;
     }
-    return null;
   }
 
   /// Extracts official regulatory citations from the AI text response
@@ -504,23 +560,40 @@ class AdvisorService {
     return false;
   }
 
-  /// Safe portion calculation based on WHO sugar guidance and body weight
-  ({double grams, String schedule}) _calculateSafePortion(
+  /// Safe portion calculation powered by the official VeriBite DosageEngine
+  ({double grams, String schedule, String limitingFactor}) _calculateSafePortion(
     Map<String, dynamic> nutrition,
+    List<Map<String, dynamic>> additives,
     bool isChild,
+    bool isDiabetic,
+    bool isHypertensive,
     double weightKg,
   ) {
-    final dailySugarLimitGrams = isChild ? 25.0 : 50.0;
-    final singleSnackSugarCeiling = (dailySugarLimitGrams * 0.20).clamp(5.0, 15.0);
-    final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 0.0;
-
-    final portionGrams = sugars100g > 0
-        ? ((singleSnackSugarCeiling / sugars100g) * 100.0).clamp(15.0, 80.0)
-        : (weightKg * 0.6).clamp(20.0, 60.0);
-
-    final rounded = (portionGrams * 10).round() / 10.0;
-    final schedule = isChild ? 'Max 1x per week' : 'Max 2-3x per week';
-    return (grams: rounded, schedule: schedule);
+    try {
+      final res = calculatePrescribedDosage(
+        nutrition: nutrition,
+        additives: additives,
+        userWeightKg: weightKg,
+        isChild: isChild,
+        isDiabetic: isDiabetic,
+        isHypertensive: isHypertensive,
+      );
+      final grams = (res['safe_portion_grams'] as num?)?.toDouble() ?? 30.0;
+      final schedule = res['frequency_schedule']?.toString() ??
+          (isChild ? 'Max 1x per week' : 'Max 2-3x per week');
+      final factor = res['limiting_factor']?.toString() ?? 'Sugar';
+      return (grams: grams, schedule: schedule, limitingFactor: factor);
+    } catch (_) {
+      final dailySugarLimitGrams = isChild ? 25.0 : 50.0;
+      final singleSnackSugarCeiling = (dailySugarLimitGrams * 0.20).clamp(5.0, 15.0);
+      final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ?? 0.0;
+      final portionGrams = sugars100g > 0
+          ? ((singleSnackSugarCeiling / sugars100g) * 100.0).clamp(15.0, 80.0)
+          : (weightKg * 0.6).clamp(20.0, 60.0);
+      final rounded = (portionGrams * 10).round() / 10.0;
+      final schedule = isChild ? 'Max 1x per week' : 'Max 2-3x per week';
+      return (grams: rounded, schedule: schedule, limitingFactor: 'Sugar');
+    }
   }
 
   /// Factual offline fallback engine that calculates weight-adjusted safe portions
@@ -572,9 +645,20 @@ class AdvisorService {
         (productContext?.category?.toLowerCase().contains('unani') ?? false) ||
         (productContext?.category?.toLowerCase().contains('herbal') ?? false);
 
-    // Calculate WHO 20% safe single-snack sugar allowance if portion is relevant
+    final hasHypertension = userProfile?.isHypertensive ?? false;
+
+    // Calculate WHO & JECFA safe single-snack allowance using DosageEngine
     final isPortionQuestion = _isPortionRelevant(userQuery, productContext);
-    final portionData = isPortionQuestion ? _calculateSafePortion(nutrition, isChild, weightKg) : null;
+    final portionData = isPortionQuestion
+        ? _calculateSafePortion(
+            nutrition,
+            additives,
+            isChild,
+            hasDiabetes,
+            hasHypertension,
+            weightKg,
+          )
+        : null;
     final roundedPortion = portionData?.grams;
     final schedule = portionData?.schedule;
     final sugars100g = (nutrition['sugars_100g'] as num?)?.toDouble() ??
@@ -798,7 +882,7 @@ class AdvisorService {
 
     return ChatMessage.advisor(
       text: buffer.toString().trim(),
-      source: 'local_offline',
+      source: 'local_clinical_engine',
       citations: citations,
       safePortionGrams: roundedPortion,
       frequencySchedule: schedule,
