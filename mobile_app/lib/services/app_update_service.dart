@@ -135,10 +135,10 @@ class AppUpdateService {
   static final AppUpdateService instance = AppUpdateService._internal();
 
   /// Installed app version matching pubspec.yaml
-  static const String currentVersion = '1.0.0';
+  static const String currentVersion = '1.0.1';
 
   /// Installed build number matching pubspec.yaml
-  static const int currentBuildNumber = 1;
+  static const int currentBuildNumber = 2;
 
   /// Configurable remote manifest URL (defaulting to raw repository version.json)
   static const String defaultManifestUrl = String.fromEnvironment(
@@ -264,3 +264,4 @@ class AppUpdateService {
     }
   }
 }
+

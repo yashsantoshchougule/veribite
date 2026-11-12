@@ -1,15 +1,18 @@
 {
+  "app_name": "VeriBite",
   "latest_version": "1.0.1",
   "latest_build_number": 2,
   "release_date": "2026-11-12",
-  "apk_size_mb": "24.5 MB",
-  "webpage_url": "https://github.com/yashsantoshchougule/veribite",
-  "apk_download_url": "https://github.com/yashsantoshchougule/veribite/releases/latest/download/app-release.apk",
+  "apk_size_mb": "116.5 MB",
+  "sha256": "15b97470ed19e1596f9e7912be5fdd1bf8c540b233cd25240e80db9a983f3367",
+  "webpage_url": "https://veribite.vercel.app",
+  "apk_download_url": "https://github.com/yashsantoshchougule/VeriBite/releases/latest/download/app-release.apk",
   "force_update": false,
   "release_notes": [
-    "Faster 3.0s parallel QR & barcode scanner",
-    "Live Web & FSSAI Clinical Intelligence deep-search",
-    "Non-food image upload guard",
-    "Interactive Today's Intake Log & persistent user profile"
+    "3.0s parallel QR & barcode scanner with instant local cache recall",
+    "Live Web & FSSAI/WHO Clinical Intelligence deep-search with clickable citations",
+    "Non-food upload protection guard & high-density macro slider support",
+    "Interactive Today's Intake Log, Featured Products routing & INS Decoder filter",
+    "Persistent user profile (height, weight, diabetes/hypertension guardrails) & single-tap navigation lock"
   ]
 }

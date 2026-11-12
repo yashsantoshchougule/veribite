@@ -1438,13 +1438,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 title: 'INS Decoder',
                 subtitle: '6,450+ E-numbers',
                 onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('INS Decoder: 6,450+ additives loaded offline in SQLite.'),
-                      backgroundColor: AppColors.primaryObsidian,
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
+                  setState(() {
+                    _currentBottomNavIndex = 1;
+                    _selectedCategory = 'Additives';
+                  });
+                  _onCategorySelected('Additives');
                 },
               ),
             ),

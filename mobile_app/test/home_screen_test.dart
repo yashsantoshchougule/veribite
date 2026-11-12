@@ -299,6 +299,21 @@ void main() {
       expect(find.byType(HealthierSwapsScreen), findsOneWidget);
       expect(find.text('Smart Healthier Swaps'), findsOneWidget);
     });
+
+    testWidgets('tapping INS Decoder action tile switches to Search tab and selects Additives category', (tester) async {
+      await tester.pumpWidget(buildTestableHomeScreen());
+      await tester.pumpAndSettle();
+
+      final insTile = find.text('INS Decoder');
+      await tester.ensureVisible(insTile);
+      await tester.tap(insTile);
+      await tester.pumpAndSettle();
+
+      // Confirms switched to Search Catalog view (Tab 1)
+      expect(find.byType(TextField), findsOneWidget);
+      // Confirms Additives chip is selected
+      expect(find.widgetWithText(ChoiceChip, 'Additives'), findsOneWidget);
+    });
   });
 
   group('HomeScreen Cross-Device Responsive Layout Tests', () {

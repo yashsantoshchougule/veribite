@@ -272,5 +272,27 @@ void main() {
       expect(result.scoreBreakdownSummary, contains('Chronic Caution: Capped to 39'));
       expect(result.redCapReason, contains('Clinical Caution: Senna'));
     });
+
+    test('Defensively defends against NaN and Infinity values without crashing', () {
+      final badNutrition = {
+        'energy_kcal': double.nan,
+        'sugars_100g': double.infinity,
+        'saturated-fat_100g': -5.0,
+        'sodium_mg': 100.0,
+        'proteins_100g': 2.0,
+      };
+
+      final result = ProductHealthScorer.calculate(
+        nutrition: badNutrition,
+        additives: [],
+        ingredients: ['Wheat'],
+        novaGrade: 1,
+      );
+
+      // Should safely evaluate with valid numbers without throwing UnsupportedError: NaN
+      expect(result.hasSufficientData, isTrue);
+      expect(result.score, isNotNull);
+      expect(result.score!.isNaN, isFalse);
+    });
   });
 }

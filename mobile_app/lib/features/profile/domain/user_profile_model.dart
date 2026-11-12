@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 /// Domain model representing a user's isolated health profile and biometrics.
 /// Strictly partitioned by [userId] to ensure zero data bleeding across accounts.
@@ -164,10 +165,12 @@ class UserProfileModel {
         other.isChild == isChild &&
         other.age == age &&
         other.gender == gender &&
+        other.heightCm == heightCm &&
         other.isDiabetic == isDiabetic &&
         other.isHypertensive == isHypertensive &&
         other.isPregnancySafe == isPregnancySafe &&
         other.isLowSugar == isLowSugar &&
+        listEquals(other.allergens, allergens) &&
         other.dietaryPreference == dietaryPreference &&
         other.language == language &&
         other.isCompleted == isCompleted;
@@ -181,10 +184,12 @@ class UserProfileModel {
       isChild,
       age,
       gender,
+      heightCm,
       isDiabetic,
       isHypertensive,
       isPregnancySafe,
       isLowSugar,
+      Object.hashAll(allergens),
       dietaryPreference,
       language,
       isCompleted,

@@ -7,6 +7,7 @@ import 'package:mobile_app/features/profile/application/user_profile_service.dar
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/profile/presentation/profile_screen.dart';
 import 'package:mobile_app/features/profile/presentation/user_details_screen.dart';
+import 'package:mobile_app/services/app_update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -86,7 +87,7 @@ void main() {
       // Offline Engine & Privacy Card
       expect(find.text('Offline Engine & Privacy Guard'), findsOneWidget);
       expect(find.textContaining('6,450+ chemical INS / E-numbers loaded offline in SQLite.'), findsOneWidget);
-      expect(find.textContaining('VeriBite v1.0.0'), findsOneWidget);
+      expect(find.textContaining('VeriBite v${AppUpdateService.currentVersion}'), findsOneWidget);
       expect(find.text('Check'), findsOneWidget);
 
       // Sign Out Button

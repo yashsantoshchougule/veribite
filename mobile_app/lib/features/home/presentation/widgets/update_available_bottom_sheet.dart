@@ -292,3 +292,4 @@ class UpdateAvailableBottomSheet extends StatelessWidget {
     );
   }
 }
+

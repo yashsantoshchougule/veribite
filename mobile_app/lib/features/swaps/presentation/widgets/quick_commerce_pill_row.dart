@@ -54,7 +54,7 @@ class QuickCommercePillRow extends StatelessWidget {
                 final ok = await service.launchStore(QuickCommercePlatform.blinkit, searchQuery);
                 if (!ok && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Opening Blinkit search in browser...')),
+                    const SnackBar(content: Text('Could not open Blinkit. Please check your browser or network connection.')),
                   );
                 }
               },
@@ -71,7 +71,7 @@ class QuickCommercePillRow extends StatelessWidget {
                 final ok = await service.launchStore(QuickCommercePlatform.zepto, searchQuery);
                 if (!ok && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Opening Zepto search in browser...')),
+                    const SnackBar(content: Text('Could not open Zepto. Please check your browser or network connection.')),
                   );
                 }
               },
@@ -88,7 +88,7 @@ class QuickCommercePillRow extends StatelessWidget {
                 final ok = await service.launchStore(QuickCommercePlatform.instamart, searchQuery);
                 if (!ok && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Opening Swiggy Instamart in browser...')),
+                    const SnackBar(content: Text('Could not open Swiggy Instamart. Please check your browser or network connection.')),
                   );
                 }
               },
@@ -105,7 +105,7 @@ class QuickCommercePillRow extends StatelessWidget {
                 final ok = await service.launchStore(QuickCommercePlatform.bigbasket, searchQuery);
                 if (!ok && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Opening BigBasket in browser...')),
+                    const SnackBar(content: Text('Could not open BigBasket. Please check your browser or network connection.')),
                   );
                 }
               },

@@ -102,6 +102,57 @@ void main() {
 
       expect(manager.weightKg, equals(87.0));
     });
+
+    test('low sugar and pregnancy safe baselines and ceilings operate accurately', () async {
+      final manager = UserProfileManager.instance;
+      await manager.init();
+
+      final lowSugarProfile = UserProfileModel(
+        userId: 'local_user',
+        weightKg: 70.0,
+        isLowSugar: true,
+        isPregnancySafe: true,
+        updatedAt: DateTime.now(),
+      );
+      await manager.updateProfile(lowSugarProfile);
+
+      expect(manager.isLowSugar, isTrue);
+      expect(manager.isPregnancySafe, isTrue);
+      expect(manager.maxSugarCeilingG, equals(10.0));
+      expect(manager.baselineSummary, equals('Low Sugar Guard'));
+    });
+
+    test('UserProfileModel equality accounts for height and allergens', () {
+      final profileA = UserProfileModel(
+        userId: 'u1',
+        heightCm: 175.0,
+        allergens: const ['Peanuts'],
+        updatedAt: DateTime(2026, 1, 1),
+      );
+      final profileB = UserProfileModel(
+        userId: 'u1',
+        heightCm: 180.0,
+        allergens: const ['Peanuts'],
+        updatedAt: DateTime(2026, 1, 1),
+      );
+      final profileC = UserProfileModel(
+        userId: 'u1',
+        heightCm: 175.0,
+        allergens: const ['Gluten'],
+        updatedAt: DateTime(2026, 1, 1),
+      );
+      final profileD = UserProfileModel(
+        userId: 'u1',
+        heightCm: 175.0,
+        allergens: const ['Peanuts'],
+        updatedAt: DateTime(2026, 1, 1),
+      );
+
+      expect(profileA == profileB, isFalse);
+      expect(profileA == profileC, isFalse);
+      expect(profileA == profileD, isTrue);
+      expect(profileA.hashCode == profileD.hashCode, isTrue);
+    });
   });
 }
 

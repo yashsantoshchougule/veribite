@@ -192,5 +192,42 @@ void main() {
       expect(requestedModels, contains('gemini-2.5-flash'));
       expect(requestedModels, contains('gemini-2.5-flash-lite'));
     });
+
+    test('correctly identifies non-food items from Gemini response', () async {
+      final mockNonFoodResponse = {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'text': jsonEncode({
+                    'is_food_or_beverage': false,
+                    'non_food_reason': 'This is an HP laptop computer, which is an electronic device, not a packaged food item.',
+                    'product_name': 'HP Victus Laptop',
+                    'brand_name': 'HP',
+                    'category': 'Electronics',
+                  })
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        return http.Response(jsonEncode(mockNonFoodResponse), 200, headers: {'content-type': 'application/json'});
+      });
+
+      final service = GeminiVisionService(httpClient: mockClient);
+      final dummyFrame = List<int>.generate(150, (i) => i % 255);
+
+      final result = await service.analyzeProductPhoto(frames: [dummyFrame]);
+
+      expect(result, isNotNull);
+      expect(result!['is_food_or_beverage'], isFalse);
+      expect(result['is_non_food'], isTrue);
+      expect(result['product_name'], 'HP Victus Laptop');
+      expect(result['non_food_reason'], contains('HP laptop computer'));
+    });
   });
 }

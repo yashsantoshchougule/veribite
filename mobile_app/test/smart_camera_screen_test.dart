@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
 import 'package:mobile_app/features/camera/presentation/smart_camera_screen.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/camera_reticle_painter.dart';
+import 'package:mobile_app/features/camera/presentation/widgets/multi_angle_capture_strip.dart';
 import 'package:mobile_app/features/camera/presentation/widgets/quick_macro_slider_sheet.dart';
 import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
 
@@ -573,5 +574,27 @@ void main() {
 
     // Verify chip state
     expect(find.text('Capture Nutrition Label'), findsOneWidget);
+  });
+
+  testWidgets('picking photo from gallery in default barcode mode renders MultiAngleCaptureStrip with Submit button', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: SmartCameraScreen(useSimulatedFeed: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Tap gallery icon button
+    final galleryBtn = find.byIcon(Icons.photo_library_rounded);
+    expect(galleryBtn, findsOneWidget);
+    await tester.tap(galleryBtn);
+    await tester.pumpAndSettle();
+
+    // MultiAngleCaptureStrip should now be rendered with 1 Frame and Submit button
+    expect(find.byType(MultiAngleCaptureStrip), findsOneWidget);
+    expect(find.text('Submit Multi-Angle Cloud Scan'), findsOneWidget);
+    expect(find.text('Curved Bottle Multi-Angle Mode (1/4)'), findsOneWidget);
   });
 }

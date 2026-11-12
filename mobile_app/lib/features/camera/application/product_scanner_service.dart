@@ -2122,7 +2122,12 @@ class ProductScannerService {
       additives: additivesList,
       userWeightKg: profile.weightKg,
       isChild: profile.isChild,
+      isDiabetic: profile.isDiabetic,
+      isHypertensive: profile.isHypertensive,
+      isLowSugar: profile.isLowSugar,
       unitPieceWeightG: unitPieceWeight,
+      productScore: (raw['health_score'] as num?)?.toInt(),
+      novaGrade: (raw['nova_grade'] as num?)?.toInt(),
     );
 
     final safePortionGrams = (dosageResult['safe_portion_grams'] as num?)?.toInt() ?? 30;

@@ -112,7 +112,17 @@ class GeminiVisionService {
   String _buildVisionPrompt({String? hintBarcode}) {
     return '''
 You are an expert food toxicology and nutrition analyst.
-Analyze this photo of a packaged food product, bottle, can, or nutrition facts label.
+Analyze this photo to determine if it contains an edible food product, beverage, dietary supplement, or packaged grocery item.
+
+CRITICAL STEP 1: FOOD CLASSIFICATION & GUARDRAILS
+1. Determine if the photographed object is an edible food product, beverage, dietary supplement, or packaged grocery item.
+2. If the image shows a NON-FOOD object (such as a laptop, computer, smartphone, electronics, gadget, person, animal, vehicle, furniture, clothing, footwear, book, document, stationery, tool, hardware, household cleaning chemical, cosmetic, or toy):
+   - Set "is_food_or_beverage": false
+   - Set "non_food_reason": "Clear explanation of what was detected and why it is not an edible food or drink."
+   - Set "product_name": "<detected object name>"
+   - Set "category": "Non-Food"
+   - Leave nutrition and ingredients empty.
+3. ONLY if the image contains an edible food product, beverage, supplement, or grocery package, set "is_food_or_beverage": true.
 
 CRITICAL INSTRUCTIONS FOR INDIAN FOOD PACKAGING:
 - Indian packaging frequently splits the nutrition table into TWO SIDE-BY-SIDE COLUMNS (e.g., Left table: Energy, Total Fat, Saturated Fat, Trans Fat, Carbohydrates; Right table: Total Sugar, Added Sugar, Protein, Cholesterol, Sodium, Dietary Fibre). Carefully read both columns!
@@ -120,12 +130,14 @@ CRITICAL INSTRUCTIONS FOR INDIAN FOOD PACKAGING:
 - If "% RDA per 100g" and "% RDA per Serve" are printed, also extract them as "rda_per_100g" and "rda_per_serve" so exact serving size can be calculated: (rda_per_serve / rda_per_100g) * 100.
 
 Extract the exact information printed on the package:
-1. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "MTR Badam Drink Mix", "Catch Chole Masala").
-2. "brand_name": Manufacturer brand (e.g., "Kwality", "MTR", "Catch", "Britannia").
-3. "category": Food category (e.g., "Bakery & Breads", "Biscuits & Cookies", "Snacks & Namkeen", "Instant Foods & Noodles").
-4. "serving_size_g": Serving size in grams or ml (default to 30.0 if not specified).
-5. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0).
-6. "nutrition": Object with numeric values per 100g:
+1. "is_food_or_beverage": true or false
+2. "non_food_reason": Explanation if not food
+3. "product_name": Full product name (e.g., "Kreamy Magic Cream Pav", "MTR Badam Drink Mix", "Catch Chole Masala").
+4. "brand_name": Manufacturer brand (e.g., "Kwality", "MTR", "Catch", "Britannia").
+5. "category": Food category (e.g., "Bakery & Breads", "Biscuits & Cookies", "Snacks & Namkeen", "Instant Foods & Noodles").
+6. "serving_size_g": Serving size in grams or ml (default to 30.0 if not specified).
+7. "pack_weight_g": Net pack weight in grams or ml (e.g., 60.0, 100.0, 200.0).
+8. "nutrition": Object with numeric values per 100g:
    - "energy_kcal": Energy in kcal per 100g (e.g., 368.00)
    - "energy_kj": Energy in kJ per 100g (if kcal printed, multiply kcal by 4.184)
    - "sugar_g_per_100g": Total sugars in grams per 100g
@@ -138,8 +150,8 @@ Extract the exact information printed on the package:
    - "sodium_mg_per_100g": Sodium in mg per 100g (if salt in g printed, salt_g * 400)
    - "cholesterol_mg_per_100g": Cholesterol in mg per 100g
    - "fiber_g": Dietary fiber in grams per 100g (default 1.0)
-7. "ingredients": List of ingredient strings printed on the package.
-8. "additives": List of detected food additives with "ins_code", "primary_name", and "risk_tier" ("GREEN", "YELLOW", or "RED").
+9. "ingredients": List of ingredient strings printed on the package.
+10. "additives": List of detected food additives with "ins_code", "primary_name", and "risk_tier" ("GREEN", "YELLOW", or "RED").
 
 ${hintBarcode != null ? 'Note: Scanned barcode hint: $hintBarcode.' : ''}
 Respond ONLY with a valid JSON object matching this schema without any markdown formatting.
@@ -150,16 +162,53 @@ Respond ONLY with a valid JSON object matching this schema without any markdown 
     if (rawText.trim().isEmpty) return null;
 
     try {
-      // Strip markdown code fences if present
-      String cleanText = rawText.trim();
-      if (cleanText.startsWith('```')) {
-        cleanText = cleanText.replaceAll(RegExp(r'^```(?:json)?\s*'), '').replaceAll(RegExp(r'\s*```$'), '').trim();
+      var cleanText = rawText.trim();
+      Map<String, dynamic>? decoded;
+
+      // 1. Direct JSON decode
+      try {
+        final parsed = jsonDecode(cleanText);
+        if (parsed is Map<String, dynamic>) decoded = parsed;
+      } catch (_) {}
+
+      // 2. Strip markdown code fences
+      if (decoded == null && cleanText.contains('```')) {
+        final match = RegExp(r'```(?:json)?\s*([\s\S]*?)\s*```').firstMatch(cleanText);
+        if (match != null) {
+          try {
+            final parsed = jsonDecode(match.group(1)!.trim());
+            if (parsed is Map<String, dynamic>) decoded = parsed;
+          } catch (_) {}
+        }
       }
 
-      final decoded = jsonDecode(cleanText);
-      if (decoded is Map<String, dynamic>) {
+      // 3. Outermost curly braces
+      if (decoded == null) {
+        final firstBrace = cleanText.indexOf('{');
+        final lastBrace = cleanText.lastIndexOf('}');
+        if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+          try {
+            final parsed = jsonDecode(cleanText.substring(firstBrace, lastBrace + 1));
+            if (parsed is Map<String, dynamic>) decoded = parsed;
+          } catch (_) {}
+        }
+      }
+
+      if (decoded != null) {
         final productName = decoded['product_name']?.toString().trim();
         if (productName == null || productName.isEmpty) return null;
+
+        // Guardrail: Non-food object detection
+        if (decoded['is_food_or_beverage'] == false || decoded['is_non_food'] == true) {
+          return {
+            'is_food_or_beverage': false,
+            'is_non_food': true,
+            'non_food_reason': decoded['non_food_reason']?.toString() ?? 'Non-food item detected',
+            'product_name': productName,
+            'brand_name': decoded['brand_name']?.toString().trim() ?? 'Electronics / Non-food',
+            'category': 'Non-Food',
+          };
+        }
 
         final brandName = decoded['brand_name']?.toString().trim() ?? 'Brand Verified';
         final category = decoded['category']?.toString().trim() ?? 'Packaged Food';

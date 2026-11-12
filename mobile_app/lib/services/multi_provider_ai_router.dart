@@ -950,18 +950,42 @@ Return ONLY a valid JSON object matching this exact schema without markdown form
 
   Map<String, dynamic>? _parseJsonContent(String rawText) {
     var clean = rawText.trim();
-    if (clean.startsWith('```')) {
-      final lines = clean.split('\n');
-      if (lines.length > 2) {
-        clean = lines.sublist(1, lines.length - 1).join('\n').trim();
-      }
-    }
+    if (clean.isEmpty) return null;
+
+    // 1. Direct JSON decode
     try {
       final decoded = jsonDecode(clean);
       if (decoded is Map<String, dynamic>) {
         return decoded;
       }
     } catch (_) {}
+
+    // 2. Strip markdown code fences if present anywhere in text
+    if (clean.contains('```')) {
+      final match = RegExp(r'```(?:json)?\s*([\s\S]*?)\s*```').firstMatch(clean);
+      if (match != null) {
+        try {
+          final decoded = jsonDecode(match.group(1)!.trim());
+          if (decoded is Map<String, dynamic>) {
+            return decoded;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 3. Substring extraction between outermost curly braces {...}
+    final firstBrace = clean.indexOf('{');
+    final lastBrace = clean.lastIndexOf('}');
+    if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+      try {
+        final substring = clean.substring(firstBrace, lastBrace + 1);
+        final decoded = jsonDecode(substring);
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
+      } catch (_) {}
+    }
+
     return null;
   }
 

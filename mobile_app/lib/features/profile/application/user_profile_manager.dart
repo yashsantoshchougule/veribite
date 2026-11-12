@@ -48,11 +48,14 @@ class UserProfileManager extends ChangeNotifier {
     if (_profile.isDiabetic) return 'Diabetic Guard Active';
     if (_profile.isHypertensive) return 'Hypertension Guard';
     if (_profile.isChild) return 'Child Guard Active';
+    if (_profile.isLowSugar) return 'Low Sugar Guard';
+    if (_profile.isPregnancySafe) return 'Pregnancy Safe';
     return 'Safe Baseline';
   }
 
   double get maxSugarCeilingG {
     if (_profile.isDiabetic) return 10.0;
+    if (_profile.isLowSugar) return 10.0;
     if (_profile.isChild) return 15.0;
     return 25.0;
   }

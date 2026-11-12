@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/product_health_scorer.dart';
 import '../../../../services/multi_provider_ai_router.dart';
@@ -344,12 +345,12 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     await DailyConsumptionTracker.instance.logProductIntake(
       _product,
       portionGrams: _currentServingGrams,
-      profile: widget.userProfile,
+      profile: _activeUserProfile,
     );
 
     // 2. Also record in background dashboard service / Supabase scan history
     await _dashboardService.logConsumedProduct(
-      userId: widget.userProfile.userId,
+      userId: _activeUserProfile.userId,
       barcode: _product.barcode,
       consumedSugarGrams: _currentSugarGrams,
       hasRedAdditives: _product.redCapTriggered,
@@ -376,8 +377,8 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     await HapticFeedback.selectionClick();
 
     await _dashboardService.recordScan(
-      userId: widget.userProfile.userId,
-      barcode: widget.product.barcode,
+      userId: _activeUserProfile.userId,
+      barcode: _product.barcode,
     );
 
     if (mounted) {
@@ -390,7 +391,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => IngredientBreakdownScreen(
-          product: widget.product,
+          product: _product,
           userProfile: _activeUserProfile,
         ),
       ),
@@ -405,14 +406,14 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
         builder: (_) => AdvisorChatScreen(
           userProfile: _activeUserProfile,
           initialProductContext: ProductAdvisorContext(
-            productName: widget.product.productName,
-            brandName: widget.product.brandName,
-            category: widget.product.category,
-            barcode: widget.product.barcode,
-            healthScore: widget.product.healthScore,
-            novaGrade: widget.product.novaGrade,
-            ingredients: widget.product.splitSugars,
-            additives: widget.product.additives,
+            productName: _product.productName,
+            brandName: _product.brandName,
+            category: _product.category,
+            barcode: _product.barcode,
+            healthScore: _product.healthScore,
+            novaGrade: _product.novaGrade,
+            ingredients: _product.splitSugars,
+            additives: _product.additives,
             healthIntelligence: _product.healthIntelligence?.toJson(),
             extendedNutrients: {
               'carbohydrates_g_per_100g': _product.carbsGPer100g > 0
@@ -434,17 +435,17 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               'caffeine_mg': ext?.caffeineMg ?? 0.0,
             },
             nutrition: {
-              'sugars_100g': widget.product.sugarGPer100g,
-              'sugar_per_serving_g': widget.product.sugarGPerServing,
-              'calories': widget.product.caloriesPerServing,
-              'energy_kcal': widget.product.caloriesPerServing,
-              'sat_fat_100g': widget.product.satFatGPer100g,
-              'sat_fat_per_serving_g': widget.product.satFatGPerServing > 0
-                  ? widget.product.satFatGPerServing
+              'sugars_100g': _product.sugarGPer100g,
+              'sugar_per_serving_g': _product.sugarGPerServing,
+              'calories': _product.caloriesPerServing,
+              'energy_kcal': _product.caloriesPerServing,
+              'sat_fat_100g': _product.satFatGPer100g,
+              'sat_fat_per_serving_g': _product.satFatGPerServing > 0
+                  ? _product.satFatGPerServing
                   : _currentSatFatGrams,
-              'sodium_100g': widget.product.sodiumMgPer100g,
-              'sodium_per_serving_mg': widget.product.sodiumMgPerServing > 0
-                  ? widget.product.sodiumMgPerServing
+              'sodium_100g': _product.sodiumMgPer100g,
+              'sodium_per_serving_mg': _product.sodiumMgPerServing > 0
+                  ? _product.sodiumMgPerServing
                   : _currentSodiumMg.toDouble(),
               'carbohydrates_g_per_100g': _product.carbsGPer100g > 0
                   ? _product.carbsGPer100g
@@ -469,7 +470,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => HealthierSwapsScreen(
-          currentProduct: widget.product,
+          currentProduct: _product,
           userProfile: _activeUserProfile,
         ),
       ),
@@ -483,7 +484,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final product = widget.product;
+    final product = _product;
     final maxSugarCeiling = _dashboardService.calculateMaxSugar(_activeUserProfile);
     final sugarPercentage = ((_currentSugarGrams / maxSugarCeiling) * 100).round();
 
@@ -622,7 +623,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.product.productName,
+                  _product.productName,
                   style: const TextStyle(
                     fontSize: 16.5,
                     fontWeight: FontWeight.w800,
@@ -633,7 +634,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  '${widget.product.brandName} • ${widget.product.category}',
+                  '${_product.brandName} • ${_product.category}',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -649,18 +650,18 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: widget.product.novaGrade >= 4 ? const Color(0xFFFCE8E6) : const Color(0xFFE6F4EA),
+              color: _product.novaGrade >= 4 ? const Color(0xFFFCE8E6) : const Color(0xFFE6F4EA),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: (widget.product.novaGrade >= 4 ? AppColors.safetyRed : AppColors.safetyGreen).withValues(alpha: 0.3),
+                color: (_product.novaGrade >= 4 ? AppColors.safetyRed : AppColors.safetyGreen).withValues(alpha: 0.3),
               ),
             ),
             child: Text(
-              'NOVA ${widget.product.novaGrade}',
+              'NOVA ${_product.novaGrade}',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
-                color: widget.product.novaGrade >= 4 ? AppColors.safetyRed : AppColors.safetyGreen,
+                color: _product.novaGrade >= 4 ? AppColors.safetyRed : AppColors.safetyGreen,
               ),
             ),
           ),
@@ -705,21 +706,21 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   }
 
   Widget _buildScoreGaugeCard() {
-    final score = widget.product.healthScore;
+    final score = _product.healthScore;
     final String scoreAdvice;
     if (score == null) {
       scoreAdvice = 'Insufficient nutrition facts & ingredients to calculate score. Please capture physical packaging.';
-    } else if (widget.product.isIngredientOnlyScore) {
+    } else if (_product.isIngredientOnlyScore) {
       scoreAdvice = 'Score calculated from verified ingredients & additives (Nutrition table not detected).';
-    } else if (score >= 70 && !widget.product.redCapTriggered) {
-      final bool hasNutrientDensity = (widget.product.proteinGPer100g >= 5.0 || widget.product.fiberGPer100g >= 3.0) &&
-          widget.product.caloriesPer100g > 0;
+    } else if (score >= 70 && !_product.redCapTriggered) {
+      final bool hasNutrientDensity = (_product.proteinGPer100g >= 5.0 || _product.fiberGPer100g >= 3.0) &&
+          _product.caloriesPer100g > 0;
       if (hasNutrientDensity) {
         scoreAdvice = 'Nutrient-dense formulation with minimal industrial additives.';
       } else {
         scoreAdvice = 'Low-additive formulation. Balanced profile with controlled processing.';
       }
-    } else if (score >= 40 && !widget.product.redCapTriggered) {
+    } else if (score >= 40 && !_product.redCapTriggered) {
       scoreAdvice = 'Moderate nutritional quality. Consume in controlled moderation.';
     } else {
       scoreAdvice = 'Ultra-processed food formulation with high sugar or hazardous additives.';
@@ -742,9 +743,9 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
       child: Column(
         children: [
           CircularScoreGauge(
-            score: widget.product.healthScore,
-            isRedCapped: widget.product.redCapTriggered,
-            verdictTag: widget.product.verdictTag,
+            score: _product.healthScore,
+            isRedCapped: _product.redCapTriggered,
+            verdictTag: _product.verdictTag,
             size: 190,
           ),
           const SizedBox(height: 12),
@@ -757,7 +758,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
             ),
             textAlign: TextAlign.center,
           ),
-          if (widget.product.scoreBreakdown != null && widget.product.scoreBreakdown!.isNotEmpty) ...[
+          if (_product.scoreBreakdown != null && _product.scoreBreakdown!.isNotEmpty) ...[
             const SizedBox(height: 12),
             _buildScoreBreakdownCard(),
           ],
@@ -769,9 +770,9 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
               return _buildListenVerdictPill(isSpeaking);
             },
           ),
-          if (widget.product.analysisSource != null) ...[
+          if (_product.analysisSource != null) ...[
             const SizedBox(height: 10),
-            _buildAnalysisSourceBadge(widget.product.analysisSource!),
+            _buildAnalysisSourceBadge(_product.analysisSource!),
           ],
         ],
       ),
@@ -804,7 +805,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                 ),
               ),
               const Spacer(),
-              if (widget.product.isIngredientOnlyScore)
+              if (_product.isIngredientOnlyScore)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -822,7 +823,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: widget.product.scoreBreakdown!
+            children: _product.scoreBreakdown!
                 .split(RegExp(r'\s*\|\s*|\s*=\s*(?=Score:|Final Score:)'))
                 .map((t) => t.trim())
                 .where((t) => t.isNotEmpty)
@@ -1760,23 +1761,30 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                       spacing: 6,
                       runSpacing: 6,
                       children: sources
-                          .map((src) => Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F3F4),
+                          .map((src) => Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () => _launchWebSource(src),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: Colors.black12),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.link_rounded, size: 12, color: Color(0xFF1A73E8)),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      src,
-                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF1A73E8)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F3F4),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.black12),
                                     ),
-                                  ],
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.link_rounded, size: 12, color: Color(0xFF1A73E8)),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          src,
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF1A73E8)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ))
                           .toList(),
@@ -1827,6 +1835,27 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _launchWebSource(String src) async {
+    try {
+      final String targetUrl;
+      final trimmed = src.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        targetUrl = trimmed;
+      } else if (trimmed.contains('.') && !trimmed.contains(' ')) {
+        targetUrl = 'https://$trimmed';
+      } else {
+        targetUrl = 'https://www.google.com/search?q=${Uri.encodeComponent(trimmed)}';
+      }
+
+      final uri = Uri.parse(targetUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('[VerdictReportScreen] Could not launch source URL: $src ($e)');
+    }
   }
 
   void _showEditNutritionSheet() {
@@ -2141,7 +2170,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            widget.product.portionAdvice,
+            _product.portionAdvice,
             style: const TextStyle(
               fontSize: 13,
               height: 1.45,
@@ -2161,7 +2190,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Frequency: ${widget.product.frequencySchedule}',
+                  'Frequency: ${_product.frequencySchedule}',
                   style: const TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w800,
@@ -2176,7 +2205,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Constraint: ${widget.product.limitingFactor}',
+                  'Constraint: ${_product.limitingFactor}',
                   style: const TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
@@ -2282,7 +2311,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
   }
 
   Widget _buildIngredientsCTA() {
-    final totalDetected = widget.product.additives.length + widget.product.splitSugars.length;
+    final totalDetected = _product.additives.length + _product.splitSugars.length;
 
     return InkWell(
       onTap: _openIngredientsBreakdown,
@@ -2470,7 +2499,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                       try {
                         await pdfService.shareReport(
                           context: context,
-                          product: widget.product,
+                          product: _product,
                           userProfile: _activeUserProfile,
                           currentServingGrams: _currentServingGrams,
                           currentSugarGrams: _currentSugarGrams,
@@ -2510,7 +2539,7 @@ class _VerdictReportScreenState extends State<VerdictReportScreen> {
                       try {
                         await pdfService.printReport(
                           context: context,
-                          product: widget.product,
+                          product: _product,
                           userProfile: _activeUserProfile,
                           currentServingGrams: _currentServingGrams,
                           currentSugarGrams: _currentSugarGrams,

@@ -26,9 +26,15 @@ class _QuickMacroSliderSheetState extends State<QuickMacroSliderSheet> {
   @override
   void initState() {
     super.initState();
-    _sugar = widget.initialSugar;
-    _satFat = widget.initialSatFat;
-    _sodium = widget.initialSodium;
+    _sugar = (widget.initialSugar.isNaN || widget.initialSugar.isInfinite)
+        ? 10.0
+        : widget.initialSugar.clamp(0.0, 100.0);
+    _satFat = (widget.initialSatFat.isNaN || widget.initialSatFat.isInfinite)
+        ? 5.0
+        : widget.initialSatFat.clamp(0.0, 60.0);
+    _sodium = (widget.initialSodium.isNaN || widget.initialSodium.isInfinite)
+        ? 200.0
+        : widget.initialSodium.clamp(0.0, 3000.0);
   }
 
   @override
@@ -70,8 +76,8 @@ class _QuickMacroSliderSheetState extends State<QuickMacroSliderSheet> {
           Slider(
             value: _sugar,
             min: 0.0,
-            max: 50.0,
-            divisions: 50,
+            max: 100.0,
+            divisions: 100,
             activeColor: const Color(0xFFE53935),
             label: '${_sugar.toStringAsFixed(1)}g',
             onChanged: (val) => setState(() => _sugar = val),
@@ -81,8 +87,8 @@ class _QuickMacroSliderSheetState extends State<QuickMacroSliderSheet> {
           Slider(
             value: _satFat,
             min: 0.0,
-            max: 30.0,
-            divisions: 30,
+            max: 60.0,
+            divisions: 60,
             activeColor: const Color(0xFFFB8C00),
             label: '${_satFat.toStringAsFixed(1)}g',
             onChanged: (val) => setState(() => _satFat = val),
@@ -92,8 +98,8 @@ class _QuickMacroSliderSheetState extends State<QuickMacroSliderSheet> {
           Slider(
             value: _sodium,
             min: 0.0,
-            max: 1500.0,
-            divisions: 30,
+            max: 3000.0,
+            divisions: 60,
             activeColor: const Color(0xFF3949AB),
             label: '${_sodium.round()}mg',
             onChanged: (val) => setState(() => _sodium = val),

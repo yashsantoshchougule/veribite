@@ -2354,7 +2354,7 @@ class _SmartCameraScreenState extends ConsumerState<SmartCameraScreen> with Widg
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (state.isMultiAngleMode)
+                  if (state.isMultiAngleMode || state.capturedFrames.isNotEmpty)
                     MultiAngleCaptureStrip(
                       capturedFramesCount: state.capturedFrames.length,
                       maxFrames: 4,

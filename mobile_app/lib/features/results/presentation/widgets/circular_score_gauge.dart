@@ -23,7 +23,7 @@ class CircularScoreGauge extends StatefulWidget {
 
 class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _scoreAnimation;
+  late Animation<double> _scoreAnimation;
 
   @override
   void initState() {
@@ -44,6 +44,10 @@ class _CircularScoreGaugeState extends State<CircularScoreGauge> with SingleTick
   void didUpdateWidget(covariant CircularScoreGauge oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.score != widget.score) {
+      _scoreAnimation = Tween<double>(
+        begin: _scoreAnimation.value,
+        end: (widget.score ?? 0).toDouble(),
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
       _controller.reset();
       _controller.forward();
     }

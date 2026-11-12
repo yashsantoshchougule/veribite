@@ -535,10 +535,18 @@ class ProductHealthScorer {
     for (final key in keys) {
       if (map.containsKey(key)) {
         final val = map[key];
-        if (val is num) return val.toDouble();
+        if (val is num) {
+          final d = val.toDouble();
+          if (!d.isNaN && !d.isInfinite && d >= 0.0) return d;
+        }
         if (val is String) {
-          final parsed = double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), ''));
-          if (parsed != null) return parsed;
+          final cleaned = val.replaceAll(RegExp(r'[^0-9.]'), '');
+          if (cleaned.isNotEmpty) {
+            final parsed = double.tryParse(cleaned);
+            if (parsed != null && !parsed.isNaN && !parsed.isInfinite && parsed >= 0.0) {
+              return parsed;
+            }
+          }
         }
       }
     }

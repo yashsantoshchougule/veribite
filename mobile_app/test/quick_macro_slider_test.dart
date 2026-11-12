@@ -38,4 +38,36 @@ void main() {
     expect(submittedMacros!['sat_fat_g_per_100g'], 6.0);
     expect(submittedMacros!['sodium_mg_per_100g'], 250.0);
   });
+
+  testWidgets('QuickMacroSliderSheet safely clamps out-of-bounds or extreme initial macro values without assertion crash', (tester) async {
+    Map<String, double>? submittedMacros;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuickMacroSliderSheet(
+            initialSugar: 120.0, // > 100 max
+            initialSatFat: 80.0,  // > 60 max
+            initialSodium: 4000.0, // > 3000 max
+            onSubmit: (values) {
+              submittedMacros = values;
+            },
+          ),
+        ),
+      ),
+    );
+
+    // Verify sliders clamped safely to maximums without throwing assertion error
+    expect(find.textContaining('Sugar: 100.0g'), findsOneWidget);
+    expect(find.textContaining('Saturated Fat: 60.0g'), findsOneWidget);
+    expect(find.textContaining('Sodium: 3000mg'), findsOneWidget);
+
+    final submitButton = find.widgetWithText(ElevatedButton, 'Compute Health Score & Dosage');
+    await tester.tap(submitButton);
+    await tester.pump();
+
+    expect(submittedMacros!['sugar_g_per_100g'], 100.0);
+    expect(submittedMacros!['sat_fat_g_per_100g'], 60.0);
+    expect(submittedMacros!['sodium_mg_per_100g'], 3000.0);
+  });
 }

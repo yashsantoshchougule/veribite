@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/features/advisor/application/tts_voice_service.dart';
 import 'package:mobile_app/features/advisor/presentation/advisor_chat_screen.dart';
 import 'package:mobile_app/features/camera/application/product_scanner_service.dart';
+import 'package:mobile_app/features/health_intelligence/domain/health_intelligence_model.dart';
 import 'package:mobile_app/features/profile/domain/user_profile_model.dart';
 import 'package:mobile_app/features/results/presentation/ingredient_breakdown_screen.dart';
 import 'package:mobile_app/features/results/presentation/verdict_report_screen.dart';
@@ -444,5 +445,95 @@ void main() {
 
     expect(find.byTooltip('Listen to Spoken Verdict'), findsOneWidget);
     expect(find.text('Listen to Verdict'), findsOneWidget);
+  });
+
+  testWidgets('VerdictReportScreen editing nutrition updates in-memory product and dynamically recalculates score gauge', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: testSafeProduct,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify initial score is 88
+    expect(find.text('88'), findsOneWidget);
+
+    // Tap Edit / Verify button
+    final editBtn = find.text('Edit / Verify');
+    await tester.ensureVisible(editBtn);
+    await tester.tap(editBtn);
+    await tester.pumpAndSettle();
+
+    // Verify bottom sheet appears
+    expect(find.text('Verify & Edit Scanned Values'), findsOneWidget);
+
+    // Change Sugar to 45g (High sugar)
+    final sugarField = find.widgetWithText(TextField, '1.1');
+    expect(sugarField, findsOneWidget);
+    await tester.enterText(sugarField, '45.0');
+    await tester.pumpAndSettle();
+
+    // Save & Recalculate
+    final saveBtn = find.text('Recalculate & Apply Values');
+    await tester.ensureVisible(saveBtn);
+    await tester.tap(saveBtn);
+    await tester.pumpAndSettle();
+
+    // Score gauge must now dynamically reflect the degraded score (not 88)
+    expect(find.text('88'), findsNothing);
+  });
+
+  testWidgets('VerdictReportScreen renders and allows tapping on Grounded Web Sources pills', (tester) async {
+    const productWithSources = ScannedProductResult(
+      barcode: '8901491101837',
+      productName: '100% Whole Grain Rolled Oats',
+      brandName: 'Quaker',
+      category: 'Breakfast Cereals',
+      servingSizeG: 40.0,
+      sugarGPer100g: 1.1,
+      sugarGPerServing: 0.4,
+      caloriesPerServing: 153.0,
+      healthScore: 88,
+      verdictTag: 'Nutri Safe 🟢',
+      novaGrade: 1,
+      redCapTriggered: false,
+      safePortionGrams: 40,
+      limitingFactor: 'Calories',
+      frequencySchedule: 'Daily Safe',
+      additives: [],
+      splitSugars: [],
+      portionAdvice: 'Safe consumption portion: 40g.',
+      isExceededBudget: false,
+      healthIntelligence: HealthIntelligence(
+        internetGroundedSources: ['fssai.gov.in', 'pubmed.ncbi.nlm.nih.gov'],
+        isGrounded: true,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VerdictReportScreen(
+          product: productWithSources,
+          userProfile: testProfile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Expand Marketing Claims card to reveal sources
+    final claimsTile = find.text('Marketing Claims vs. Clinical Reality');
+    expect(claimsTile, findsOneWidget);
+    await tester.ensureVisible(claimsTile);
+    await tester.tap(claimsTile);
+    await tester.pumpAndSettle();
+
+    final sourcePill = find.text('fssai.gov.in');
+    expect(sourcePill, findsOneWidget);
+    await tester.ensureVisible(sourcePill);
+    await tester.tap(sourcePill);
+    await tester.pumpAndSettle();
   });
 }

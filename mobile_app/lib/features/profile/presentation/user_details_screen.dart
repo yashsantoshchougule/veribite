@@ -40,6 +40,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
   // Optional Physical Profile
   String? _selectedGender; // 'Male', 'Female', 'Other'
+  double? _heightCm;
 
   // Optional Health Guardrails (Multi-Select)
   bool _isDiabetic = false;
@@ -84,6 +85,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
       isChild: _isChild,
       age: _exactAge,
       gender: _selectedGender,
+      heightCm: _heightCm,
       isDiabetic: _isDiabetic,
       isHypertensive: _isHypertensive,
       isPregnancySafe: _isPregnancySafe,
@@ -115,6 +117,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
         _isChild = existing.isChild;
         _exactAge = existing.age;
         _selectedGender = existing.gender;
+        _heightCm = existing.heightCm;
         _isDiabetic = existing.isDiabetic;
         _isHypertensive = existing.isHypertensive;
         _isPregnancySafe = existing.isPregnancySafe;

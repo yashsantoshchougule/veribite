@@ -22,3 +22,14 @@
 -keep class io.flutter.plugin.common.** { *; }
 -keep class io.flutter.app.** { *; }
 -keep class io.flutter.embedding.** { *; }
+
+# Keep SQLite, SharedPreferences, and PathProvider plugins
+-keep class com.tekartik.sqflite.** { *; }
+-keep class io.flutter.plugins.sharedpreferences.** { *; }
+-keep class io.flutter.plugins.pathprovider.** { *; }
+
+# Keep native methods and annotations
+-keepattributes *Annotation*
+-keepclasseswithmembernames class * {
+    native <methods>;
+}

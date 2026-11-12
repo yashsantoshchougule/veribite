@@ -97,6 +97,9 @@ Map<String, dynamic> calculatePrescribedDosage({
   required List<Map<String, dynamic>> additives,
   double userWeightKg = 65.0,
   bool isChild = false,
+  bool isDiabetic = false,
+  bool isHypertensive = false,
+  bool isLowSugar = false,
   double? unitPieceWeightG,
   int? productScore,
   int? novaGrade,
@@ -109,9 +112,12 @@ Map<String, dynamic> calculatePrescribedDosage({
   final satFatPerG = math.max(satFat100g / 100.0, 0.0001);
   final sodiumPerG = math.max(sodium100g / 100.0, 0.0001);
 
-  final portionSugar = 5.0 / sugarPerG;
+  final maxSugarG = (isDiabetic || isLowSugar) ? 2.5 : 5.0;
+  final maxSodiumMg = isHypertensive ? 200.0 : 400.0;
+
+  final portionSugar = maxSugarG / sugarPerG;
   final portionSatFat = 4.0 / satFatPerG;
-  final portionSodium = 400.0 / sodiumPerG;
+  final portionSodium = maxSodiumMg / sodiumPerG;
 
   String limitingFactor = 'Sugar';
   double baseMacroPortion = portionSugar;
@@ -152,9 +158,9 @@ Map<String, dynamic> calculatePrescribedDosage({
     limitingFactor = 'Additive ADI ($adiLimitingAdditive)';
   }
 
-  // Clamp single snack to max 150g
+  // Clamp single snack to max 150g, minimum 1g
   final clampedPortion = math.min(finalUnclampedPortion, 150.0);
-  final safePortionGrams = clampedPortion.round();
+  final safePortionGrams = math.max(1, clampedPortion.round());
 
   // 4. Safe Pieces
   int? safePieces;
@@ -162,7 +168,7 @@ Map<String, dynamic> calculatePrescribedDosage({
     safePieces = (clampedPortion / unitPieceWeightG).floor();
   }
 
-  // 5. 4-Tier Frequency Schedule & Child Hyperactivity Override
+  // 5. 4-Tier Frequency Schedule & Override Flags
   final hasRedAdditive = additives.any((a) {
     final tier = a['risk_tier']?.toString().toUpperCase();
     final redCap = a['triggers_red_cap'];
@@ -178,7 +184,13 @@ Map<String, dynamic> calculatePrescribedDosage({
   String frequencySchedule = 'Daily Safe';
   String? frequencyWarning;
 
-  if (isChild && childHyperactiveAdditives.isNotEmpty) {
+  if (isDiabetic && sugar100g > 10.0) {
+    frequencySchedule = 'Strict Avoidance / High Glycemic Risk for Diabetics';
+    frequencyWarning = 'High sugar content ($sugar100g g/100g) can trigger rapid glycemic spikes.';
+  } else if (isHypertensive && sodium100g > 400.0) {
+    frequencySchedule = 'Sodium Caution / Limit Intake for Hypertension';
+    frequencyWarning = 'Elevated sodium level ($sodium100g mg/100g) exceeds cardiovascular safety thresholds.';
+  } else if (isChild && childHyperactiveAdditives.isNotEmpty) {
     final codes = childHyperactiveAdditives.map((a) => 'INS ${a['ins_code']}').join(', ');
     frequencySchedule = 'Complete Avoidance Recommended for Children';
     frequencyWarning =

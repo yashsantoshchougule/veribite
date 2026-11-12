@@ -103,8 +103,8 @@ void main() {
         if (request.url.path.endsWith('version.json')) {
           return http.Response(
             json.encode({
-              'latest_version': '1.0.1',
-              'latest_build_number': 2,
+              'latest_version': '1.0.2',
+              'latest_build_number': 3,
               'release_date': '2026-11-12',
               'apk_size_mb': '24.5 MB',
               'webpage_url': 'https://your-webpage-domain.com',
@@ -126,19 +126,19 @@ void main() {
       );
 
       expect(result, isNotNull);
-      expect(result!.latestVersion, '1.0.1');
+      expect(result!.latestVersion, '1.0.2');
       expect(result.hasUpdate, isTrue);
     });
 
     test('auto-check suppresses notification if version was dismissed', () async {
-      AppUpdateService.instance.dismissVersion('1.0.1');
-      expect(AppUpdateService.instance.isVersionDismissed('1.0.1'), isTrue);
+      AppUpdateService.instance.dismissVersion('1.0.2');
+      expect(AppUpdateService.instance.isVersionDismissed('1.0.2'), isTrue);
 
       final mockClient = MockClient((request) async {
         return http.Response(
           json.encode({
-            'latest_version': '1.0.1',
-            'latest_build_number': 2,
+            'latest_version': '1.0.2',
+            'latest_build_number': 3,
             'force_update': false,
             'release_notes': ['Notes'],
           }),
@@ -162,17 +162,17 @@ void main() {
         client: mockClient,
       );
       expect(manualResult, isNotNull);
-      expect(manualResult!.latestVersion, '1.0.1');
+      expect(manualResult!.latestVersion, '1.0.2');
     });
 
     test('force_update: true overrides dismissal even in auto-check', () async {
-      AppUpdateService.instance.dismissVersion('1.0.1');
+      AppUpdateService.instance.dismissVersion('1.0.2');
 
       final mockClient = MockClient((request) async {
         return http.Response(
           json.encode({
-            'latest_version': '1.0.1',
-            'latest_build_number': 2,
+            'latest_version': '1.0.2',
+            'latest_build_number': 3,
             'force_update': true,
             'release_notes': ['Security Patch'],
           }),
@@ -205,3 +205,4 @@ void main() {
     });
   });
 }
+

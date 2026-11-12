@@ -13,6 +13,22 @@ class DailyConsumptionTracker extends ChangeNotifier {
   static DailyConsumptionTracker? _instance;
   static DailyConsumptionTracker get instance => _instance ??= DailyConsumptionTracker();
 
+  DailyConsumptionTracker() {
+    UserProfileManager.instance.addListener(_onUserProfileChanged);
+  }
+
+  void _onUserProfileChanged() {
+    if (UserProfileManager.instance.isInitialized) {
+      updateProfile(UserProfileManager.instance.profile);
+    }
+  }
+
+  @override
+  void dispose() {
+    UserProfileManager.instance.removeListener(_onUserProfileChanged);
+    super.dispose();
+  }
+
   @visibleForTesting
   static void resetInstanceForTesting() {
     _instance?.dispose();
@@ -53,6 +69,7 @@ class DailyConsumptionTracker extends ChangeNotifier {
             : null);
     if (active == null) return 25.0;
     if (active.isDiabetic) return 10.0;
+    if (active.isLowSugar) return 10.0;
     if (active.isChild) return 15.0;
     return 25.0;
   }
