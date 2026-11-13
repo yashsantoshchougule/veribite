@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"name": "first mobile app",
+			"path": "."
+		},
+		{
+			"name": "testing_and_scripts",
+			"path": "../../rules files/veribite/testing_and_scripts"
+		},
+		{
+			"name": "rules_and_agent_configs",
+			"path": "../../rules files/veribite/rules_and_agent_configs"
+		},
+		{
+			"name": "markdown_reports_and_docs",
+			"path": "../../rules files/veribite/markdown_reports_and_docs"
+		}
+	],
+	"settings": {}
+}

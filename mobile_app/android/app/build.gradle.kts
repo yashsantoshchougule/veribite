@@ -15,7 +15,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.mobile_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -36,6 +35,14 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        create("release") {
+            storeFile = file("veribite-release.jks")
+            storePassword = "veribite2026"
+            keyAlias = "veribite_key"
+            keyPassword = "veribite2026"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
     }
 
     buildTypes {
@@ -43,14 +50,9 @@ android {
             signingConfig = signingConfigs.getByName("debugShared")
         }
         release {
-            // Sideloaded release builds safely use the deterministic project keystore
-            // so Google Sign-In SHA-1 / SHA-256 fingerprints match across all physical devices
-            val keyPropsFile = rootProject.file("key.properties")
-            if (keyPropsFile.exists()) {
-                signingConfig = signingConfigs.getByName("debugShared")
-            } else {
-                signingConfig = signingConfigs.getByName("debugShared")
-            }
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debugShared")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
