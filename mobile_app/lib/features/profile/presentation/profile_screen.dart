@@ -134,9 +134,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _updateLanguage(String langCode) async {
-    final normalized = RegionalVoiceLanguage.fromString(langCode).code;
+    final normalized = RegionalVoiceLanguage.fromString(langCode).localeCode;
     final current = _profile ?? UserProfileManager.instance.profile;
-    final updated = current.copyWith(language: normalized, updatedAt: DateTime.now());
+    final updated = current.copyWith(
+      language: normalized,
+      voiceLanguage: normalized,
+      updatedAt: DateTime.now(),
+    );
     setState(() {
       _profile = updated;
     });
@@ -928,14 +932,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildLanguageSelectorCard(UserProfileModel profile) {
-    final currentLang = RegionalVoiceLanguage.fromString(profile.language).code;
+    final currentVoiceLang = RegionalVoiceLanguage.fromString(profile.language);
 
     final languages = [
-      {'code': 'en', 'label': 'English'},
-      {'code': 'hi', 'label': 'Hindi (हिंदी)'},
-      {'code': 'mr', 'label': 'Marathi (मराठी)'},
-      {'code': 'ta', 'label': 'Tamil (தமிழ்)'},
-      {'code': 'te', 'label': 'Telugu (తెలుగు)'},
+      {'code': 'en-IN', 'label': 'English'},
+      {'code': 'hi-IN', 'label': 'Hindi (हिंदी)'},
+      {'code': 'mr-IN', 'label': 'Marathi (मराठी)'},
+      {'code': 'ta-IN', 'label': 'Tamil (தமிழ்)'},
+      {'code': 'te-IN', 'label': 'Telugu (తెలుగు)'},
     ];
 
     return Container(
@@ -989,7 +993,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             spacing: 8,
             runSpacing: 8,
             children: languages.map((lang) {
-              final isSelected = currentLang == lang['code'];
+              final isSelected = currentVoiceLang == RegionalVoiceLanguage.fromString(lang['code']);
               return GestureDetector(
                 onTap: () => _updateLanguage(lang['code']!),
                 child: Container(

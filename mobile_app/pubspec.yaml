@@ -1,7 +1,7 @@
 name: mobile_app
 description: Smart Packaged Product Ingredient, Toxicology & Safe Consumption Dosage Scanner
 publish_to: 'none'
-version: 1.0.1+5
+version: 1.0.1+4
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

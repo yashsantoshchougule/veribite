@@ -190,7 +190,7 @@ class UserProfileManager extends ChangeNotifier {
 
   /// Fast helper to update voice language with immediate persistence.
   Future<void> updateVoiceLanguage(String languageInput) async {
-    final normalized = RegionalVoiceLanguage.fromString(languageInput).code;
+    final normalized = RegionalVoiceLanguage.fromString(languageInput).localeCode;
     final updated = _profile.copyWith(
       language: normalized,
       updatedAt: DateTime.now(),

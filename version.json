@@ -1,18 +1,19 @@
 {
   "app_name": "VeriBite",
-  "latest_version": "1.0.1",
-  "latest_build_number": 5,
+  "latest_version": "1.0.1+4",
+  "latest_build_number": 4,
   "release_date": "2026-11-13",
   "apk_size_mb": "116.8 MB",
-  "sha256": "1975190540b4b022ebd2eccc25e0203d368733dd22dd329e470bb0c08c202f4e",
+  "sha256": "b30ef21a708e0ee1e0e7a326d280583fdc049b6476a7aab18135eddce89972c2",
   "webpage_url": "https://veribite.vercel.app",
-  "apk_download_url": "https://github.com/yashsantoshchougule/VeriBite/releases/latest/download/app-release.apk",
+  "apk_download_url": "https://github.com/yashsantoshchougule/veribite/releases/latest/download/app-release.apk",
+  "self_hosted_apk_url": "downloads/app-release.apk",
   "force_update": false,
   "release_notes": [
-    "Seamless in-app APK streaming download with live 0% -> 100% progress indicator and MB counter",
-    "Auto-trigger native Android package installer dialog upon 100% download completion",
-    "Automatic permission redirection & auto-install resume for 'Install unknown apps' trust setting",
-    "Ultra-low-latency AI Advisor with sub-second (<1.5s) Groq LPU routing & Tier 0 instant offline lookup",
-    "Enhanced FileProvider path mapping and SHA-256 binary integrity verification"
+    "3.0s parallel QR & barcode scanner with instant local cache recall",
+    "Native 5-language Regional Voice Read-Out (English, Hindi, Marathi, Tamil, Telugu)",
+    "Sub-1.5s AI Advisor powered by Groq LPU & Gemini 2.5 Flash routing",
+    "In-app 0-100% auto-installer with automatic Android Package Installer launch",
+    "Live Web & FSSAI/WHO Clinical Intelligence deep-search with clickable citations"
   ]
 }

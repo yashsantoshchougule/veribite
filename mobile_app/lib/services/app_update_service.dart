@@ -186,7 +186,7 @@ class AppUpdateService {
   static const String currentVersion = '1.0.1';
 
   /// Installed build number matching pubspec.yaml
-  static const int currentBuildNumber = 5;
+  static const int currentBuildNumber = 4;
 
   /// Configurable remote manifest URL (defaulting to raw repository version.json)
   static const String defaultManifestUrl = String.fromEnvironment(
@@ -308,7 +308,7 @@ class AppUpdateService {
 
       final totalBytes = response.contentLength ?? 0;
       final tempDir = await getTemporaryDirectory();
-      tempFile = File('${tempDir.path}/VeriBite-update.apk');
+      tempFile = File('${tempDir.path}/VeriBite-v1.0.1+4.apk');
       if (await tempFile.exists()) {
         try {
           await tempFile.delete();

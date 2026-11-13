@@ -1150,7 +1150,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
   }
 
   Future<void> _updateLanguage(String langCode) async {
-    final normalized = RegionalVoiceLanguage.fromString(langCode).code;
+    final normalized = RegionalVoiceLanguage.fromString(langCode).localeCode;
     setState(() {
       _language = normalized;
     });
@@ -1168,14 +1168,14 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
   }
 
   Widget _buildLanguageSelectorCard() {
-    final currentLang = RegionalVoiceLanguage.fromString(_language).code;
+    final currentVoiceLang = RegionalVoiceLanguage.fromString(_language);
 
     final languages = [
-      {'code': 'en', 'label': 'English'},
-      {'code': 'hi', 'label': 'Hindi (हिंदी)'},
-      {'code': 'mr', 'label': 'Marathi (मराठी)'},
-      {'code': 'ta', 'label': 'Tamil (தமிழ்)'},
-      {'code': 'te', 'label': 'Telugu (తెలుగు)'},
+      {'code': 'en-IN', 'label': 'English'},
+      {'code': 'hi-IN', 'label': 'Hindi (हिंदी)'},
+      {'code': 'mr-IN', 'label': 'Marathi (मराठी)'},
+      {'code': 'ta-IN', 'label': 'Tamil (தமிழ்)'},
+      {'code': 'te-IN', 'label': 'Telugu (తెలుగు)'},
     ];
 
     return Container(
@@ -1229,7 +1229,7 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
             spacing: 8,
             runSpacing: 8,
             children: languages.map((lang) {
-              final isSelected = currentLang == lang['code'];
+              final isSelected = currentVoiceLang == RegionalVoiceLanguage.fromString(lang['code']);
               return GestureDetector(
                 onTap: () => _updateLanguage(lang['code']!),
                 child: Container(
