@@ -1,19 +1,18 @@
 {
   "app_name": "VeriBite",
   "latest_version": "1.0.1",
-  "latest_build_number": 4,
-  "release_date": "2026-11-12",
-  "apk_size_mb": "116.7 MB",
-  "sha256": "755613313fa40ad7d864250f906d66cc577a15d1c1d5de7b33fdcd78d30db999",
+  "latest_build_number": 5,
+  "release_date": "2026-11-13",
+  "apk_size_mb": "116.8 MB",
+  "sha256": "1975190540b4b022ebd2eccc25e0203d368733dd22dd329e470bb0c08c202f4e",
   "webpage_url": "https://veribite.vercel.app",
   "apk_download_url": "https://github.com/yashsantoshchougule/VeriBite/releases/latest/download/app-release.apk",
   "force_update": false,
   "release_notes": [
-    "Ultra-low-latency AI Advisor with sub-second (<1.5s) Groq LPU primary routing & 2.2s hedged failover",
-    "Tier 0 instant on-device clinical short-circuit (<100ms) for macros, safe portions, and 770+ INS additives",
-    "Dead local backend circuit breaker with strict 800ms connect timeout",
-    "Disabled Gemini thinkingBudget overhead (0 tokens) and smart conditional search grounding",
-    "Immediate animated clinical typing indicator with input double-tap guards",
-    "Android 11+ TTS_SERVICE package query integration with 5-language native voice readout"
+    "Seamless in-app APK streaming download with live 0% -> 100% progress indicator and MB counter",
+    "Auto-trigger native Android package installer dialog upon 100% download completion",
+    "Automatic permission redirection & auto-install resume for 'Install unknown apps' trust setting",
+    "Ultra-low-latency AI Advisor with sub-second (<1.5s) Groq LPU routing & Tier 0 instant offline lookup",
+    "Enhanced FileProvider path mapping and SHA-256 binary integrity verification"
   ]
 }

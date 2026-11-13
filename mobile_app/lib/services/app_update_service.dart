@@ -1,7 +1,47 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// Status states for APK download and installation lifecycle
+enum DownloadStatus {
+  idle,
+  downloading,
+  verifying,
+  readyToInstall,
+  needsPermission,
+  failed,
+}
+
+/// Reactive state model emitted during APK download and verification
+class DownloadProgress {
+  final DownloadStatus status;
+  final int bytesDownloaded;
+  final int totalBytes;
+  final double progress; // 0.0 to 1.0
+  final String? errorMessage;
+  final String? downloadedFilePath;
+
+  const DownloadProgress({
+    required this.status,
+    this.bytesDownloaded = 0,
+    this.totalBytes = 0,
+    this.progress = 0.0,
+    this.errorMessage,
+    this.downloadedFilePath,
+  });
+
+  String get downloadedMb => (bytesDownloaded / (1024 * 1024)).toStringAsFixed(1);
+  String get totalMb => (totalBytes > 0)
+      ? (totalBytes / (1024 * 1024)).toStringAsFixed(1)
+      : '?';
+  int get percentage => (progress * 100).clamp(0, 100).toInt();
+}
 
 /// Data model representing a remote update release manifest.
 class AppUpdateInfo {
@@ -14,6 +54,7 @@ class AppUpdateInfo {
   final bool forceUpdate;
   final List<String> releaseNotes;
   final bool hasUpdate;
+  final String? sha256;
 
   const AppUpdateInfo({
     required this.latestVersion,
@@ -25,6 +66,7 @@ class AppUpdateInfo {
     required this.forceUpdate,
     required this.releaseNotes,
     required this.hasUpdate,
+    this.sha256,
   });
 
   factory AppUpdateInfo.fromJson(
@@ -60,6 +102,7 @@ class AppUpdateInfo {
       forceUpdate: json['force_update'] == true,
       releaseNotes: notes,
       hasUpdate: hasUpdate,
+      sha256: json['sha256']?.toString(),
     );
   }
 
@@ -123,22 +166,27 @@ class AppUpdateInfo {
       'force_update': forceUpdate,
       'release_notes': releaseNotes,
       'has_update': hasUpdate,
+      if (sha256 != null) 'sha256': sha256,
     };
   }
 }
 
-/// In-App Update Checker Service.
+/// In-App Update Checker & Native Installer Service.
 /// Communicates with an external manifest server or GitHub Releases API to check
-/// for newer app builds, parse release notes, and launch downloads cleanly.
+/// for newer app builds, parse release notes, streams in-app APK downloads with
+/// real-time progress, and launches native Android PackageInstaller automatically.
 class AppUpdateService {
   AppUpdateService._internal();
   static final AppUpdateService instance = AppUpdateService._internal();
+
+  static const MethodChannel _installerChannel =
+      MethodChannel('com.veribite.app/apk_installer');
 
   /// Installed app version matching pubspec.yaml
   static const String currentVersion = '1.0.1';
 
   /// Installed build number matching pubspec.yaml
-  static const int currentBuildNumber = 4;
+  static const int currentBuildNumber = 5;
 
   /// Configurable remote manifest URL (defaulting to raw repository version.json)
   static const String defaultManifestUrl = String.fromEnvironment(
@@ -228,6 +276,180 @@ class AppUpdateService {
     }
   }
 
+  /// Streams in-app APK download with real-time progress, optional SHA-256 verification,
+  /// and automatically triggers the native package installer when 100% complete.
+  Stream<DownloadProgress> downloadAndInstallApk({
+    required String apkUrl,
+    String? expectedSha256,
+  }) async* {
+    yield const DownloadProgress(
+      status: DownloadStatus.downloading,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      progress: 0.0,
+    );
+
+    final client = http.Client();
+    IOSink? sink;
+    File? tempFile;
+
+    try {
+      final request = http.Request('GET', Uri.parse(apkUrl));
+      request.headers['User-Agent'] = 'VeriBite-App-Updater/1.0';
+      final response = await client.send(request);
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        yield DownloadProgress(
+          status: DownloadStatus.failed,
+          errorMessage: 'Server returned HTTP ${response.statusCode}',
+        );
+        return;
+      }
+
+      final totalBytes = response.contentLength ?? 0;
+      final tempDir = await getTemporaryDirectory();
+      tempFile = File('${tempDir.path}/VeriBite-update.apk');
+      if (await tempFile.exists()) {
+        try {
+          await tempFile.delete();
+        } catch (_) {}
+      }
+
+      sink = tempFile.openWrite();
+      int downloadedBytes = 0;
+      int lastYieldMs = DateTime.now().millisecondsSinceEpoch;
+
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        downloadedBytes += chunk.length;
+
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        if (nowMs - lastYieldMs >= 60 || (totalBytes > 0 && downloadedBytes >= totalBytes)) {
+          lastYieldMs = nowMs;
+          final fraction = totalBytes > 0
+              ? (downloadedBytes / totalBytes).clamp(0.0, 1.0)
+              : 0.0;
+          yield DownloadProgress(
+            status: DownloadStatus.downloading,
+            bytesDownloaded: downloadedBytes,
+            totalBytes: totalBytes,
+            progress: fraction,
+          );
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      // Download complete
+      yield DownloadProgress(
+        status: DownloadStatus.downloading,
+        bytesDownloaded: downloadedBytes,
+        totalBytes: downloadedBytes,
+        progress: 1.0,
+      );
+
+      // Verify SHA-256 integrity if specified
+      if (expectedSha256 != null && expectedSha256.trim().isNotEmpty) {
+        yield DownloadProgress(
+          status: DownloadStatus.verifying,
+          bytesDownloaded: downloadedBytes,
+          totalBytes: downloadedBytes,
+          progress: 1.0,
+        );
+
+        final digest = await crypto.sha256.bind(tempFile.openRead()).first;
+        final actualHex = digest.toString().toLowerCase();
+        final targetHex = expectedSha256.trim().toLowerCase();
+
+        if (actualHex != targetHex) {
+          yield DownloadProgress(
+            status: DownloadStatus.failed,
+            bytesDownloaded: downloadedBytes,
+            totalBytes: downloadedBytes,
+            progress: 1.0,
+            errorMessage: 'Checksum mismatch. Downloaded file may be corrupted.',
+          );
+          return;
+        }
+      }
+
+      // Automatically launch native PackageInstaller dialog
+      yield DownloadProgress(
+        status: DownloadStatus.readyToInstall,
+        bytesDownloaded: downloadedBytes,
+        totalBytes: downloadedBytes,
+        progress: 1.0,
+        downloadedFilePath: tempFile.path,
+      );
+
+      final installResult = await triggerNativeInstall(tempFile.path);
+      if (installResult == 'NEEDS_PERMISSION') {
+        yield DownloadProgress(
+          status: DownloadStatus.needsPermission,
+          bytesDownloaded: downloadedBytes,
+          totalBytes: downloadedBytes,
+          progress: 1.0,
+          downloadedFilePath: tempFile.path,
+        );
+      } else {
+        yield DownloadProgress(
+          status: DownloadStatus.readyToInstall,
+          bytesDownloaded: downloadedBytes,
+          totalBytes: downloadedBytes,
+          progress: 1.0,
+          downloadedFilePath: tempFile.path,
+        );
+      }
+    } catch (e) {
+      if (sink != null) {
+        try {
+          await sink.close();
+        } catch (_) {}
+      }
+      yield DownloadProgress(
+        status: DownloadStatus.failed,
+        errorMessage: e.toString(),
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Check if the app has permission to install unknown apps (Android 8.0+)
+  Future<bool> canRequestPackageInstalls() async {
+    try {
+      final res = await _installerChannel.invokeMethod<bool>('canRequestPackageInstalls');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Trigger native package installer dialog for a downloaded APK path
+  Future<String?> triggerNativeInstall(String filePath) async {
+    try {
+      final res = await _installerChannel.invokeMethod<String>(
+        'installApk',
+        {'filePath': filePath},
+      );
+      return res;
+    } catch (e) {
+      debugPrint('[AppUpdateService] triggerNativeInstall error: $e');
+      return null;
+    }
+  }
+
+  /// Open Android system "Allow from this source" settings for VeriBite
+  Future<void> openUnknownSourcesSettings() async {
+    try {
+      await _installerChannel.invokeMethod('openUnknownSourcesSettings');
+    } catch (e) {
+      debugPrint('[AppUpdateService] openUnknownSourcesSettings error: $e');
+    }
+  }
+
   /// Launch external browser or download link cleanly using url_launcher
   Future<bool> launchUpdateUrl(String url) async {
     try {
@@ -264,4 +486,3 @@ class AppUpdateService {
     }
   }
 }
-
