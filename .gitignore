@@ -47,3 +47,7 @@ Thumbs.db
 **/android/local.properties
 **/android/.gradle
 **/android/captures/
+
+# Markdown Documentation (kept locally, excluded from remote repository)
+*.md
+!/README.md
