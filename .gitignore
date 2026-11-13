@@ -22,6 +22,7 @@ venv/
 .packages
 build/
 *.apk
+!app-release.apk
 *.aab
 
 # Test Scratch & Local DB Journals
