@@ -54,3 +54,6 @@ Thumbs.db
 
 # Supportive Files (kept locally, excluded from remote repository)
 supportive files/
+
+# Static Pages (kept locally, excluded from remote repository)
+pages/
